@@ -1,6 +1,6 @@
 /*
  * SAN ANIM file decoder for Outlaws ".SAN" video files.
- * Outlaws SAN files use SMUSH codec 47 and IACT 22.05kHz 16-bit stereo Audio.
+ * Outlaws SAN files use SMUSH codecs 47, 1 and IACT 22.05kHz 16-bit stereo Audio.
  *
  * Clobbered together from FFmpeg/libavcodec sanm.c decoder and ScummVM
  *  SMUSH player code.
@@ -290,12 +290,15 @@ static inline int readBE32(struct sanrt *rt, uint32_t *out)
 }
 
 // consume unused bytes in the stream (wrt. chunk size)
-static inline int san_read_unused(struct sanrt *rt)
+static inline void san_read_unused(struct sanrt *rt)
 {
-	uint32_t t;
+	int32_t t;
 	uint8_t v;
 
 	t = rt->_bsz;
+	if (t < 0)
+		return;
+
 	while (t--) {
 		read8(rt, &v);
 	}
@@ -433,6 +436,8 @@ static int codec47_comp5(struct sanrt *rt, unsigned char *dst, uint16_t w, uint1
 	while (left) {
 		_READ(8, &opc, 1, rt);
 		rlen = (opc >> 1) + 1;
+		if (rlen > left)
+			rlen = left;
 		if (opc & 1) {
 			_READ(8, &col, 1, rt);
 			memset(dst, col, rlen);
@@ -466,7 +471,6 @@ static int codec47(struct sanrt *rt, uint32_t size, uint16_t w, uint16_t h, uint
 	unsigned char *dst;
 	int ret;
 
-	//printf("C47  seq %4u comp %u newrot %u skip %u decsize %u\n", seq, comp, newrot, skip, decsize);
 	ret = 0;
 	if (seq == 0) {
 		rt->lastseq = (uint32_t)-1;
@@ -494,6 +498,26 @@ static int codec47(struct sanrt *rt, uint32_t size, uint16_t w, uint16_t h, uint
 	}
 
 	return ret;
+}
+
+static int codec1(struct sanrt *rt, uint32_t size, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
+{
+	uint8_t *dst;
+	uint16_t v1;
+	int ret;
+
+	dst = rt->buf0 + (top * w);
+	do {
+		dst += left;
+		_READ(LE16, &v1, 98, rt);
+		ret = codec47_comp5(rt, dst, w, h, w);
+		if (ret)
+			return ret;
+		dst += w - left;
+	} while (--h);
+
+	rt->rotate = 0;
+	return 0;
 }
 
 static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t bpp)
@@ -542,11 +566,6 @@ static int handle_FOBJ(struct sanrt *rt, uint32_t size)
 	_READ(LE16, &h, 76, rt);
 	_READ(LE32, &t1, 77, rt);
 
-//	printf("FOBJ size %d %dx%d at %dx%d, codec %d\n", size, w, h, left, top, codec);
-
-	if (codec =! 47)
-		return 78;
-
 	ret = 0;
 	if ((rt->w < (left + w)) || (rt->h < (top + h))) {
 		ret = fobj_alloc_buffers(rt, _max(rt->w, left + w), _max(rt->h, top + h), 1);
@@ -554,7 +573,12 @@ static int handle_FOBJ(struct sanrt *rt, uint32_t size)
 	if (ret != 0)
 		return 79;
 
-	ret = codec47(rt, size - 14, w, h, top, left);
+	switch (codec) {
+	case 1:
+	case 3: ret = codec1(rt, size - 14, w, h, top, left); break;
+	case 47:ret = codec47(rt, size - 14, w, h, top, left); break;
+	default: ret = 78;
+	}
 
 	san_read_unused(rt);
 
@@ -642,8 +666,6 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 	_READ(LE16, &v[5], 1, rt);	// index
 	_READ(LE16, &v[6], 1, rt);	// num frames
 	_READ(LE32, &vv, 1, rt);	// size2
-
-	//printf("IACT: size %d code %d flags %d unk %d uid %d trk %d idx %d frames %d size2 %d\n", size, v[0], v[1], v[2], v[3], v[4], v[5], v[6], vv);
 
 	tmpbuf = malloc(blocksz);
 	if (!tmpbuf)
@@ -739,8 +761,6 @@ static int handle_TRES(struct sanrt *rt, uint32_t size)
 	_READ(LE16, &strid, 1, rt); // dummy
 	_READ(LE16, &strid, 1, rt); // real strid
 
-	printf("TRES: sz %u px %u py %u flags %u left %d top %d w %d h %d strid %d\n", size, px, py, f, l, t, w, h, strid);
-
 	san_read_unused(rt);
 
 	return 0;
@@ -786,8 +806,7 @@ static int handle_FRME(struct sanrt *rt, uint32_t size)
 		case FTCH: ret = handle_FTCH(rt, csz); break;
 		case XPAL: ret = handle_XPAL(rt, csz); break;
 		default:
-			printf("UNK2: %08x %c%c%c%c %d\n", cid, (cid>>24)%0xff, (cid>>16)&0xff,(cid>>8)&0xff,cid&0xff,csz);
-			ret = 61;
+			ret = 203;
 			break;
 		}
 		if (csz & 1)
@@ -818,7 +837,8 @@ static int handle_FRME(struct sanrt *rt, uint32_t size)
 
 		// consume any unread bytes
 		while (framebytes--)
-			read8(rt, &v);
+			if (read8(rt, &v))
+				return 204;
 
 		rt->to_store = 0;
 		rt->currframe++;
@@ -888,7 +908,6 @@ int san_one_frame(struct sanrt *rt)
 	switch (cid) {
 		case FRME: ret = handle_FRME(rt, csz); break;
 		default:
-			printf("UNK1: %08x %c%c%c%c\n", cid, (cid>>24), (cid>>16), (cid>>8), cid&0xff);
 			ret = 108;
 	}
 

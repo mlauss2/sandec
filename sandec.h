@@ -13,7 +13,7 @@ struct sanio {
 
 struct sanrt {
 	struct sanio *io;
-	uint32_t _bsz;		// current block size
+	int32_t _bsz;		// current block size
 	uint32_t totalsize;
 	uint32_t currframe;
 	uint32_t framerate;
