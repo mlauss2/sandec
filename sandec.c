@@ -467,6 +467,7 @@ static int codec47(struct sanrt *rt, uint32_t size, uint16_t w, uint16_t h, uint
 	int ret;
 
 	//printf("C47  seq %4u comp %u newrot %u skip %u decsize %u\n", seq, comp, newrot, skip, decsize);
+	ret = 0;
 	if (seq == 0) {
 		rt->lastseq = (uint32_t)-1;
 		memset(rt->buf1, headtable[12], rt->fbsize);
@@ -487,10 +488,12 @@ static int codec47(struct sanrt *rt, uint32_t size, uint16_t w, uint16_t h, uint
 	default: ret = 99;
 	}
 
-	rt->rotate = (seq == rt->lastseq + 1) ? newrot : 0;
-	rt->lastseq = seq;
+	if (ret == 0) {
+		rt->rotate = (seq == rt->lastseq + 1) ? newrot : 0;
+		rt->lastseq = seq;
+	}
 
-	return 0;
+	return ret;
 }
 
 static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t bpp)
