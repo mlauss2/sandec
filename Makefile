@@ -1,4 +1,4 @@
-CFLAGS?=-Og -ggdb3 -march=znver5 -mtune=znver5 -gdwarf-5 -pipe
+CFLAGS?=-Og -ggdb3 -gdwarf-5 -pipe
 INC=-I/usr/include/SDL2
 LIBS=-lSDL2 -lc
 CC=gcc
