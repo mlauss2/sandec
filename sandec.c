@@ -1,11 +1,18 @@
-#include <inttypes.h>
+/*
+ * SAN ANIM file decoder for Outlaws ".SAN" video files.
+ * Outlaws SAN files use SMUSH codec 47 and IACT 22.05kHz 16-bit stereo Audio.
+ *
+ * Clobbered together from FFmpeg/libavcodec sanm.c decoder and ScummVM
+ *  SMUSH player code.
+ */
+
+#include <memory.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <SDL.h>
-#include <SDL_endian.h>
-#include <sys/types.h>
+#include "sandec.h"
+#include "byteswap.h"
 
 #ifndef _max
 #define _max(a,b) ((a) > (b) ? (a) : (b))
@@ -23,7 +30,12 @@
 #define FTCH	0x46544348
 #define XPAL	0x5850414c
 
-#define NGLYPHS 256
+
+
+/******************************************************************************
+ * SAN Codec47 Glyph setup, taken from ffmpeg
+ * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob_plain/HEAD:/libavcodec/sanm.c
+ */
 #define GLYPH_COORD_VECT_SIZE 16
 
 static const int8_t glyph4_x[GLYPH_COORD_VECT_SIZE] = {
@@ -95,50 +107,6 @@ static const int8_t motion_vectors[256][2] = {
 	{  23,  36 }, { -19,  39 }, {  16,  40 }, { -13,  41 }, {   9,  42 },
 	{  -6,  43 }, {   1,  43 }, {   0,   0 }, {   0,   0 }, {   0,   0 },
 };
-
-static int frames = 0;
-
-struct sanrt {
-	int handle;
-	uint32_t totalsize;
-	uint32_t currframe;
-	uint32_t FRMEcnt;
-	uint32_t framerate;
-	uint32_t maxframe;
-	uint16_t w;  // frame width/pitch/stride
-	uint16_t h;  // frame height
-
-	int(*queue_video)(struct sanrt *san, unsigned char *vdata, uint32_t size);
-	int(*queue_audio)(struct sanrt *san, unsigned char *adata, uint32_t size);
-
-	// codec47 stuff
-	int8_t glyph4x4[NGLYPHS][16];
-	int8_t glyph8x8[NGLYPHS][64];
-	unsigned long fbsize;	// size of the buffers below
-	unsigned char *buf0;
-	unsigned char *buf1;
-	unsigned char *buf2;
-	unsigned char *buf3;	// aux buffer for "STOR" and "FTCH"
-	unsigned char *buf;	// baseptr
-	uint32_t lastseq;
-	uint32_t rotate;
-	uint16_t version;
-	bool to_store;
-
-	// iact block stuff
-	uint32_t samplerate;
-	uint16_t iactpos;
-
-	// buffers
-	uint32_t palette[256];
-	uint16_t deltapal[768];
-	uint8_t iactbuf[4096];
-};
-
-/******************************************************************************
- * SAN Codec47 Glyph setup, taken from ffmpeg
- * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob_plain/HEAD:/libavcodec/sanm.c
- */
 
 enum GlyphEdge {
 	LEFT_EDGE,
@@ -293,28 +261,28 @@ static uint16_t readLE16(int h)
 {
 	uint16_t s;
 	read(h, &s, 2);
-	return SDL_SwapLE16(s);
+	return le16_to_cpu(s);
 }
 
 static uint32_t readLE32(int h)
 {
 	uint32_t w;
 	read(h, &w, 4);
-	return SDL_SwapLE32(w);
+	return le32_to_cpu(w);
 }
 
 static uint16_t readBE16(int h)
 {
 	uint16_t s;
 	read(h, &s, 2);
-	return SDL_SwapBE16(s);
+	return be16_to_cpu(s);
 }
 
 static uint32_t readBE32(int h)
 {
 	uint32_t w;
 	read(h, &w, 4);
-	return SDL_SwapBE32(w);
+	return be32_to_cpu(w);
 }
 
 static uint32_t readBE24(int h)
@@ -338,8 +306,8 @@ static int readtag(int h, uint32_t *outtag, uint32_t *outsize)
 	if (ret != 4)
 		return 2;
 
-	v1 = SDL_SwapBE32(v1);
-	v2 = SDL_SwapBE32(v2);
+	v1 = be32_to_cpu(v1);
+	v2 = be32_to_cpu(v2);
 	*outtag = v1;
 	*outsize = v2;
 	return 0;
@@ -601,6 +569,7 @@ static int handle_NPAL(struct sanrt *rt, uint32_t size)
 	if (j)
 		read(rt->handle, tmpbuf, j);
 
+	rt->newpal = 1;
 	return 0;
 }
 
@@ -640,6 +609,7 @@ static int handle_XPAL(struct sanrt *rt, uint32_t size)
 	}
 	for (i = 0; i < sz2; i++)
 		(void)read8(rt->handle);
+	rt->newpal = 1;
 	return 0;
 }
 
@@ -670,7 +640,7 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 	// algorithm taken from scummvm/engines/scumm/smush/smush_player.cpp::handleIACT()
 	while (blocksz > 0) {
 		if (rt->iactpos >= 2) {
-			len = SDL_SwapBE16((*(uint16_t *)rt->iactbuf));
+			len = be16_to_cpu((*(uint16_t *)rt->iactbuf));
 			len = len + 2 - rt->iactpos;
 			if (len > blocksz) {
 				memcpy(iactbuf + rt->iactpos, src, blocksz);
@@ -680,6 +650,7 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 				tb2 = malloc(4096);
 				if (!tb2)
 					return 42;
+				memset(tb2, 0, 4096);
 					
 				memcpy(iactbuf + rt->iactpos, src, len);
 				dst = tb2;
@@ -695,7 +666,7 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 						*dst++ = *src2++;
 						*dst++ = *src2++;
 					} else {
-						uint16_t v16 = (int8_t)value << v2;
+						int16_t v16 = (int8_t)value << v2;
 						*dst++ = v16 >> 8;
 						*dst++ = v16 & 0xff;
 					}
@@ -704,7 +675,7 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 						*dst++ = *src2++;
 						*dst++ = *src2++;
 					} else {
-						uint16_t v16 = (int8_t)value << v1;
+						int16_t v16 = (int8_t)value << v1;
 						*dst++ = v16 >> 8;
 						*dst++ = v16 & 0xff;
 					}
@@ -760,7 +731,7 @@ static int handle_STOR(struct sanrt *rt, uint32_t size)
 {
 	uint32_t s;
 
-	rt->to_store = true;
+	rt->to_store = 1;
 
 	s = readLE32(rt->handle);
 	printf("STOR: sz %u param %08x\n", size, s);
@@ -825,7 +796,8 @@ static int handle_FRME(struct sanrt *rt, uint32_t size)
 		}
 	}
 	// copy rt->buf0 to output
-	ret = rt->queue_video(rt, rt->buf0, rt->w * rt->h * 1);
+	ret = rt->queue_video(rt, rt->buf0, rt->w * rt->h * 1, rt->newpal);
+	rt->newpal = 0;
 
 	if (rt->rotate) {
 		unsigned char *tmp;
@@ -839,30 +811,8 @@ static int handle_FRME(struct sanrt *rt, uint32_t size)
 		rt->buf0 = tmp;
 	}
 
-	rt->to_store = false;
+	rt->to_store = 0;
 	rt->currframe++;
-
-	return ret;
-}
-
-static int san_one_frame(struct sanrt *rt)
-{
-	uint32_t cid, csz;
-	int ret;
-
-	if (rt->currframe >= rt->FRMEcnt)
-		return 500;
-
-	ret = readtag(rt->handle, &cid, &csz);
-	if (ret == 1)
-		return 500;	// probably EOF, we're done
-
-	switch (cid) {
-	case FRME: ret = handle_FRME(rt, csz); break;
-	default:
-		printf("UNK1: %08x %c%c%c%c\n", cid, (cid>>24), (cid>>16), (cid>>8), cid&0xff);
-		ret = 108;
-	}
 
 	return ret;
 }
@@ -888,6 +838,7 @@ static int handle_AHDR(struct sanrt *rt, uint32_t size)
 
 	//printf("AHDR size %d version %d FRMEs %d ", size, rt->version, rt->FRMEcnt);
 
+	rt->newpal = 1;
 	for (int i = 0; i < 256;  i++)
 		rt->palette[i] = 0xff000000 | readBE24(rt->handle);
 
@@ -914,6 +865,28 @@ static int handle_AHDR(struct sanrt *rt, uint32_t size)
 	return ret;
 }
 
+int san_one_frame(struct sanrt *rt)
+{
+	uint32_t cid, csz;
+	int ret;
+
+	if (rt->currframe >= rt->FRMEcnt)
+		return 500;
+
+	ret = readtag(rt->handle, &cid, &csz);
+	if (ret == 1)
+		return 500;	// probably EOF, we're done
+
+		switch (cid) {
+			case FRME: ret = handle_FRME(rt, csz); break;
+			default:
+				printf("UNK1: %08x %c%c%c%c\n", cid, (cid>>24), (cid>>16), (cid>>8), cid&0xff);
+				ret = 108;
+		}
+
+		return ret;
+}
+
 int san_open(int handle, struct sanrt** out)
 {
 	int ret, ok;
@@ -921,8 +894,8 @@ int san_open(int handle, struct sanrt** out)
 	struct sanrt *rt;
 	uint32_t cid;
 	uint32_t csz;
-	bool have_anim = false;
-	bool have_ahdr = false;
+	int have_anim = 0;
+	int have_ahdr = 0;
 
 	while (1) {
 		ok = readtag(handle, &cid, &csz);
@@ -933,12 +906,12 @@ int san_open(int handle, struct sanrt** out)
 
 		if (!have_anim) {
 			if (cid == ANIM) {
-				have_anim = true;
+				have_anim = 1;
 			}
 			continue;
 		}
 		if (cid == AHDR) {
-			have_ahdr = true;
+			have_ahdr = 1;
 			break;
 		}
 	}
@@ -956,64 +929,10 @@ int san_open(int handle, struct sanrt** out)
 	ret = handle_AHDR(rt, csz);
 	if (ret) {
 		free(rt);
-		*out = nullptr;
+		*out = NULL;
 	} else {
 		*out = rt;
 	}
 
-	return ret;
-}
-
-static int queue_audio(struct sanrt *rt, unsigned char *adata, uint32_t size)
-{
-	printf("AUDIO: %p : %u at %u Hz\n", adata, size, rt->samplerate);
-	free(adata);
-	return 0;
-}
-
-static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size)
-{
-	printf("VIDEO: %p %u %ux%x\n", vdata, size, rt->w, rt->h);
-	return 0;
-}
-
-int main(int a, char **argv)
-{
-	int h, ret;
-	struct sanrt *san;
-
-	if (a < 1)
-		return 0;
-
-	h = open(argv[1], O_RDONLY);
-	if (!h) {
-		printf("cannot open\n");
-		return 1;
-	}
-	ret = san_open(h, &san);
-	if (ret) {
-		printf("SAN invalid: %d\n", ret);
-		goto out;
-	}
-
-	printf("SAN ver %u fps %u sr %u FRMEs %u\n", san->version, san->framerate,
-	       san->samplerate, san->FRMEcnt);
-
-	san->queue_audio = queue_audio;
-	san->queue_video = queue_video;
-
-	do {
-		ret = san_one_frame(san);
-	} while (ret == 0);
-
-	if (ret != 500) {
-		printf("sanloop exited with error %d\n", ret);
-	} else {
-		printf("sanloop exit OK\n");
-	}
-
-	free(san);
-out:
-	close(h);
 	return ret;
 }

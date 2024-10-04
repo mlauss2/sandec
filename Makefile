@@ -1,14 +1,19 @@
-CFLAGS?=-Og -ggdb3 -march=znver5 -mtune=znver5 -gdwarf-5 -pipe -std=c23
+CFLAGS?=-Og -ggdb3 -march=znver5 -mtune=znver5 -gdwarf-5 -pipe
 INC=-I/usr/include/SDL2
+LIBS=-lSDL2 -lc
 CC=gcc
 
-all: sandec
+all: sanplay
 
-sandec.o: sandec.c
-	$(CC) -c $(CFLAGS) $(INC) -o sandec.o sandec.c
+FOBJS = 		\
+	sandec.o	\
+	sanplay.o
 
-sandec: sandec.o
-	$(CC) -o sandec sandec.o -lSDL2
+sanplay: $(FOBJS)
+	$(CC) $(LIBS) -o sanplay $(FOBJS)
 
 clean:
-	@rm sandec sandec.o *~
+	@rm -f sanplay $(FOBJS) *~
+
+%.o: %.c
+	$(CC) $(CFLAGS) $(INC) -o $@ -c $<
