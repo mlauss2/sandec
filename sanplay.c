@@ -174,10 +174,21 @@ static void exit_sdl(struct sdlpriv *p)
 	SDL_Quit();
 }
 
+static int sio_read(void *ctx, void *dst, uint32_t size)
+{
+	int hdl = *(int *)ctx;
+	if (!dst) {
+		lseek(hdl, size, SEEK_CUR);
+		return size;
+	}
+	return read(hdl, dst, size);
+}
+
 int main(int a, char **argv)
 {
 	int h, ret;
 	struct sanrt *san;
+	struct sanio sio;
 	struct sdlpriv sdl;
 	SDL_Event e;
 	int running, paused, parserdone;
@@ -193,7 +204,17 @@ int main(int a, char **argv)
 		printf("cannot open\n");
 		return 2;
 	}
-	ret = san_open(h, &san);
+
+	ret = san_init(&san);
+	if (ret) {
+		printf("SAN init failed: %d\n", ret);
+		goto out;
+	}
+
+	sio.ctx = &h;
+	sio.read = sio_read;
+
+	ret = san_open(san, &sio);
 	if (ret) {
 		printf("SAN invalid: %d\n", ret);
 		goto out;

@@ -8,18 +8,20 @@
 
 struct sanio {
 	void *ctx;
-	int(*read)(void *ctx, uint8_t *dst, uint32_t size);
+	int(*read)(void *ctx, void *dst, uint32_t size);
 };
 
 struct sanrt {
-	int handle;
+	struct sanio *io;
+	uint32_t _bsz;		// current block size
 	uint32_t totalsize;
 	uint32_t currframe;
-	uint32_t FRMEcnt;
 	uint32_t framerate;
 	uint32_t maxframe;
+	uint16_t FRMEcnt;
 	uint16_t w;  // frame width/pitch/stride
 	uint16_t h;  // frame height
+	uint16_t version;
 
 	int(*queue_video)(struct sanrt *san, unsigned char *vdata, uint32_t size, int newpal);
 	int(*queue_audio)(struct sanrt *san, unsigned char *adata, uint32_t size);
@@ -35,7 +37,6 @@ struct sanrt {
 	unsigned char *buf;	// baseptr
 	uint32_t lastseq;
 	uint32_t rotate;
-	uint16_t version;
 	int to_store;
 
 	// iact block stuff
@@ -58,7 +59,8 @@ struct sanctx {
 
 int san_init(struct sanrt** sanctx);
 
-int san_open(int handle, struct sanrt** out);
+int san_open(struct sanrt* rt, struct sanio *io);
+
 int san_one_frame(struct sanrt *rt);
 
 #endif

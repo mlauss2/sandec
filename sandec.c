@@ -7,6 +7,7 @@
  */
 
 #include <memory.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -231,97 +232,105 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 /******************************************************************************/
 
 
-static int readX(int h, char *dst, unsigned int cnt)
+static inline int readX(struct sanrt *rt, void *dst, uint32_t sz)
 {
-	return read(h, dst, cnt);
+	int ret = rt->io->read(rt->io->ctx, dst, sz);
+	if (ret > 0) {
+		rt->_bsz -= ret;
+	}
+	return ret == sz ? 0 : 1;
 }
 
-static uint8_t read8(int h)
+static inline int read8(struct sanrt *rt, uint8_t *out)
 {
-	uint8_t b;
-	read(h, &b, 1);
-	return b;
+	int ret = rt->io->read(rt->io->ctx, out, 1);
+	if (ret > 0)
+		rt->_bsz -= 1;
+	return ret > 0 ? 0 : 1;
 }
 
-static uint16_t read16(int h)
+static inline int readLE16(struct sanrt *rt, uint16_t *out)
 {
-	uint16_t s;
-	read(h, &s, 2);
-	return s;
+	int ret = rt->io->read(rt->io->ctx, out, 2);
+	if (ret > 0) {
+		*out = le16_to_cpu(*out);
+		rt->_bsz -= 2;
+	}
+	return ret > 0 ? 0 : 1;
 }
 
-static uint32_t read32(int h)
+static inline int readLE32(struct sanrt *rt, uint32_t *out)
 {
-	uint32_t w;
-	read(h, &w, 4);
-	return w;
+	int ret = rt->io->read(rt->io->ctx, out, 4);
+	if (ret > 0) {
+		*out = le32_to_cpu(*out);
+		rt->_bsz -= 4;
+	}
+	return ret > 0 ? 0 : 1;
 }
 
-static uint16_t readLE16(int h)
+static inline int readBE16(struct sanrt *rt, uint16_t *out)
 {
-	uint16_t s;
-	read(h, &s, 2);
-	return le16_to_cpu(s);
+	int ret = rt->io->read(rt->io->ctx, out, 2);
+	if (ret > 0) {
+		*out = be16_to_cpu(*out);
+		rt->_bsz -= 2;
+	}
+	return ret > 0 ? 0 : 1;
 }
 
-static uint32_t readLE32(int h)
+static inline int readBE32(struct sanrt *rt, uint32_t *out)
 {
-	uint32_t w;
-	read(h, &w, 4);
-	return le32_to_cpu(w);
+	int ret = rt->io->read(rt->io->ctx, out, 4);
+	if (ret > 0) {
+		*out = be32_to_cpu(*out);
+		rt->_bsz -= 4;
+	}
+	return ret > 0 ? 0 : 1;
 }
 
-static uint16_t readBE16(int h)
+// consume unused bytes in the stream (wrt. chunk size)
+static inline int san_read_unused(struct sanrt *rt)
 {
-	uint16_t s;
-	read(h, &s, 2);
-	return be16_to_cpu(s);
+	uint32_t t;
+	uint8_t v;
+
+	t = rt->_bsz;
+	while (t--) {
+		read8(rt, &v);
+	}
 }
 
-static uint32_t readBE32(int h)
-{
-	uint32_t w;
-	read(h, &w, 4);
-	return be32_to_cpu(w);
-}
+#define _READ(x, y, z, rt)			\
+	do {					\
+		if (read##x(rt, y))		\
+			return z;		\
+	} while (0)
 
-static uint32_t readBE24(int h)
-{
-	char b[3];
-	uint32_t v;
-	read(h, b, 3);
-	v = (b[0] << 16) | (b[1]) << 8 | b[2];
-	return v;
-}
-
-static int readtag(int h, uint32_t *outtag, uint32_t *outsize)
+static int readtag(struct sanrt *rt, uint32_t *outtag, uint32_t *outsize)
 {
 	uint32_t v1, v2;
 	int ret;
 
-	ret = read(h, &v1, 4);
-	if (ret != 4)
-		return 1;
-	ret = read(h, &v2, 4);
-	if (ret != 4)
-		return 2;
+	ret = readBE32(rt, &v1);
+	if (ret)
+		return 11;
+	ret = readBE32(rt, &v2);
+	if (ret)
+		return 12;
 
-	v1 = be32_to_cpu(v1);
-	v2 = be32_to_cpu(v2);
 	*outtag = v1;
 	*outsize = v2;
+
 	return 0;
 }
 
 // uncompressed full frame
 static int codec47_comp0(struct sanrt *rt, unsigned char *dst, uint16_t w, uint16_t h)
 {
-	int r;
-
 	for (unsigned int i = 0; i < h; i++) {
-		r = readX(rt->handle, dst, w);
-		if (r != w)
-			return 1;
+		if (readX(rt, dst, w))
+			return 1; // error
 		dst += w;
 	}
 	return 0;
@@ -330,51 +339,52 @@ static int codec47_comp0(struct sanrt *rt, unsigned char *dst, uint16_t w, uint1
 // full frame in half width and height resolution
 static int codec47_comp1(struct sanrt *rt, unsigned char *dst, uint16_t w, uint16_t h)
 {
-	int r;
+	uint8_t val;
 
 	for (unsigned int j = 0; j < h; j += 2) {
 		for (unsigned int i = 0; i < w; i += 2) {
-			dst[i] = dst[i + 1] = dst[w + i] = dst[w + i + 1] = read8(rt->handle);
+			_READ(8, &val, 1, rt);
+			dst[i] = dst[i + 1] = dst[w + i] = dst[w + i + 1] = val;
 		}
 	}
 	return 0;
 }
 
-static int codec47_block(struct sanrt *rt, unsigned char *dst, unsigned char *p1, unsigned char *p2, uint16_t w, off_t tblofs, uint16_t size)
+static int codec47_block(struct sanrt *rt, unsigned char *dst, unsigned char *p1, unsigned char *p2, uint16_t w, uint8_t *headtbl, uint16_t size)
 {
-	uint8_t code, col[2], c;
+	uint8_t code, col[2], c, val;
 	uint16_t i, j;
 	int8_t *pglyph;
 
-	code = read8(rt->handle);
+	_READ(8, &code, 1, rt);
 	if (code >= 0xF8) {
 		switch (code) {
 		case 0xff:
 			if (size == 2) {
-				dst[0] = read8(rt->handle);
-				dst[1] = read8(rt->handle);
-				dst[w] = read8(rt->handle);
-				dst[w+1] = read8(rt->handle);
+				_READ(8, &dst[0], 1, rt);
+				_READ(8, &dst[1], 1, rt);
+				_READ(8, &dst[w], 1, rt);
+				_READ(8, &dst[w+1], 1, rt);
 			} else {
 				size /= 2;
-				codec47_block(rt, dst, p1, p2, w, tblofs, size);
-				codec47_block(rt, dst + size, p1 + size, p2 + size, w, tblofs, size);
+				codec47_block(rt, dst, p1, p2, w, headtbl, size);
+				codec47_block(rt, dst + size, p1 + size, p2 + size, w, headtbl, size);
 				dst += (size * w);
 				p1 += (size * w);
 				p2 += (size * w);
-				codec47_block(rt, dst, p1, p2, w, tblofs, size);
-				codec47_block(rt, dst + size, p1 + size, p2 + size, w, tblofs, size);
+				codec47_block(rt, dst, p1, p2, w, headtbl, size);
+				codec47_block(rt, dst + size, p1 + size, p2 + size, w, headtbl, size);
 			}
 			break;
 		case 0xfe:
-			c = read8(rt->handle);
+			_READ(8, &c, 1, rt);
 			for (i = 0; i < size; i++)
 				memset(dst + (i * w), c, size);
 			break;
 		case 0xfd:
-			code = read8(rt->handle);
-			col[0] = read8(rt->handle);
-			col[1] = read8(rt->handle);
+			_READ(8, &code, 1, rt);
+			_READ(8, &col[0], 1, rt);
+			_READ(8, &col[1], 1, rt);
 			pglyph = (size == 8) ? rt->glyph8x8[code] : rt->glyph4x4[code];
 			for (i = 0; i < size; i++) {
 				for (j = 0; j < size; j++) {
@@ -388,10 +398,7 @@ static int codec47_block(struct sanrt *rt, unsigned char *dst, unsigned char *p1
 			}
 			break;
 		default:
-			off_t savepos = lseek(rt->handle, 0, SEEK_CUR);
-			lseek(rt->handle, tblofs + (code & 7), SEEK_SET);
-			c = read8(rt->handle);
-			lseek(rt->handle, savepos, SEEK_SET);
+			c = headtbl[code & 7];
 			for (i = 0; i < size; i++) {
 				memset(dst + (i * w), c, size);
 			}
@@ -406,7 +413,7 @@ static int codec47_block(struct sanrt *rt, unsigned char *dst, unsigned char *p1
 	return 0;
 }
 
-static int codec47_comp2(struct sanrt *rt, unsigned char *dst, uint16_t w, uint16_t h, uint32_t seq, off_t tblofs)
+static int codec47_comp2(struct sanrt *rt, unsigned char *dst, uint16_t w, uint16_t h, uint32_t seq, uint8_t *headtbl)
 {
 	unsigned int i, j;
 	unsigned char *b1, *b2;
@@ -419,7 +426,7 @@ static int codec47_comp2(struct sanrt *rt, unsigned char *dst, uint16_t w, uint1
 
 	for (j = 0; j < h; j += 8) {
 		for (i = 0; i < w; i += 8) {
-			codec47_block(rt, dst + i, b1 + i, b2 + i, w, tblofs + 8, 8);
+			codec47_block(rt, dst + i, b1 + i, b2 + i, w, headtbl + 8, 8);
 		}
 		dst += (w * 8);
 		b1 += (w * 8);
@@ -434,13 +441,14 @@ static int codec47_comp5(struct sanrt *rt, unsigned char *dst, uint16_t w, uint1
 	uint8_t opc, rlen, col;
 
 	while (left) {
-		opc = read8(rt->handle);
+		_READ(8, &opc, 1, rt);
 		rlen = (opc >> 1) + 1;
 		if (opc & 1) {
-			col = read8(rt->handle);
+			_READ(8, &col, 1, rt);
 			memset(dst, col, rlen);
 		} else {
-			readX(rt->handle, dst, rlen);
+			if (readX(rt, dst, rlen))
+				return 1;
 		}
 		dst += rlen;
 		left -= rlen;
@@ -450,23 +458,23 @@ static int codec47_comp5(struct sanrt *rt, unsigned char *dst, uint16_t w, uint1
 
 static int codec47(struct sanrt *rt, uint32_t size, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
 {
-	off_t tblofs = lseek(rt->handle, 0, SEEK_CUR);
-	uint16_t seq = readLE16(rt->handle);
-	uint8_t comp = read8(rt->handle);
-	uint8_t newrot = read8(rt->handle);
-	uint8_t skip = read8(rt->handle);
+	// the codec47_block() compression path accesses parts of this header.
+	// instead of the seek/tell file pointer games that the ffmpeg code uses,
+	// we just read the whole 26 byte block, pass it around and read our
+	// data out of it.
+	uint8_t headtable[32];
+
+	// read header
+	if (readX(rt, headtable, 26))
+		return 1;
+
+	uint16_t seq = *(uint16_t *)(headtable + 0);
+	uint8_t comp = headtable[2];
+	uint8_t newrot = headtable[3];
+	uint8_t skip = headtable[4];
+	uint32_t decsize = *(uint32_t *)(headtable + 14);
 	unsigned char *dst;
 	int ret;
-
-	// skip 9 bytes
-	(void)read8(rt->handle);
-	(void)read32(rt->handle);
-	(void)read32(rt->handle);
-
-	uint32_t decsize = readLE32(rt->handle);
-	// skip 8 bytes
-	(void)read32(rt->handle);
-	(void)read32(rt->handle);
 
 	//printf("C47  seq %4u comp %u newrot %u skip %u decsize %u\n", seq, comp, newrot, skip, decsize);
 	if (seq == 0) {
@@ -475,14 +483,14 @@ static int codec47(struct sanrt *rt, uint32_t size, uint16_t w, uint16_t h, uint
 		memset(rt->buf2, 0, rt->fbsize);
 	}
 	if (skip & 1) {
-		lseek(rt->handle, 0x8080, SEEK_CUR);
+		readX(rt, NULL, 0x8080);
 	}
 
 	dst = rt->buf0 + left + (top * w);
 	switch (comp) {
 	case 0:	ret = codec47_comp0(rt, dst, w, h); break;
 	case 1: ret = codec47_comp1(rt, dst, w, h); break;
-	case 2: ret = codec47_comp2(rt, dst, w, h, seq, tblofs); break;
+	case 2: ret = codec47_comp2(rt, dst, w, h, seq, headtable); break;
 	case 3:	memcpy(rt->buf0, rt->buf2, rt->fbsize); break;
 	case 4: memcpy(rt->buf0, rt->buf1, rt->fbsize); break;
 	case 5: ret = codec47_comp5(rt, dst, w, h, decsize); break;
@@ -500,8 +508,10 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	const uint32_t bs = w * h * bpp;
 	unsigned char *b;
 
-	//printf("FOBJ: new buffer %ux%u %u\n", w, h, bs);
-
+	/* codec47 requires up to 4 buffers the size of the image.
+	 * a front buffer, 2 work buffers and an aux buffer to occasionally
+	 * save the frontbuffer to/from.
+	 */
 	b = (unsigned char *)malloc(bs * 4);
 	if (!b)
 		return 1;
@@ -524,92 +534,100 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 static int handle_FOBJ(struct sanrt *rt, uint32_t size)
 {
 	uint16_t codec, left, top, w, h;
-	off_t off = lseek(rt->handle, 0, SEEK_CUR);
+	uint32_t t1;
 	int ret;
 
 	if (size < 12)
 		return 71;
 
-	codec = readLE16(rt->handle);
-	left = readLE16(rt->handle);
-	top = readLE16(rt->handle);
-	w = readLE16(rt->handle);
-	h = readLE16(rt->handle);
-	(void)readLE32(rt->handle);	// dummy 4 bytes
+	// need to track read size since not all bytes of "size" are always consumed
+	rt->_bsz = size;		// init byte tracking
+	_READ(LE16, &codec, 72, rt);
+	_READ(LE16, &left, 73, rt);
+	_READ(LE16, &top, 74, rt);
+	_READ(LE16, &w, 75, rt);
+	_READ(LE16, &h, 76, rt);
+	_READ(LE32, &t1, 77, rt);
 
-	//printf("FOBJ size %d %dx%d at %dx%d, codec %d\n", size, w, h, left, top, codec);
+//	printf("FOBJ size %d %dx%d at %dx%d, codec %d\n", size, w, h, left, top, codec);
+
+	if (codec =! 47)
+		return 78;
+
 	ret = 0;
 	if ((rt->w < (left + w)) || (rt->h < (top + h))) {
 		ret = fobj_alloc_buffers(rt, _max(rt->w, left + w), _max(rt->h, top + h), 1);
 	}
 	if (ret != 0)
-		goto out;
-	if (codec =! 47) {
-		ret = 72;
-		goto out;
-	}
+		return 79;
+
 	ret = codec47(rt, size - 14, w, h, top, left);
 
-out:
-	lseek(rt->handle, off + size, SEEK_SET);
+	san_read_unused(rt);
+
 	return ret;
 }
 
 static int handle_NPAL(struct sanrt *rt, uint32_t size)
 {
-	char tmpbuf[4];
+	uint8_t tmpbuf[4];
 	int j;
 
-	//printf("NPAL size %d\n", size);
-
+	rt->_bsz = size;		// init byte tracking
 	for (int i = 0; i < (size / 3); i++) {
-		rt->palette[i] = 0xff000000 | readBE24(rt->handle);
+		_READ(8, &tmpbuf[0], 1, rt);
+		_READ(8, &tmpbuf[1], 1, rt);
+		_READ(8, &tmpbuf[2], 1, rt);
+		rt->palette[i] = (0xff<<24) | tmpbuf[2] << 16 | tmpbuf[1] << 8 | tmpbuf[0];
 	}
-	j = size & 3;
-	if (j)
-		read(rt->handle, tmpbuf, j);
-
 	rt->newpal = 1;
+
+	san_read_unused(rt);
+
 	return 0;
 }
 
 static int handle_XPAL(struct sanrt *rt, uint32_t size)
 {
-	int i, j;
+	uint32_t sz2 = size, t32;
 	uint8_t t1, t2[3];
-	uint16_t t;
-	uint32_t sz2 = size;
+	uint16_t t16;
+	int i, j;
 
-	//printf("XPAL: %u\n", size);
-
+	rt->_bsz = size;		// init byte tracking
 	if (size == 4 || size == 6) {
 		for (i = 0; i < 256; i++) {
 			for (j = 0; j < 3; j++) {
 				t1 = (rt->palette[i] >> (16 - (j * 8))) & 0xff;
-				t = t1;
-				t2[j] = ((t * 129) + rt->deltapal[(i * 3) + j]) >> 7; // clip pal ?
+				t16 = t1;
+				t2[j] = ((t16 * 129) + rt->deltapal[(i * 3) + j]) >> 7; // clip pal ?
 			}
 			rt->palette[i] = 0xff | (t2[0] << 16) | (t2[1] << 8) | t2 [2];
 		}
 		sz2 = size;
 	} else {
-		(void)read32(rt->handle);
+		_READ(LE32, &t32, 1, rt);
 		for (i = 0; i < 768; i++) {
-			rt->deltapal[i] = readLE16(rt->handle);
+			_READ(LE16, &t16, 3, rt);
+			rt->deltapal[i] = t16;
 		}
 		sz2 -= 768 * 2 + 4;
 		if (size >= 3844) {
 			for (i = 0; i < 256; i++) {
-				rt->palette[i] = 0xff000000 | readBE24(rt->handle);
+				_READ(8, &t2[0], 1, rt);
+				_READ(8, &t2[1], 1, rt);
+				_READ(8, &t2[2], 1, rt);
+				rt->palette[i] = 0xff000000 | t2[0] << 16 | t2[1] << 8 | t2[2];
 			}
 			sz2 -= 256 * 3;
 		} else {
 			memset(rt->palette, 0, 256 * 4);
 		}
 	}
-	for (i = 0; i < sz2; i++)
-		(void)read8(rt->handle);
 	rt->newpal = 1;
+
+	san_read_unused(rt);
+
 	return 0;
 }
 
@@ -619,14 +637,20 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 	uint32_t blocksz = size - 18, len, vv;
 	unsigned char *tmpbuf, *iactbuf, *tb2, *dst, *src, *src2, value;
 
-	v[0] = readLE16(rt->handle); // code
-	v[1] = readLE16(rt->handle); // flags
-	v[2] = readLE16(rt->handle); // unk
-	v[3] = readLE16(rt->handle); // uid
-	v[4] = readLE16(rt->handle); // trkid
-	v[5] = readLE16(rt->handle); // index
-	v[6] = readLE16(rt->handle); // num frame
-	vv = readLE32(rt->handle); // size
+	// size is always a multiple of 2 in the stream, even if the tag reports
+	// otherwise.
+	if (size & 1)
+		size += 1;
+
+	rt->_bsz = size;		// init byte tracking
+	_READ(LE16, &v[0], 1, rt);	// code
+	_READ(LE16, &v[1], 1, rt);	// flags
+	_READ(LE16, &v[2], 1, rt);	// unk
+	_READ(LE16, &v[3], 1, rt);	// uid
+	_READ(LE16, &v[4], 1, rt);	// trkid
+	_READ(LE16, &v[5], 1, rt);	// index
+	_READ(LE16, &v[6], 1, rt);	// num frames
+	_READ(LE32, &vv, 1, rt);	// size2
 
 	//printf("IACT: size %d code %d flags %d unk %d uid %d trk %d idx %d frames %d size2 %d\n", size, v[0], v[1], v[2], v[3], v[4], v[5], v[6], vv);
 
@@ -634,7 +658,8 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 	if (!tmpbuf)
 		return 41;
 	src = tmpbuf;
-	readX(rt->handle, src, blocksz);
+	if (readX(rt, src, blocksz))
+		return 42;
 	iactbuf = rt->iactbuf;
 
 	// algorithm taken from scummvm/engines/scumm/smush/smush_player.cpp::handleIACT()
@@ -649,7 +674,7 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 			} else {
 				tb2 = malloc(4096);
 				if (!tb2)
-					return 42;
+					return 43;
 				memset(tb2, 0, 4096);
 					
 				memcpy(iactbuf + rt->iactpos, src, len);
@@ -701,8 +726,7 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 	}
 	free(tmpbuf);
 
-	if (size & 1)
-		(void)read8(rt->handle);
+	san_read_unused(rt);
 
 	return 0;
 }
@@ -713,60 +737,50 @@ static int handle_TRES(struct sanrt *rt, uint32_t size)
 	uint32_t v;
 	uint16_t px, py, l, t, w, h, f, strid;
 
-	px = readLE16(rt->handle);
-	py = readLE16(rt->handle);
-	f = readLE16(rt->handle);
-	l = readLE16(rt->handle);
-	t = readLE16(rt->handle);
-	w = readLE16(rt->handle);
-	h = readLE16(rt->handle);
-	(void)readLE16(rt->handle);
-	strid = readLE16(rt->handle);
+	rt->_bsz = size;		// init byte tracking
+	_READ(LE16, &px, 1, rt);
+	_READ(LE16, &py, 1, rt);
+	_READ(LE16, &f, 1, rt);
+	_READ(LE16, &l, 1, rt);
+	_READ(LE16, &t, 1, rt);
+	_READ(LE16, &w, 1, rt);
+	_READ(LE16, &h, 1, rt);
+	_READ(LE16, &strid, 1, rt); // dummy
+	_READ(LE16, &strid, 1, rt); // real strid
+
 	printf("TRES: sz %u px %u py %u flags %u left %d top %d w %d h %d strid %d\n", size, px, py, f, l, t, w, h, strid);
+
+	san_read_unused(rt);
 
 	return 0;
 }
 
 static int handle_STOR(struct sanrt *rt, uint32_t size)
 {
-	uint32_t s;
-
+	rt->_bsz = size;		// init byte tracking
 	rt->to_store = 1;
-
-	s = readLE32(rt->handle);
-	printf("STOR: sz %u param %08x\n", size, s);
-
+	san_read_unused(rt);
 	return 0;
 }
 
 static int handle_FTCH(struct sanrt *rt, uint32_t size)
 {
-	uint32_t v1;
-	uint16_t v2;
-
+	rt->_bsz = size;		// init byte tracking
 	memcpy(rt->buf0, rt->buf3, rt->fbsize);
-	if (size == 6) {
-		v2 = readLE16(rt->handle);
-		v1 = readLE32(rt->handle);
-		printf("FTCH: sz %d v1 %08x v2 %04x\n", size, v1, v2);
-	} else {
-		printf("FTCH: sz %d", size);
-		lseek(rt->handle, size, SEEK_CUR);
-	}
-
+	san_read_unused(rt);
 	return 0;
 }
 
 static int handle_FRME(struct sanrt *rt, uint32_t size)
 {
-	int ret;
 	uint32_t cid, csz, framebytes;
+	uint8_t v;
+	int ret;
 
-	//printf("FRME: frame %3d size %d\n", rt->currframe, size);
-	framebytes = size;
+	framebytes = size;	// byte tracking
 	ret = 0;
-	while (framebytes && (ret == 0)) {
-		ret = readtag(rt->handle, &cid, &csz);
+	while ((framebytes > 3) && (ret == 0)) {
+		ret = readtag(rt, &cid, &csz);
 		if (ret)
 			return 201;
 		if (csz > framebytes)
@@ -782,7 +796,6 @@ static int handle_FRME(struct sanrt *rt, uint32_t size)
 		case XPAL: ret = handle_XPAL(rt, csz); break;
 		default:
 			printf("UNK2: %08x %c%c%c%c %d\n", cid, (cid>>24)%0xff, (cid>>16)&0xff,(cid>>8)&0xff,cid&0xff,csz);
-			lseek(rt->handle, csz, SEEK_CUR);
 			ret = 61;
 			break;
 		}
@@ -790,29 +803,36 @@ static int handle_FRME(struct sanrt *rt, uint32_t size)
 			csz += 1;
 		framebytes -= csz + 8;
 	}
+
 	if (framebytes < 4 && ret == 0) {
+		// OK Case: most bytes consumed, no errors.
 		if (rt->to_store) {
 			memcpy(rt->buf3, rt->buf0, rt->fbsize);
 		}
-	}
-	// copy rt->buf0 to output
-	ret = rt->queue_video(rt, rt->buf0, rt->w * rt->h * 1, rt->newpal);
-	rt->newpal = 0;
 
-	if (rt->rotate) {
-		unsigned char *tmp;
-		if (rt->rotate == 2) {
-			tmp = rt->buf1;
-			rt->buf1 = rt->buf2;
-			rt->buf2 = tmp;
+		// copy rt->buf0 to output
+		ret = rt->queue_video(rt, rt->buf0, rt->w * rt->h * 1, rt->newpal);
+		rt->newpal = 0;
+
+		if (rt->rotate) {
+			unsigned char *tmp;
+			if (rt->rotate == 2) {
+				tmp = rt->buf1;
+				rt->buf1 = rt->buf2;
+				rt->buf2 = tmp;
 		}
-		tmp = rt->buf2;
-		rt->buf2 = rt->buf0;
-		rt->buf0 = tmp;
-	}
+			tmp = rt->buf2;
+			rt->buf2 = rt->buf0;
+			rt->buf0 = tmp;
+		}
 
-	rt->to_store = 0;
-	rt->currframe++;
+		// consume any unread bytes
+		while (framebytes--)
+			read8(rt, &v);
+
+		rt->to_store = 0;
+		rt->currframe++;
+	}
 
 	return ret;
 }
@@ -829,38 +849,34 @@ static int handle_AHDR(struct sanrt *rt, uint32_t size)
 	if (size < 768 + 6)
 		return 1;		// too small
 
-	tmpbuf[0] = read8(rt->handle);
-	tmpbuf[1] = read8(rt->handle);
+	rt->_bsz = size;		// init byte tracking
+	_READ(8, &tmpbuf[0], 1, rt);
+	_READ(8, &tmpbuf[1], 1, rt);
 	rt->version = tmpbuf[0] | (tmpbuf[1] << 8);
-	rt->FRMEcnt = readLE16(rt->handle);
-	/* dummy data */
-	read(rt->handle, &v, 2);
-
-	//printf("AHDR size %d version %d FRMEs %d ", size, rt->version, rt->FRMEcnt);
+	_READ(LE16, &(rt->FRMEcnt), 2, rt);
+	if (readX(rt, &v, 2))  /* dummy data */
+		return 3;
 
 	rt->newpal = 1;
-	for (int i = 0; i < 256;  i++)
-		rt->palette[i] = 0xff000000 | readBE24(rt->handle);
+	for (int i = 0; i < 256;  i++) {
+		_READ(8, &tmpbuf[0], 4, rt);
+		_READ(8, &tmpbuf[1], 4, rt);
+		_READ(8, &tmpbuf[2], 4, rt);
+		rt->palette[i] = 0xff000000 | tmpbuf[0] << 16 | tmpbuf[1] << 8 | tmpbuf[2];
+	}
 
-	left = size - (768 + 6);
-	if (left < 20) {
+	if (rt->_bsz < 20) {
 		ret = 2;
 	} else {
-		rt->framerate = readLE32(rt->handle);
-		rt->maxframe = readLE32(rt->handle);
-		rt->samplerate = readLE32(rt->handle);
-		(void)readLE32(rt->handle);	// unk1
-		(void)readLE32(rt->handle);	// unk2
-		//printf("framerate %d maxframe %d samplerate %d", rt->framerate, rt->maxframe, rt->samplerate);
-		left -= 20;
+		_READ(LE32, &rt->framerate, 5, rt);
+		_READ(LE32, &rt->maxframe, 5, rt);
+		_READ(LE32, &rt->samplerate, 5, rt);
+		_READ(LE32, &v2, 5, rt);	// unk1
+		_READ(LE32, &v2, 5, rt);	// unk2
 		ret = 0;
 	}
-	printf("\n");
 
-	while (left) {
-		(void)read8(rt->handle);
-		left--;
-	}
+	san_read_unused(rt);
 
 	return ret;
 }
@@ -870,37 +886,58 @@ int san_one_frame(struct sanrt *rt)
 	uint32_t cid, csz;
 	int ret;
 
+	if (!rt->io)
+		return 1;
+
 	if (rt->currframe >= rt->FRMEcnt)
 		return 500;
 
-	ret = readtag(rt->handle, &cid, &csz);
-	if (ret == 1)
+	ret = readtag(rt, &cid, &csz);
+	if (ret)
 		return 500;	// probably EOF, we're done
 
-		switch (cid) {
-			case FRME: ret = handle_FRME(rt, csz); break;
-			default:
-				printf("UNK1: %08x %c%c%c%c\n", cid, (cid>>24), (cid>>16), (cid>>8), cid&0xff);
-				ret = 108;
-		}
+	switch (cid) {
+		case FRME: ret = handle_FRME(rt, csz); break;
+		default:
+			printf("UNK1: %08x %c%c%c%c\n", cid, (cid>>24), (cid>>16), (cid>>8), cid&0xff);
+			ret = 108;
+	}
 
-		return ret;
+	return ret;
 }
 
-int san_open(int handle, struct sanrt** out)
+int san_init(struct sanrt **out)
+{
+	struct sanrt *rt;
+
+	rt = malloc(sizeof(struct sanrt));
+	if (!rt)
+		return 1;
+	memset(rt, 0, sizeof(struct sanrt));
+
+	c47_make_glyphs(rt->glyph4x4[0], glyph4_x, glyph4_y, 4);
+	c47_make_glyphs(rt->glyph8x8[0], glyph8_x, glyph8_y, 8);
+	*out = rt;
+
+	return 0;
+}
+
+int san_open(struct sanrt *rt, struct sanio *io)
 {
 	int ret, ok;
-	char buf[128];
-	struct sanrt *rt;
 	uint32_t cid;
 	uint32_t csz;
 	int have_anim = 0;
 	int have_ahdr = 0;
 
+	if (!io)
+		return 1;
+	rt->io = io;
+
 	while (1) {
-		ok = readtag(handle, &cid, &csz);
+		ok = readtag(rt, &cid, &csz);
 		if (ok != 0) {
-			ret = 31;
+			ret = 2;
 			break;
 		}
 
@@ -919,20 +956,5 @@ int san_open(int handle, struct sanrt** out)
 	if (!have_ahdr)
 		return ret;
 
-	rt = malloc(sizeof(struct sanrt));
-	if (!rt)
-		return 32;
-	memset(rt, 0, sizeof(struct sanrt));
-	rt->handle = handle;
-	c47_make_glyphs(rt->glyph4x4[0], glyph4_x, glyph4_y, 4);
-	c47_make_glyphs(rt->glyph8x8[0], glyph8_x, glyph8_y, 8);
-	ret = handle_AHDR(rt, csz);
-	if (ret) {
-		free(rt);
-		*out = NULL;
-	} else {
-		*out = rt;
-	}
-
-	return ret;
+	return handle_AHDR(rt, csz);
 }
