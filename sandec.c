@@ -516,7 +516,7 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	rt->buf0 = b;
 	rt->buf1 = rt->buf0 + bs;
 	rt->buf2 = rt->buf1 + bs;
-	rt->buf3 = rt->buf1 + bs;
+	rt->buf3 = rt->buf2 + bs;
 	rt->fbsize = bs;
 	rt->w = w;
 	rt->h = w;
