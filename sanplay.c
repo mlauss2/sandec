@@ -56,10 +56,15 @@ static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size, in
 	}
 	if (newpal) {
 		for (int i = 0; i < 256; i++) {
-			p->col[i].r = (rt->palette[i] >> 24) & 0xff;
-			p->col[i].g = (rt->palette[i] >> 16) & 0xff;
-			p->col[i].b = (rt->palette[i] >>  8) & 0xff;
+			// the layout of the colors in rt->palette is identical
+			// to the components in SDL_Color, so do a 32bit copy.
+			*(uint32_t *)(&p->col[i]) = *(uint32_t *)&(rt->palette[i]);
+/* per-byte version:
+			p->col[i].r = (rt->palette[i] >> 0) & 0xff;
+			p->col[i].g = (rt->palette[i] >> 8) & 0xff;
+			p->col[i].b = (rt->palette[i] >>16) & 0xff;
 			p->col[i].a = 0xff;
+*/
 		}
 	}
 	pal = SDL_AllocPalette(256);
@@ -235,6 +240,7 @@ int main(int a, char **argv)
 	paused = 0;
 	parserdone = 0;
 
+	// frame pacing
 	ts.tv_sec = 0;
 	ts.tv_nsec = 1000000000 / san->framerate;
 
