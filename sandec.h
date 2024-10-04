@@ -23,7 +23,7 @@ struct sanrt {
 	uint16_t h;  // frame height
 	uint16_t version;
 
-	int(*queue_video)(struct sanrt *san, unsigned char *vdata, uint32_t size, int newpal);
+	int(*queue_video)(struct sanrt *san, unsigned char *vdata, uint32_t size);
 	int(*queue_audio)(struct sanrt *san, unsigned char *adata, uint32_t size);
 
 	// codec47 stuff
@@ -44,11 +44,10 @@ struct sanrt {
 	uint16_t iactpos;
 
 	// buffers
-	uint32_t palette[256]; // ABGR
-	uint16_t deltapal[768];
-	uint8_t iactbuf[4096];
+	uint32_t palette[256];	// ABGR
+	uint16_t deltapal[768];	// for XPAL chunks
+	uint8_t iactbuf[4096];	// for IACT chunks
 	void *userdata;
-	int newpal;
 };
 
 struct sanctx {

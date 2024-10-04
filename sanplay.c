@@ -1,3 +1,9 @@
+/*
+ * SDL2-based SAN video player.
+ *
+ * (c) 2024 Manuel Lauss <manuel.lauss@gmail.com>
+ */
+
 #define __USE_MISC
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,7 +39,7 @@ static int queue_audio(struct sanrt *rt, unsigned char *adata, uint32_t size)
 	return 0;
 }
 
-static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size, int newpal)
+static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size)
 {
 	struct sdlpriv *p = rt->userdata;
 	uint32_t fid = rt->currframe;
@@ -43,7 +49,7 @@ static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size, in
 	SDL_Rect sr, dr;
 	int ret;
 
-	printf("VIDEO: %p %u %ux%x %d fid %u\n", vdata, size, rt->w, rt->h, newpal, fid);
+	printf("VIDEO: %p %u %ux%x fid %u\n", vdata, size, rt->w, rt->h, fid);
 
 	sr.x = sr.y = 0;
 	sr.w = rt->w;
@@ -54,23 +60,11 @@ static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size, in
 		printf("ERR: %s\n", SDL_GetError());
 		return 1001;
 	}
-	if (newpal) {
-		for (int i = 0; i < 256; i++) {
-			// the layout of the colors in rt->palette is identical
-			// to the components in SDL_Color, so do a 32bit copy.
-			*(uint32_t *)(&p->col[i]) = *(uint32_t *)&(rt->palette[i]);
-/* per-byte version:
-			p->col[i].r = (rt->palette[i] >> 0) & 0xff;
-			p->col[i].g = (rt->palette[i] >> 8) & 0xff;
-			p->col[i].b = (rt->palette[i] >>16) & 0xff;
-			p->col[i].a = 0xff;
-*/
-		}
-	}
+
 	pal = SDL_AllocPalette(256);
 	if (!pal)
 		return 1005;
-	memcpy(pal->colors, p->col, 256 * sizeof(SDL_Color));
+	memcpy(pal->colors, rt->palette, 256 * sizeof(SDL_Color));
 	ret = SDL_SetSurfacePalette(sur, pal);
 	if (ret) {
 		SDL_FreeSurface(sur);
@@ -191,13 +185,13 @@ static int sio_read(void *ctx, void *dst, uint32_t size)
 
 int main(int a, char **argv)
 {
-	int h, ret;
-	struct sanrt *san;
-	struct sanio sio;
-	struct sdlpriv sdl;
-	SDL_Event e;
 	int running, paused, parserdone;
 	struct timespec ts;
+	struct sdlpriv sdl;
+	struct sanrt *san;
+	struct sanio sio;
+	SDL_Event e;
+	int h, ret;
 
 	if (a < 2) {
 		printf("arg missing\n");

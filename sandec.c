@@ -580,7 +580,6 @@ static int handle_NPAL(struct sanrt *rt, uint32_t size)
 		_READ(8, &tmpbuf[2], 1, rt);
 		rt->palette[i] = (0xff<<24) | tmpbuf[2] << 16 | tmpbuf[1] << 8 | tmpbuf[0];
 	}
-	rt->newpal = 1;
 
 	san_read_unused(rt);
 
@@ -624,7 +623,6 @@ static int handle_XPAL(struct sanrt *rt, uint32_t size)
 			memset(rt->palette, 0, 256 * 4);
 		}
 	}
-	rt->newpal = 1;
 
 	san_read_unused(rt);
 
@@ -811,8 +809,7 @@ static int handle_FRME(struct sanrt *rt, uint32_t size)
 		}
 
 		// copy rt->buf0 to output
-		ret = rt->queue_video(rt, rt->buf0, rt->w * rt->h * 1, rt->newpal);
-		rt->newpal = 0;
+		ret = rt->queue_video(rt, rt->buf0, rt->w * rt->h * 1);
 
 		if (rt->rotate) {
 			unsigned char *tmp;
@@ -857,7 +854,6 @@ static int handle_AHDR(struct sanrt *rt, uint32_t size)
 	if (readX(rt, &v, 2))  /* dummy data */
 		return 3;
 
-	rt->newpal = 1;
 	for (int i = 0; i < 256;  i++) {
 		_READ(8, &tmpbuf[0], 4, rt);
 		_READ(8, &tmpbuf[1], 4, rt);
