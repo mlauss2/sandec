@@ -325,17 +325,6 @@ static int readtag(struct sanrt *rt, uint32_t *outtag, uint32_t *outsize)
 	return 0;
 }
 
-// uncompressed full frame
-static int codec47_comp0(struct sanrt *rt, unsigned char *dst, uint16_t w, uint16_t h)
-{
-	for (unsigned int i = 0; i < h; i++) {
-		if (readX(rt, dst, w))
-			return 1; // error
-		dst += w;
-	}
-	return 0;
-}
-
 // full frame in half width and height resolution
 static int codec47_comp1(struct sanrt *rt, unsigned char *dst, uint16_t w, uint16_t h)
 {
@@ -346,6 +335,7 @@ static int codec47_comp1(struct sanrt *rt, unsigned char *dst, uint16_t w, uint1
 			_READ(8, &val, 1, rt);
 			dst[i] = dst[i + 1] = dst[w + i] = dst[w + i + 1] = val;
 		}
+		dst += w * 2;
 	}
 	return 0;
 }
@@ -479,8 +469,8 @@ static int codec47(struct sanrt *rt, uint32_t size, uint16_t w, uint16_t h, uint
 	//printf("C47  seq %4u comp %u newrot %u skip %u decsize %u\n", seq, comp, newrot, skip, decsize);
 	if (seq == 0) {
 		rt->lastseq = (uint32_t)-1;
-		memset(rt->buf1, 0, rt->fbsize);
-		memset(rt->buf2, 0, rt->fbsize);
+		memset(rt->buf1, headtable[12], rt->fbsize);
+		memset(rt->buf2, headtable[13], rt->fbsize);
 	}
 	if (skip & 1) {
 		readX(rt, NULL, 0x8080);
@@ -488,7 +478,7 @@ static int codec47(struct sanrt *rt, uint32_t size, uint16_t w, uint16_t h, uint
 
 	dst = rt->buf0 + left + (top * w);
 	switch (comp) {
-	case 0:	ret = codec47_comp0(rt, dst, w, h); break;
+	case 0:	ret = readX(rt, dst, w * h); break;
 	case 1: ret = codec47_comp1(rt, dst, w, h); break;
 	case 2: ret = codec47_comp2(rt, dst, w, h, seq, headtable); break;
 	case 3:	memcpy(rt->buf0, rt->buf2, rt->fbsize); break;
