@@ -734,7 +734,7 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 //	printf("IACT sz %u c %u f %u u1 %u ui %u tid %u frms %u sz2 %u\n",
 //	       size, v[0], v[1], v[2], v[3], v[4], v[5], v[6], vv);
 
-	if (v[0] != 8 && v[1] != 46 && v[2] != 0 && v[3] != 0) {
+	if (v[0] != 8 || v[1] != 46 || v[2] != 0 || v[3] != 0) {
 		ret = 44;
 		goto out;
 	}
@@ -913,17 +913,13 @@ int san_one_frame(struct sanrt *rt)
 	if (!rt->io)
 		return 1;
 
-	if (rt->currframe >= rt->FRMEcnt)
-		return 500;
-
 	ret = readtag(rt, &cid, &csz);
 	if (ret)
-		return 500;	// probably EOF, we're done
+		return -1;	// probably EOF, we're done
 
 	switch (cid) {
-		case FRME: ret = handle_FRME(rt, csz); break;
-		default:
-			ret = 108;
+	case FRME: 	ret = handle_FRME(rt, csz); break;
+	default:		ret = 108;
 	}
 
 	return ret;
