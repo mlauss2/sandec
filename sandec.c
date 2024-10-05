@@ -646,11 +646,75 @@ static int handle_XPAL(struct sanrt *rt, uint32_t size)
 	return 0;
 }
 
+static void decompress_iact(struct sanrt *rt, uint8_t *output_data, uint8_t *d_src, int bsize)
+{
+	uint8_t value;
+	uint8_t *_IACToutput = rt->iactbuf;
+
+	while (bsize > 0) {
+		if (rt->iactpos >= 2) {
+			int32_t len = be16_to_cpu(*(uint16_t*)_IACToutput) + 2;
+			len -= rt->iactpos;
+			if (len > bsize) {
+				memcpy(_IACToutput + rt->iactpos, d_src, bsize);
+				rt->iactpos += bsize;
+				bsize = 0;
+			} else {
+				memcpy(_IACToutput + rt->iactpos, d_src, len);
+				unsigned char *dst = output_data;
+				unsigned char *d_src2 = _IACToutput;
+				d_src2 += 2;
+				int count = 1024;
+				unsigned char variable1 = *d_src2++;
+				unsigned char variable2 = variable1 / 16;
+				variable1 &= 0x0f;
+				do {
+					value = *d_src2++;
+					if (value == 0x80) {
+						*dst++ = *d_src2++;
+						*dst++ = *d_src2++;
+					} else {
+						short val = (char)value << variable2;
+						*dst++ = val >> 8;
+						*dst++ = (unsigned char)(val);
+					}
+					value = *d_src2++;
+					if (value == 0x80) {
+						*dst++ = *d_src2++;
+						*dst++ = *d_src2++;
+					} else {
+						short val = (char)value << variable1;
+						*dst++ = val >> 8;
+						*dst++ = (unsigned char)(val);
+					}
+				} while (--count);
+				// XXX: why do I have this 3 byte skew here?!
+				(void)rt->queue_audio(rt, output_data+3, 4096-4);
+				bsize -= len;
+				d_src += len;
+				rt->iactpos = 0;
+			}
+		} else {
+			if (bsize > 1 && rt->iactpos == 0) {
+				*(_IACToutput + 0) = *d_src++;
+				rt->iactpos = 1;
+				bsize--;
+			}
+			*(_IACToutput + rt->iactpos) = *d_src++;
+			rt->iactpos++;
+			bsize--;
+		}
+	}
+}
+
 static int handle_IACT(struct sanrt *rt, uint32_t size)
 {
+	int ret;
 	uint16_t v[8];
-	uint32_t blocksz = size - 18, len, vv;
-	unsigned char *tmpbuf, *iactbuf, *tb2, *dst, *src, *src2, value;
+	uint32_t datasz, vv;
+	unsigned char *inbuf, outbuf[4096];
+
+	datasz = size - 18;
 
 	// size is always a multiple of 2 in the stream, even if the tag reports
 	// otherwise.
@@ -667,81 +731,31 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 	_READ(LE16, &v[6], 1, rt);	// num frames
 	_READ(LE32, &vv, 1, rt);	// size2
 
-	tmpbuf = malloc(blocksz);
-	if (!tmpbuf)
-		return 41;
-	src = tmpbuf;
-	if (readX(rt, src, blocksz))
-		return 42;
-	iactbuf = rt->iactbuf;
+//	printf("IACT sz %u c %u f %u u1 %u ui %u tid %u frms %u sz2 %u\n",
+//	       size, v[0], v[1], v[2], v[3], v[4], v[5], v[6], vv);
 
-	// algorithm taken from scummvm/engines/scumm/smush/smush_player.cpp::handleIACT()
-	while (blocksz > 0) {
-		if (rt->iactpos >= 2) {
-			len = be16_to_cpu((*(uint16_t *)rt->iactbuf));
-			len = len + 2 - rt->iactpos;
-			if (len > blocksz) {
-				memcpy(iactbuf + rt->iactpos, src, blocksz);
-				rt->iactpos += blocksz;
-				blocksz = 0; 
-			} else {
-				tb2 = malloc(4096);
-				if (!tb2)
-					return 43;
-				memset(tb2, 0, 4096);
-					
-				memcpy(iactbuf + rt->iactpos, src, len);
-				dst = tb2;
-				src2 = iactbuf;
-				src2 += rt->iactpos;
-				uint8_t v1 = *src2++;
-				uint8_t v2 = v1 >> 4;
-				uint32_t count = 1024;
-				v1 &= 0x0f;
-				do {
-					value = *(src2++);
-					if (value == 0x80) {
-						*dst++ = *src2++;
-						*dst++ = *src2++;
-					} else {
-						int16_t v16 = (int8_t)value << v2;
-						*dst++ = v16 >> 8;
-						*dst++ = v16 & 0xff;
-					}
-					value = *(src2++);
-					if (value == 0x80) {
-						*dst++ = *src2++;
-						*dst++ = *src2++;
-					} else {
-						int16_t v16 = (int8_t)value << v1;
-						*dst++ = v16 >> 8;
-						*dst++ = v16 & 0xff;
-					}
-				} while (--count);
-
-				// queue audio block
-				// this function will take "tb2" pointer and free it when its done.
-				(void)rt->queue_audio(rt, tb2, dst - tb2);
-				blocksz -= len;
-				src += len;
-				rt->iactpos = 0;
-			}
-		} else {
-			if (rt->iactpos == 0 && blocksz > 1) {
-				*iactbuf = *src++;
-				rt->iactpos++;
-				blocksz--;
-			}
-			*(iactbuf + rt->iactpos) = *src++;
-			blocksz--;
-			rt->iactpos++;
-		}
+	if (v[0] != 8 && v[1] != 46 && v[2] != 0 && v[3] != 0) {
+		ret = 44;
+		goto out;
 	}
-	free(tmpbuf);
 
+	inbuf = malloc(datasz);
+	if (!inbuf) {
+		ret = 41;
+		goto out;
+	}
+	if (readX(rt, inbuf, datasz)) {
+		ret = 42;
+		goto out1;
+	}
+
+	ret = 0;
+	decompress_iact(rt, outbuf, inbuf, datasz);
+out1:
+	free(inbuf);
+out:
 	san_read_unused(rt);
-
-	return 0;
+	return ret;
 }
 
 // subtitles
@@ -829,7 +843,7 @@ static int handle_FRME(struct sanrt *rt, uint32_t size)
 				tmp = rt->buf1;
 				rt->buf1 = rt->buf2;
 				rt->buf2 = tmp;
-		}
+			}
 			tmp = rt->buf2;
 			rt->buf2 = rt->buf0;
 			rt->buf0 = tmp;
@@ -842,6 +856,7 @@ static int handle_FRME(struct sanrt *rt, uint32_t size)
 
 		rt->to_store = 0;
 		rt->currframe++;
+		rt->rotate = 0;
 	}
 
 	return ret;
