@@ -32,11 +32,10 @@ static int queue_audio(struct sanrt *rt, unsigned char *adata, uint32_t size)
 	int ret;
 
 	ret = SDL_QueueAudio(p->aud, adata, size);
-	free(adata);
 
-	printf("AUDIO: %p : %u at %u Hz  fid %u %d\n", adata, size, rt->samplerate, fid, ret);
-
-	return 0;
+	//printf("AUDIO: %p : %u at %u Hz  fid %u %d\n", adata, size, rt->samplerate, fid, ret);
+	
+	return ret;
 }
 
 static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size)
@@ -49,7 +48,7 @@ static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size)
 	SDL_Rect sr, dr;
 	int ret;
 
-	printf("VIDEO: %p %u %ux%x fid %u\n", vdata, size, rt->w, rt->h, fid);
+	//printf("VIDEO: %p %u %ux%x fid %u\n", vdata, size, rt->w, rt->h, fid);
 
 	sr.x = sr.y = 0;
 	sr.w = rt->w;
@@ -87,16 +86,13 @@ static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size)
 	return 0;
 }
 
-static int audiocb(void)
-{
-
-}
-
 static int init_sdl_vid(struct sdlpriv *p)
 {
 	int ret = SDL_Init(SDL_INIT_TIMER | SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_EVENTS);
 	if (ret)
 		return 81;
+
+	SDL_SetHint(SDL_HINT_APP_NAME, "SAN Player");
 	SDL_Window *win = SDL_CreateWindow("SAN Player",
 					   SDL_WINDOWPOS_CENTERED,
 					   SDL_WINDOWPOS_CENTERED,
@@ -236,7 +232,7 @@ int main(int a, char **argv)
 
 	// frame pacing
 	ts.tv_sec = 0;
-	ts.tv_nsec = 1000000000 / san->framerate;
+	ts.tv_nsec = 999999998 / san->framerate;
 
 	while (running) {
 		while (0 != SDL_PollEvent(&e) && running) {
