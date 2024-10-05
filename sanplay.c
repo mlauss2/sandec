@@ -232,7 +232,7 @@ int main(int a, char **argv)
 
 	// frame pacing
 	ts.tv_sec = 0;
-	ts.tv_nsec = 999999998 / san->framerate;
+	ts.tv_nsec = 900000000 / san->framerate;
 
 	while (running) {
 		while (0 != SDL_PollEvent(&e) && running) {
@@ -240,26 +240,28 @@ int main(int a, char **argv)
 				running = 0;
 		}
 
-		if (!paused) {
+		if (!paused && running) {
 			if (!parserdone) {
 				ret = san_one_frame(san);
-				if (ret	== 500)
-					parserdone = 1;
-				else if (ret != 0)
-					running = 0;
+				if (ret == 0)
+					nanosleep(&ts, NULL);
+				else {
+					printf("ret %d at %d\n", ret, san->currframe);
+					if (ret < 0)
+						parserdone = 1;
+					else
+						running = 0;
+				}
+
 			}
-			if (!SDL_GetQueuedAudioSize(sdl.aud))
+			if (parserdone && !SDL_GetQueuedAudioSize(sdl.aud))
 				running = 0;
 		}
-		nanosleep(&ts, NULL);
 	}
 
 
-	if (ret != 500) {
-		printf("sanloop exited with error %d\n", ret);
-	} else {
-		printf("sanloop exit OK\n");
-	}
+
+	printf("sanloop exited with code %d, played %d FRMEs\n", ret, san->currframe);
 
 	free(san);
 out1:
