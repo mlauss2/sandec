@@ -20,38 +20,73 @@ struct sdlpriv {
 	SDL_Window *win;
 	SDL_AudioDeviceID aud;
 	SDL_Color col[256];
-	void *ptr1;
-	void *ptr2;
+
+	uint32_t abufsize;
+	uint32_t abufptr;
+	unsigned char *abuf;
+
+	uint16_t w;
+	uint16_t h;
+	uint32_t vbufsize;
+	unsigned char *vbuf;
+	uint32_t pal[256];
 };
 
+// this can be called multiple times per "san_one_frame()", so buffer needs
+// to be dynamically expanded.
 static int queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
 	int ret;
 
-	ret = SDL_QueueAudio(p->aud, adata, size);
+	while ((p->abufptr + size) > p->abufsize) {
+		uint32_t newsize = p->abufsize + 16384;
+		p->abuf = realloc(p->abuf, newsize);
+		if (!p->abuf)
+			return 1010;
+		p->abufsize = newsize;
+	}
+	memcpy(p->abuf + p->abufptr, adata, size);
+	p->abufptr += size;
 
-	//printf("AUDIO: %p : %u at %u Hz  fid %u %d\n", adata, size, rt->samplerate, fid, ret);
-	
-	return ret;
+	return 0;
 }
 
+// this is called once per "san_one_frame()"
 static int queue_video(void *avctx, unsigned char *vdata, uint32_t size, uint16_t w, uint16_t h, uint32_t *imgpal)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
+
+	//printf("VIDEO: %p %u %ux%x fid %u\n", vdata, size, rt->w, rt->h, fid);
+	if (size > p->vbufsize) {
+		p->vbuf = realloc(p->vbuf, size);
+		if (!p->vbuf)
+			return 1011;
+		p->vbufsize = size;
+	}
+	memcpy(p->vbuf, vdata, size);
+	if (imgpal) {
+		memcpy(p->pal, imgpal, 256 * 4);
+	}
+	p->w = w;
+	p->h = h;
+
+	return 0;
+}
+
+static int render_frame(struct sdlpriv *p)
+{
 	SDL_Surface *sur;
 	SDL_Texture *tex;
 	SDL_Palette *pal;
 	SDL_Rect sr, dr;
 	int ret;
 
-	//printf("VIDEO: %p %u %ux%x fid %u\n", vdata, size, rt->w, rt->h, fid);
-
 	sr.x = sr.y = 0;
-	sr.w = w;
-	sr.h = h;
+	sr.w = p->w;
+	sr.h = p->h;
 
-	sur = SDL_CreateRGBSurfaceWithFormatFrom(vdata, w, h, 8, w, SDL_PIXELFORMAT_INDEX8);
+	sur = SDL_CreateRGBSurfaceWithFormatFrom(p->vbuf, p->w, p->h, 8, p->w, SDL_PIXELFORMAT_INDEX8);
 	if (!sur) {
 		printf("ERR: %s\n", SDL_GetError());
 		return 1001;
@@ -60,7 +95,7 @@ static int queue_video(void *avctx, unsigned char *vdata, uint32_t size, uint16_
 	pal = SDL_AllocPalette(256);
 	if (!pal)
 		return 1005;
-	memcpy(pal->colors, imgpal, 256 * sizeof(SDL_Color));
+	memcpy(pal->colors, p->pal, 256 * sizeof(SDL_Color));
 	ret = SDL_SetSurfacePalette(sur, pal);
 	if (ret) {
 		SDL_FreeSurface(sur);
@@ -77,6 +112,9 @@ static int queue_video(void *avctx, unsigned char *vdata, uint32_t size, uint16_
 		return 1004;
 	}
 	SDL_RenderPresent(p->ren);
+	SDL_QueueAudio(p->aud, p->abuf, p->abufptr);
+	p->abufptr = 0;
+
 	SDL_DestroyTexture(tex);
 	SDL_FreeSurface(sur);
 
@@ -203,6 +241,7 @@ int main(int a, char **argv)
 		goto out;
 	}
 
+	memset(&sdl, 0, sizeof(sdl));
 	ret = init_sdl(&sdl);
 	if (ret)
 		goto out;
@@ -241,9 +280,10 @@ int main(int a, char **argv)
 		if (!paused && running) {
 			if (!parserdone) {
 				ret = san_one_frame(sanctx);
-				if (ret == 0)
+				if (ret == 0) {
+					ret = render_frame(&sdl);
 					nanosleep(&ts, NULL);
-				else {
+				} else {
 					printf("ret %d at %d\n", ret, san_get_currframe(sanctx));
 					if (ret < 0)
 						parserdone = 1;
@@ -257,7 +297,8 @@ int main(int a, char **argv)
 		}
 	}
 
-
+	free(sdl.abuf);
+	free(sdl.vbuf);
 
 	printf("sanloop exited with code %d, played %d FRMEs\n", ret, san_get_currframe(sanctx));
 
