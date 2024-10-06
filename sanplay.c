@@ -16,7 +16,6 @@
 #include <SDL2/SDL_audio.h>
 
 struct sdlpriv {
-	struct sanrt *san;
 	SDL_Renderer *ren;
 	SDL_Window *win;
 	SDL_AudioDeviceID aud;
@@ -25,10 +24,9 @@ struct sdlpriv {
 	void *ptr2;
 };
 
-static int queue_audio(struct sanrt *rt, unsigned char *adata, uint32_t size)
+static int queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 {
-	struct sdlpriv *p = rt->userdata;
-	uint32_t fid = rt->currframe;
+	struct sdlpriv *p = (struct sdlpriv *)avctx;
 	int ret;
 
 	ret = SDL_QueueAudio(p->aud, adata, size);
@@ -38,10 +36,9 @@ static int queue_audio(struct sanrt *rt, unsigned char *adata, uint32_t size)
 	return ret;
 }
 
-static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size)
+static int queue_video(void *avctx, unsigned char *vdata, uint32_t size, uint16_t w, uint16_t h, uint32_t *imgpal)
 {
-	struct sdlpriv *p = rt->userdata;
-	uint32_t fid = rt->currframe;
+	struct sdlpriv *p = (struct sdlpriv *)avctx;
 	SDL_Surface *sur;
 	SDL_Texture *tex;
 	SDL_Palette *pal;
@@ -51,10 +48,10 @@ static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size)
 	//printf("VIDEO: %p %u %ux%x fid %u\n", vdata, size, rt->w, rt->h, fid);
 
 	sr.x = sr.y = 0;
-	sr.w = rt->w;
-	sr.h = rt->h;
+	sr.w = w;
+	sr.h = h;
 
-	sur = SDL_CreateRGBSurfaceWithFormatFrom(vdata, rt->w, rt->h, 8, rt->w, SDL_PIXELFORMAT_INDEX8);
+	sur = SDL_CreateRGBSurfaceWithFormatFrom(vdata, w, h, 8, w, SDL_PIXELFORMAT_INDEX8);
 	if (!sur) {
 		printf("ERR: %s\n", SDL_GetError());
 		return 1001;
@@ -63,7 +60,7 @@ static int queue_video(struct sanrt *rt, unsigned char *vdata, uint32_t size)
 	pal = SDL_AllocPalette(256);
 	if (!pal)
 		return 1005;
-	memcpy(pal->colors, rt->palette, 256 * sizeof(SDL_Color));
+	memcpy(pal->colors, imgpal, 256 * sizeof(SDL_Color));
 	ret = SDL_SetSurfacePalette(sur, pal);
 	if (ret) {
 		SDL_FreeSurface(sur);
@@ -184,8 +181,8 @@ int main(int a, char **argv)
 	int running, paused, parserdone;
 	struct timespec ts;
 	struct sdlpriv sdl;
-	struct sanrt *san;
 	struct sanio sio;
+	void *sanctx;
 	SDL_Event e;
 	int h, ret;
 
@@ -200,31 +197,32 @@ int main(int a, char **argv)
 		return 2;
 	}
 
-	ret = san_init(&san);
+	ret = san_init(&sanctx);
 	if (ret) {
 		printf("SAN init failed: %d\n", ret);
 		goto out;
 	}
 
-	sio.ctx = &h;
-	sio.read = sio_read;
+	ret = init_sdl(&sdl);
+	if (ret)
+		goto out;
 
-	ret = san_open(san, &sio);
+	sio.ioctx = &h;
+	sio.read = sio_read;
+	sio.avctx = &sdl;
+	sio.queue_audio = queue_audio;
+	sio.queue_video = queue_video;
+
+	ret = san_open(sanctx, &sio);
 	if (ret) {
 		printf("SAN invalid: %d\n", ret);
 		goto out;
 	}
 
-	printf("SAN ver %u fps %u sr %u FRMEs %u\n", san->version, san->framerate,
-	       san->samplerate, san->FRMEcnt);
+	printf("SAN ver %u fps %u sr %u FRMEs %u\n", san_get_version(sanctx),
+	       san_get_framerate(sanctx), san_get_samplerate(sanctx), san_get_framecount(sanctx));
 
-	ret = init_sdl(&sdl);
-	if (ret)
-		goto out;
 
-	san->userdata = &sdl;
-	san->queue_audio = queue_audio;
-	san->queue_video = queue_video;
 
 	running = 1;
 	paused = 0;
@@ -232,7 +230,7 @@ int main(int a, char **argv)
 
 	// frame pacing
 	ts.tv_sec = 0;
-	ts.tv_nsec = 900000000 / san->framerate;
+	ts.tv_nsec = 970000000 / san_get_framerate(sanctx);
 
 	while (running) {
 		while (0 != SDL_PollEvent(&e) && running) {
@@ -242,11 +240,11 @@ int main(int a, char **argv)
 
 		if (!paused && running) {
 			if (!parserdone) {
-				ret = san_one_frame(san);
+				ret = san_one_frame(sanctx);
 				if (ret == 0)
 					nanosleep(&ts, NULL);
 				else {
-					printf("ret %d at %d\n", ret, san->currframe);
+					printf("ret %d at %d\n", ret, san_get_currframe(sanctx));
 					if (ret < 0)
 						parserdone = 1;
 					else
@@ -261,9 +259,9 @@ int main(int a, char **argv)
 
 
 
-	printf("sanloop exited with code %d, played %d FRMEs\n", ret, san->currframe);
+	printf("sanloop exited with code %d, played %d FRMEs\n", ret, san_get_currframe(sanctx));
 
-	free(san);
+	free(sanctx);
 out1:
 	exit_sdl(&sdl);
 out:

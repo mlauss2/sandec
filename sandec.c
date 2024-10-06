@@ -32,6 +32,40 @@
 #define XPAL	0x5850414c
 
 
+// internal context
+struct sanrt {
+	struct sanio *io;
+	int32_t _bsz;		// current block size
+	uint32_t totalsize;
+	uint32_t currframe;
+	uint32_t framerate;
+	uint32_t maxframe;
+	uint16_t FRMEcnt;
+	uint16_t w;  // frame width/pitch/stride
+	uint16_t h;  // frame height
+	uint16_t version;
+
+	// codec47 stuff
+	int8_t glyph4x4[NGLYPHS][16];
+	int8_t glyph8x8[NGLYPHS][64];
+	unsigned long fbsize;	// size of the buffers below
+	unsigned char *buf0;
+	unsigned char *buf1;
+	unsigned char *buf2;
+	unsigned char *buf3;	// aux buffer for "STOR" and "FTCH"
+	unsigned char *buf;	// baseptr
+	uint32_t lastseq;
+	uint32_t rotate;
+	int to_store;
+
+	// iact block stuff
+	uint32_t samplerate;
+	uint32_t iactpos;
+	uint8_t iactbuf[4096];	// for IACT chunks
+	uint32_t palette[256];	// ABGR
+	uint16_t deltapal[768];	// for XPAL chunks
+};
+
 
 /******************************************************************************
  * SAN Codec47 Glyph setup, taken from ffmpeg
@@ -234,7 +268,7 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 
 static inline int readX(struct sanrt *rt, void *dst, uint32_t sz)
 {
-	int ret = rt->io->read(rt->io->ctx, dst, sz);
+	int ret = rt->io->read(rt->io->ioctx, dst, sz);
 	if (ret > 0) {
 		rt->_bsz -= ret;
 	}
@@ -243,7 +277,7 @@ static inline int readX(struct sanrt *rt, void *dst, uint32_t sz)
 
 static inline int read8(struct sanrt *rt, uint8_t *out)
 {
-	int ret = rt->io->read(rt->io->ctx, out, 1);
+	int ret = rt->io->read(rt->io->ioctx, out, 1);
 	if (ret > 0)
 		rt->_bsz -= 1;
 	return ret > 0 ? 0 : 1;
@@ -251,7 +285,7 @@ static inline int read8(struct sanrt *rt, uint8_t *out)
 
 static inline int readLE16(struct sanrt *rt, uint16_t *out)
 {
-	int ret = rt->io->read(rt->io->ctx, out, 2);
+	int ret = rt->io->read(rt->io->ioctx, out, 2);
 	if (ret > 0) {
 		*out = le16_to_cpu(*out);
 		rt->_bsz -= 2;
@@ -261,7 +295,7 @@ static inline int readLE16(struct sanrt *rt, uint16_t *out)
 
 static inline int readLE32(struct sanrt *rt, uint32_t *out)
 {
-	int ret = rt->io->read(rt->io->ctx, out, 4);
+	int ret = rt->io->read(rt->io->ioctx, out, 4);
 	if (ret > 0) {
 		*out = le32_to_cpu(*out);
 		rt->_bsz -= 4;
@@ -271,7 +305,7 @@ static inline int readLE32(struct sanrt *rt, uint32_t *out)
 
 static inline int readBE16(struct sanrt *rt, uint16_t *out)
 {
-	int ret = rt->io->read(rt->io->ctx, out, 2);
+	int ret = rt->io->read(rt->io->ioctx, out, 2);
 	if (ret > 0) {
 		*out = be16_to_cpu(*out);
 		rt->_bsz -= 2;
@@ -281,7 +315,7 @@ static inline int readBE16(struct sanrt *rt, uint16_t *out)
 
 static inline int readBE32(struct sanrt *rt, uint32_t *out)
 {
-	int ret = rt->io->read(rt->io->ctx, out, 4);
+	int ret = rt->io->read(rt->io->ioctx, out, 4);
 	if (ret > 0) {
 		*out = be32_to_cpu(*out);
 		rt->_bsz -= 4;
@@ -668,13 +702,13 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 	_READ(LE16, &p[1], 1, rt);	// flags
 	_READ(LE16, &p[2], 1, rt);	// unk
 	_READ(LE16, &p[3], 1, rt);	// uid
-	_READ(LE16, &p[4], 1, rt);	// trkid
-	_READ(LE16, &p[5], 1, rt);	// index
-	_READ(LE16, &p[6], 1, rt);	// num frames
-	_READ(LE32, &vv, 1, rt);	// size2
+	_READ(LE16, &p[4], 1, rt);	// track
+	_READ(LE16, &p[5], 1, rt);	// current frame in track
+	_READ(LE16, &p[6], 1, rt);	// total frames in track
+	_READ(LE32, &vv, 1, rt);	// data left until the end.
 
-//	printf("IACT sz %u c %u f %u u1 %u ui %u tid %u frms %u sz2 %u\n",
-//	       size, p[0], p[1], p[2], p[3], p[4], p[5], p[6], vv);
+//	printf("IACT sz %u c %u f %u u1 %u ui %u tid %u idx %u frms %u sz2 %u iactpos %d\n",
+//	       size, p[0], p[1], p[2], p[3], p[4], p[5], p[6], vv, rt->iactpos);
 
 	if (p[0] != 8 || p[1] != 46 || p[2] != 0 || p[3] != 0) {
 		ret = 44;
@@ -738,7 +772,7 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 
 					}
 				} while (--count);
-				ret = rt->queue_audio(rt, outbuf, 4096);
+				ret = rt->io->queue_audio(rt->io->avctx, outbuf, 4096);
 				if (ret)
 					goto out1;
 				datasz -= len;
@@ -751,8 +785,8 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 				rt->iactpos = 1;
 				datasz--;
 			}
-			*(rt->iactbuf + 1) = *src++;
-			rt->iactpos = 2;
+			*(rt->iactbuf + rt->iactpos) = *src++;
+			rt->iactpos++;
 			datasz--;
 		}
 	}
@@ -840,7 +874,7 @@ static int handle_FRME(struct sanrt *rt, uint32_t size)
 		}
 
 		// copy rt->buf0 to output
-		ret = rt->queue_video(rt, rt->buf0, rt->w * rt->h * 1);
+		ret = rt->io->queue_video(rt->io->avctx, rt->buf0, rt->w * rt->h * 1, rt->w, rt->h, rt->palette);
 
 		if (rt->rotate) {
 			unsigned char *tmp;
@@ -910,8 +944,9 @@ static int handle_AHDR(struct sanrt *rt, uint32_t size)
 	return ret;
 }
 
-int san_one_frame(struct sanrt *rt)
+int san_one_frame(void *sanctx)
 {
+	struct sanrt *rt = (struct sanrt *)sanctx;
 	uint32_t cid, csz;
 	int ret;
 
@@ -930,7 +965,7 @@ int san_one_frame(struct sanrt *rt)
 	return ret;
 }
 
-int san_init(struct sanrt **out)
+int san_init(void **ctxout)
 {
 	struct sanrt *rt;
 
@@ -941,13 +976,14 @@ int san_init(struct sanrt **out)
 
 	c47_make_glyphs(rt->glyph4x4[0], glyph4_x, glyph4_y, 4);
 	c47_make_glyphs(rt->glyph8x8[0], glyph8_x, glyph8_y, 8);
-	*out = rt;
+	*ctxout = rt;
 
 	return 0;
 }
 
-int san_open(struct sanrt *rt, struct sanio *io)
+int san_open(void *ctx, struct sanio *io)
 {
+	struct sanrt *rt = (struct sanrt *)ctx;
 	int ret, ok;
 	uint32_t cid;
 	uint32_t csz;
@@ -981,4 +1017,34 @@ int san_open(struct sanrt *rt, struct sanio *io)
 		return ret;
 
 	return handle_AHDR(rt, csz);
+}
+
+int san_get_framerate(void *sanctx)
+{
+	struct sanrt *rt = (struct sanrt *)sanctx;
+	return rt ? rt->framerate : -1;
+}
+
+int san_get_samplerate(void *sanctx)
+{
+	struct sanrt *rt = (struct sanrt *)sanctx;
+	return rt ? rt->samplerate : -1;
+}
+
+int san_get_framecount(void *sanctx)
+{
+	struct sanrt *rt = (struct sanrt *)sanctx;
+	return rt ? rt->FRMEcnt : -1;
+}
+
+int san_get_version(void *sanctx)
+{
+	struct sanrt *rt = (struct sanrt *)sanctx;
+	return rt ? rt->version : -1;
+}
+
+int san_get_currframe(void *sanctx)
+{
+	struct sanrt *rt = (struct sanrt *)sanctx;
+	return rt ? rt->currframe : -1;
 }
