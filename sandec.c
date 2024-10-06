@@ -603,9 +603,16 @@ static int handle_NPAL(struct sanrt *rt, uint32_t size)
 	return 0;
 }
 
+static inline uint8_t _u8clip(int a)
+{
+	if (a > 255) return 255;
+	else if (a < 0) return 0;
+	else return a;
+}
+
 static int handle_XPAL(struct sanrt *rt, uint32_t size)
 {
-	uint32_t sz2 = size, t32;
+	uint32_t t32;
 	uint8_t t1, t2[3];
 	uint16_t t16;
 	int i, j;
@@ -614,28 +621,23 @@ static int handle_XPAL(struct sanrt *rt, uint32_t size)
 	if (size == 4 || size == 6) {
 		for (i = 0; i < 256; i++) {
 			for (j = 0; j < 3; j++) {
-				t1 = (rt->palette[i] >> (16 - (j * 8))) & 0xff;
-				t16 = t1;
-				t2[j] = ((t16 * 129) + rt->deltapal[(i * 3) + j]) >> 7; // clip pal ?
+				int t1 = (rt->palette[i] >> (16 - (j * 8))) & 0xff;
+				t2[j] = _u8clip(((t1 * 129) + rt->deltapal[(i * 3) + j]) >> 7);
 			}
-			rt->palette[i] = 0xff | (t2[0] << 16) | (t2[1] << 8) | t2 [2];
+			rt->palette[i] = 0xff<<24 | (t2[0] << 16) | (t2[1] << 8) | t2 [2];
 		}
-		sz2 = size;
 	} else {
 		_READ(LE32, &t32, 1, rt);
 		for (i = 0; i < 768; i++) {
-			_READ(LE16, &t16, 3, rt);
-			rt->deltapal[i] = t16;
+			_READ(LE16, &rt->deltapal[i], 3, rt);
 		}
-		sz2 -= 768 * 2 + 4;
-		if (size >= 3844) {
+		if (size >= (768 * 5 + 4)) {
 			for (i = 0; i < 256; i++) {
 				_READ(8, &t2[0], 1, rt);
 				_READ(8, &t2[1], 1, rt);
 				_READ(8, &t2[2], 1, rt);
-				rt->palette[i] = 0xff000000 | t2[0] << 16 | t2[1] << 8 | t2[2];
+				rt->palette[i] = 0xff<<24 | t2[0] << 16 | t2[1] << 8 | t2[2];
 			}
-			sz2 -= 256 * 3;
 		} else {
 			memset(rt->palette, 0, 256 * 4);
 		}
