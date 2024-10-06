@@ -648,73 +648,13 @@ static int handle_XPAL(struct sanrt *rt, uint32_t size)
 	return 0;
 }
 
-static void decompress_iact(struct sanrt *rt, uint8_t *output_data, uint8_t *d_src, int bsize)
-{
-	uint8_t value;
-	uint8_t *_IACToutput = rt->iactbuf;
-
-	while (bsize > 0) {
-		if (rt->iactpos >= 2) {
-			int32_t len = be16_to_cpu(*(uint16_t*)_IACToutput) + 2;
-			len -= rt->iactpos;
-			if (len > bsize) {
-				memcpy(_IACToutput + rt->iactpos, d_src, bsize);
-				rt->iactpos += bsize;
-				bsize = 0;
-			} else {
-				memcpy(_IACToutput + rt->iactpos, d_src, len);
-				unsigned char *dst = output_data;
-				unsigned char *d_src2 = _IACToutput;
-				d_src2 += 2;
-				int count = 1024;
-				unsigned char variable1 = *d_src2++;
-				unsigned char variable2 = variable1 / 16;
-				variable1 &= 0x0f;
-				do {
-					value = *d_src2++;
-					if (value == 0x80) {
-						*dst++ = *d_src2++;
-						*dst++ = *d_src2++;
-					} else {
-						short val = (char)value << variable2;
-						*dst++ = val >> 8;
-						*dst++ = (unsigned char)(val);
-					}
-					value = *d_src2++;
-					if (value == 0x80) {
-						*dst++ = *d_src2++;
-						*dst++ = *d_src2++;
-					} else {
-						short val = (char)value << variable1;
-						*dst++ = val >> 8;
-						*dst++ = (unsigned char)(val);
-					}
-				} while (--count);
-				// XXX: why do I have this 3 byte skew here?!
-				(void)rt->queue_audio(rt, output_data+3, 4096-4);
-				bsize -= len;
-				d_src += len;
-				rt->iactpos = 0;
-			}
-		} else {
-			if (bsize > 1 && rt->iactpos == 0) {
-				*(_IACToutput + 0) = *d_src++;
-				rt->iactpos = 1;
-				bsize--;
-			}
-			*(_IACToutput + rt->iactpos) = *d_src++;
-			rt->iactpos++;
-			bsize--;
-		}
-	}
-}
-
 static int handle_IACT(struct sanrt *rt, uint32_t size)
 {
-	int ret;
-	uint16_t v[8];
-	uint32_t datasz, vv;
+	uint8_t v1, v2, v3, v4, *dst, *src, *src2;
 	unsigned char *inbuf, outbuf[4096];
+	int16_t len, v16, p[8];
+	uint32_t datasz, vv;
+	int count, ret;
 
 	datasz = size - 18;
 
@@ -724,19 +664,19 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 		size += 1;
 
 	rt->_bsz = size;		// init byte tracking
-	_READ(LE16, &v[0], 1, rt);	// code
-	_READ(LE16, &v[1], 1, rt);	// flags
-	_READ(LE16, &v[2], 1, rt);	// unk
-	_READ(LE16, &v[3], 1, rt);	// uid
-	_READ(LE16, &v[4], 1, rt);	// trkid
-	_READ(LE16, &v[5], 1, rt);	// index
-	_READ(LE16, &v[6], 1, rt);	// num frames
+	_READ(LE16, &p[0], 1, rt);	// code
+	_READ(LE16, &p[1], 1, rt);	// flags
+	_READ(LE16, &p[2], 1, rt);	// unk
+	_READ(LE16, &p[3], 1, rt);	// uid
+	_READ(LE16, &p[4], 1, rt);	// trkid
+	_READ(LE16, &p[5], 1, rt);	// index
+	_READ(LE16, &p[6], 1, rt);	// num frames
 	_READ(LE32, &vv, 1, rt);	// size2
 
 //	printf("IACT sz %u c %u f %u u1 %u ui %u tid %u frms %u sz2 %u\n",
-//	       size, v[0], v[1], v[2], v[3], v[4], v[5], v[6], vv);
+//	       size, p[0], p[1], p[2], p[3], p[4], p[5], p[6], vv);
 
-	if (v[0] != 8 || v[1] != 46 || v[2] != 0 || v[3] != 0) {
+	if (p[0] != 8 || p[1] != 46 || p[2] != 0 || p[3] != 0) {
 		ret = 44;
 		goto out;
 	}
@@ -752,7 +692,70 @@ static int handle_IACT(struct sanrt *rt, uint32_t size)
 	}
 
 	ret = 0;
-	decompress_iact(rt, outbuf, inbuf, datasz);
+	src = inbuf;
+
+	/* algorithm taken from ScummVM/engines/scumm/smush/smush_player.cpp.
+	 * I only changed the output generator for LSB samples (while the source
+	 * and ScummVM output MSB samples).
+	 */
+	while (datasz > 0) {
+		if (rt->iactpos >= 2) {
+			len = be16_to_cpu(*(uint16_t *)rt->iactbuf) + 2 - rt->iactpos;
+			if (len > datasz) {  // continued in next IACT chunk.
+				memcpy(rt->iactbuf + rt->iactpos, src, datasz);
+				rt->iactpos += datasz;
+				datasz = 0;
+			} else {
+				memcpy(rt->iactbuf + rt->iactpos, src, len);
+				dst = outbuf;
+				src2 = rt->iactbuf + 2;
+				v1 = *src2++;
+				v2 = v1 >> 4;
+				v1 &= 0x0f;
+				count = 1024;
+				do {
+					v3 = *src2++;
+					if (v3 == 0x80) {
+						// endian-swap BE16 samples
+						v4 = *src2++;
+						*dst++ = *src2++;
+						*dst++ = v4;
+					} else {
+						v16 = (int8_t)v3 << v2;
+						*dst++ = (int8_t)(v16) & 0xff;
+						*dst++ = (int8_t)(v16 >> 8) & 0xff;
+					}
+					v3 = *src2++;
+					if (v3 == 0x80) {
+						// endian-swap BE16 samples
+						v4 = *src2++;
+						*dst++ = *src2++;
+						*dst++ = v4;
+					} else {
+						v16 = (int8_t)v3 << v1;
+						*dst++ = (int8_t)(v16) & 0xff;
+						*dst++ = (int8_t)(v16 >> 8) & 0xff;
+
+					}
+				} while (--count);
+				ret = rt->queue_audio(rt, outbuf, 4096);
+				if (ret)
+					goto out1;
+				datasz -= len;
+				src += len;
+				rt->iactpos = 0;
+			}
+		} else {
+			if (datasz > 1 && rt->iactpos == 0) {
+				*rt->iactbuf = *src++;
+				rt->iactpos = 1;
+				datasz--;
+			}
+			*(rt->iactbuf + 1) = *src++;
+			rt->iactpos = 2;
+			datasz--;
+		}
+	}
 out1:
 	free(inbuf);
 out:
