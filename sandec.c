@@ -543,21 +543,24 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 	uint16_t seq;
 	int ret;
 
-	// read header
-	if (readX(ctx, headtable, 26))
+	/* read the whole header; start at offset 2 to align the 32bit read
+	 * at table offset 14 to a 32bit boundary.  The codec47_block() code
+	 * accesses this table with byte granularity so we're good.
+	 */
+	if (readX(ctx, headtable + 2, 26))
 		return 1;
 
-	seq =    le16_to_cpu(*(uint16_t *)(headtable + 0));
-	comp =   headtable[2];
-	newrot = headtable[3];
-	skip =   headtable[4];
-	decsize = le32_to_cpu(*(uint32_t *)(headtable + 14)); // bah, unaligned access
+	seq =    le16_to_cpu(*(uint16_t *)(headtable + 2));
+	comp =   headtable[4];
+	newrot = headtable[5];
+	skip =   headtable[6];
+	decsize = le32_to_cpu(*(uint32_t *)(headtable + 16));
 
 	ret = 0;
 	if (seq == 0) {
 		ctx->rt.lastseq = -1;
-		memset(ctx->rt.buf1, headtable[12], ctx->rt.fbsize);
-		memset(ctx->rt.buf2, headtable[13], ctx->rt.fbsize);
+		memset(ctx->rt.buf1, headtable[14], ctx->rt.fbsize);
+		memset(ctx->rt.buf2, headtable[15], ctx->rt.fbsize);
 	}
 	if (skip & 1) {
 		readX(ctx, NULL, 0x8080);
@@ -567,7 +570,7 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 	switch (comp) {
 	case 0:	ret = readX(ctx, dst, w * h); break;
 	case 1: ret = codec47_comp1(ctx, dst, w, h); break;
-	case 2: ret = codec47_comp2(ctx, dst, w, h, seq, headtable); break;
+	case 2: ret = codec47_comp2(ctx, dst, w, h, seq, headtable + 2); break;
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;
 	case 4: memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize); break;
 	case 5: ret = codec47_comp5(ctx, dst, decsize); break;
@@ -747,7 +750,7 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size)
 {
 	uint8_t v1, v2, v3, v4, *dst, *src, *src2, *inbuf, outbuf[4096];
 	int16_t len, v16;
-	uint16_t p[9];
+	uint16_t p[10];
 	uint32_t datasz;
 	int count, ret;
 
@@ -759,23 +762,17 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size)
 		size += 1;
 
 	ctx->_bsz = size;		// init byte tracking
-	if (readX(ctx, p, 18))
+	if (readX(ctx, p + 1, 18))	/* +2bytes to align the 32bit read for vv */
 		return 40;
 
-#if 0
-	_READ(LE16, &p[0], 1, ctx);	// code
-	_READ(LE16, &p[1], 1, ctx);	// flags
-	_READ(LE16, &p[2], 1, ctx);	// unk
-	_READ(LE16, &p[3], 1, ctx);	// uid
-	_READ(LE16, &p[4], 1, ctx);	// track
-	_READ(LE16, &p[5], 1, ctx);	// current frame in track
-	_READ(LE16, &p[6], 1, ctx);	// total frames in track
-	_READ(LE32, &vv, 1, ctx);	// data left until the end of track.
+#ifdef DEBUG
+	uint32_t vv = *(uint32_t *)(&p[8]);
+	printf("IACT sz %u code %u flags %u unknown %u uid %u trkid %u frame %u"
+	       " maxframes %u data_left_in_track %u iactpos %d\n",
+	       size, p[1], p[2], p[3], p[4], p[5], p[6], p[7], vv, ctx->rt.iactpos);
 #endif
-//	printf("IACT sz %u code %u flags %u unknown %u uid %u trkid %u frame %u maxframes %u data_left_in_track %u iactpos %d\n",
-//	       size, p[0], p[1], p[2], p[3], p[4], p[5], p[6], vv, ctx->rt.iactpos);
 
-	if (p[0] != 8 || p[1] != 46 || p[2] != 0 || p[3] != 0) {
+	if (p[1] != 8 || p[2] != 46 || p[3] != 0 || p[4] != 0) {
 		ret = 44;
 		goto out;
 	}
