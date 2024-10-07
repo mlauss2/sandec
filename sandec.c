@@ -282,6 +282,9 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 						for (icol = point[0]; icol < side_length; icol++)
 							pglyph[icol + point[1] * side_length] = 1;
 					break;
+
+					case NO_DIR:
+					break;
 				}
 			}
 		}
@@ -418,7 +421,7 @@ static int codec47_comp1(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t 
 
 static int codec47_block(struct sanctx *ctx, uint8_t *dst, uint8_t *p1, uint8_t *p2, uint16_t w, uint8_t *headtbl, uint16_t size)
 {
-	uint8_t code, col[2], c, val;
+	uint8_t code, col[2], c;
 	uint16_t i, j;
 	int8_t *pglyph;
 
@@ -578,7 +581,7 @@ static int codec1(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, uin
 {
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
-	int ret, pos, i, j;
+	int pos, i, j;
 
 	dst = ctx->rt.buf0 + (top * w);
 
@@ -676,7 +679,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size)
 
 static int handle_NPAL(struct sanctx *ctx, uint32_t size)
 {
-	uint8_t tmpbuf[4];
 	int ret;
 
 	ctx->_bsz = size;		// init byte tracking
@@ -737,7 +739,8 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size)
 static int handle_IACT(struct sanctx *ctx, uint32_t size)
 {
 	uint8_t v1, v2, v3, v4, *dst, *src, *src2, *inbuf, outbuf[4096];
-	int16_t len, v16, p[8];
+	int16_t len, v16;
+	uint16_t p[7];
 	uint32_t datasz, vv;
 	int count, ret;
 
@@ -851,7 +854,6 @@ out:
 // subtitles
 static int handle_TRES(struct sanctx *ctx, uint32_t size)
 {
-	uint32_t v;
 	uint16_t px, py, l, t, w, h, f, strid;
 
 	ctx->_bsz = size;		// init byte tracking

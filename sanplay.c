@@ -37,7 +37,6 @@ struct sdlpriv {
 static int queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
-	int ret;
 
 	while ((p->abufptr + size) > p->abufsize) {
 		uint32_t newsize = p->abufsize + 16384;
@@ -57,7 +56,7 @@ static int queue_video(void *avctx, unsigned char *vdata, uint32_t size, uint16_
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
 
-	//printf("VIDEO: %p %u %ux%x fid %u\n", vdata, size, rt->w, rt->h, fid);
+	//printf("VIDEO: %p %u %ux%x \n", vdata, size, w, h);
 	if (size > p->vbufsize) {
 		p->vbuf = realloc(p->vbuf, size);
 		if (!p->vbuf)
@@ -79,7 +78,7 @@ static int render_frame(struct sdlpriv *p)
 	SDL_Surface *sur;
 	SDL_Texture *tex;
 	SDL_Palette *pal;
-	SDL_Rect sr, dr;
+	SDL_Rect sr;
 	int ret;
 
 	sr.x = sr.y = 0;
@@ -303,7 +302,6 @@ int main(int a, char **argv)
 	printf("sanloop exited with code %d, played %d FRMEs\n", ret, sandec_get_currframe(sanctx));
 
 	free(sanctx);
-out1:
 	exit_sdl(&sdl);
 out:
 	close(h);
