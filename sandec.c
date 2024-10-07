@@ -1,14 +1,16 @@
 /*
  * SAN ANIM file decoder for Outlaws ".SAN" video files.
- * Outlaws SAN files use SMUSH codecs 47, 1 and IACT 22.05kHz 16-bit stereo Audio.
+ * Outlaws SAN files use SMUSH codecs 1+47 and IACT 22.05kHz 16-bit stereo Audio.
  *
- * Clobbered together from FFmpeg/libavcodec sanm.c decoder and ScummVM
- *  SMUSH player code.
+ * Written in 2024 by Manuel Lauss <manuel.lauss@gmail.com>
+ *
+ * Codec algorithms (Video, Audio, Palette) liberally taken from FFmpeg and
+ * ScummVM:
+ * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob/HEAD:/libavcodec/sanm.c
+ * https://github.com/scummvm/scummvm/blob/master/engines/scumm/smush/smush_player.cpp
  */
 
-
 #include <byteswap.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "sandec.h"
@@ -332,26 +334,6 @@ static inline int readLE32(struct sanctx *ctx, uint32_t *out)
 	return ret > 0 ? 0 : 1;
 }
 
-static inline int readBE16(struct sanctx *ctx, uint16_t *out)
-{
-	int ret = ctx->io->read(ctx->io->ioctx, out, 2);
-	if (ret > 0) {
-		*out = be16_to_cpu(*out);
-		ctx->_bsz -= 2;
-	}
-	return ret > 0 ? 0 : 1;
-}
-
-static inline int readBE32(struct sanctx *ctx, uint32_t *out)
-{
-	int ret = ctx->io->read(ctx->io->ioctx, out, 4);
-	if (ret > 0) {
-		*out = be32_to_cpu(*out);
-		ctx->_bsz -= 4;
-	}
-	return ret > 0 ? 0 : 1;
-}
-
 // consume unused bytes in the stream (wrt. chunk size)
 static inline void san_read_unused(struct sanctx *ctx)
 {
@@ -550,17 +532,17 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 	if (readX(ctx, headtable + 2, 26))
 		return 1;
 
-	seq =    le16_to_cpu(*(uint16_t *)(headtable + 2));
-	comp =   headtable[4];
-	newrot = headtable[5];
-	skip =   headtable[6];
-	decsize = le32_to_cpu(*(uint32_t *)(headtable + 16));
+	seq =    le16_to_cpu(*(uint16_t *)(headtable + 2 + 0));
+	comp =   headtable[2 + 2];
+	newrot = headtable[2 + 3];
+	skip =   headtable[2 + 4];
+	decsize = le32_to_cpu(*(uint32_t *)(headtable + 2 + 14));
 
 	ret = 0;
 	if (seq == 0) {
 		ctx->rt.lastseq = -1;
-		memset(ctx->rt.buf1, headtable[14], ctx->rt.fbsize);
-		memset(ctx->rt.buf2, headtable[15], ctx->rt.fbsize);
+		memset(ctx->rt.buf1, headtable[2 + 12], ctx->rt.fbsize);
+		memset(ctx->rt.buf2, headtable[2 + 13], ctx->rt.fbsize);
 	}
 	if (skip & 1) {
 		readX(ctx, NULL, 0x8080);
@@ -718,7 +700,8 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size)
 	_READ(LE16, &dp, 83, ctx);	// command
 
 	if (dp == 256) {
-		_READ(LE16, &dp, 85, ctx);	// dummy
+		if (readX(ctx, &dp, 2))	// dummy
+			return 85;
 		i = 0;
 		while (i < 768) {
 			t32 = *pal;
@@ -764,14 +747,19 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size)
 	if (readX(ctx, p + 1, 18))	/* +2bytes to align the 32bit read for vv */
 		return 40;
 
-#ifdef DEBUG
+#if 0
 	uint32_t vv = *(uint32_t *)(&p[8]);
 	printf("IACT sz %u code %u flags %u unknown %u uid %u trkid %u frame %u"
-	       " maxframes %u data_left_in_track %u iactpos %d\n",
-	       size, p[1], p[2], p[3], p[4], p[5], p[6], p[7], vv, ctx->rt.iactpos);
+	       " maxframes %u data_left_in_track %u iactpos %d\n", size,
+	       le16_tp_cpu(p[1]), le16_tp_cpu(p[2]), le16_tp_cpu(p[3]),
+	       le16_tp_cpu(p[4]), le16_tp_cpu(p[5]), le16_tp_cpu(p[6]),
+	       le16_tp_cpu(p[7]), le32_tp_cpu(vv), ctx->rt.iactpos);
 #endif
 
-	if (p[1] != 8 || p[2] != 46 || p[3] != 0 || p[4] != 0) {
+	if (le16_to_cpu(p[1]) != 8  ||
+	    le16_to_cpu(p[2]) != 46 ||
+	    le16_to_cpu(p[3]) != 0  ||
+	    le16_to_cpu(p[4]) != 0) {
 		ret = 44;
 		goto out;
 	}
@@ -979,11 +967,11 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		return 1;		// too small
 
 	ctx->_bsz = size;		// init byte tracking
-	ret = readX(ctx, v16, 6);
+	ret = readX(ctx, v16, 3 * 2);
 	if (ret)
 		return 10;
-	rt->version = v16[0];
-	rt->FRMEcnt = v16[1];
+	rt->version = le16_to_cpu(v16[0]);
+	rt->FRMEcnt = le16_to_cpu(v16[1]);
 	/* unk16 */
 
 	ret = read_palette(ctx);
@@ -994,11 +982,11 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		ret = readX(ctx, v32, 5 * 4);
 		if (ret)
 			return 2;
-		rt->framerate =  v32[0];
-		rt->maxframe =   v32[1];
-		rt->samplerate = v32[2];
-		/* unk1 */
-		/* unk2 */
+		rt->framerate =  le32_to_cpu(v32[0]);
+		rt->maxframe =   le32_to_cpu(v32[1]);
+		rt->samplerate = le32_to_cpu(v32[2]);
+		/* unk32_1 */
+		/* unk32_2 */
 		ret = 0;
 	}
 
@@ -1025,7 +1013,7 @@ int sandec_decode_next_frame(void *sanctx)
 
 	switch (cid) {
 	case FRME: 	ret = handle_FRME(ctx, csz); break;
-	default:		ret = 108;
+	default:	ret = 108;
 	}
 
 	return ret;
