@@ -6,17 +6,35 @@
  *  SMUSH player code.
  */
 
-#include <memory.h>
-#include <stddef.h>
+
+#include <byteswap.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h>
-#include <unistd.h>
+#include <string.h>
 #include "sandec.h"
-#include "byteswap.h"
 
 #ifndef _max
 #define _max(a,b) ((a) > (b) ? (a) : (b))
+#endif
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+
+#define le32_to_cpu(x) (x)
+#define le16_to_cpu(x) (x)
+#define be32_to_cpu(x) bswap_32(x)
+#define be16_to_cpu(x) bswap_16(x)
+
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+
+#define be32_to_cpu(x)  (x)
+#define be16_to_cpu(x)  (x)
+#define le32_to_cpu(x)  bswap_32(x)
+#define le16_to_cpu(x)  bswap_16(x)
+
+#else
+
+#error "unknown endianness"
+
 #endif
 
 // chunk ids
