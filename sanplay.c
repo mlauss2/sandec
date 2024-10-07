@@ -235,7 +235,7 @@ int main(int a, char **argv)
 		return 2;
 	}
 
-	ret = san_init(&sanctx);
+	ret = sandec_init(&sanctx);
 	if (ret) {
 		printf("SAN init failed: %d\n", ret);
 		goto out;
@@ -252,15 +252,15 @@ int main(int a, char **argv)
 	sio.queue_audio = queue_audio;
 	sio.queue_video = queue_video;
 
-	ret = san_open(sanctx, &sio);
+	ret = sandec_open(sanctx, &sio);
 	if (ret) {
 		printf("SAN invalid: %d\n", ret);
 		goto out;
 	}
 
-	printf("SAN ver %u fps %u sr %u FRMEs %u\n", san_get_version(sanctx),
-	       san_get_framerate(sanctx), san_get_samplerate(sanctx), san_get_framecount(sanctx));
-
+	printf("SAN ver %u fps %u sr %u FRMEs %u\n", sandec_get_version(sanctx),
+	       sandec_get_framerate(sanctx), sandec_get_samplerate(sanctx),
+	       sandec_get_framecount(sanctx));
 
 
 	running = 1;
@@ -269,7 +269,7 @@ int main(int a, char **argv)
 
 	// frame pacing
 	ts.tv_sec = 0;
-	ts.tv_nsec = 970000000 / san_get_framerate(sanctx);
+	ts.tv_nsec = 970000000 / sandec_get_framerate(sanctx);
 
 	while (running) {
 		while (0 != SDL_PollEvent(&e) && running) {
@@ -279,13 +279,13 @@ int main(int a, char **argv)
 
 		if (!paused && running) {
 			if (!parserdone) {
-				ret = san_one_frame(sanctx);
-				if (ret == 0) {
+				ret = sandec_decode_next_frame(sanctx);
+				if (ret == SANDEC_OK) {
 					ret = render_frame(&sdl);
 					nanosleep(&ts, NULL);
 				} else {
-					printf("ret %d at %d\n", ret, san_get_currframe(sanctx));
-					if (ret < 0)
+					printf("ret %d at %d\n", ret, sandec_get_currframe(sanctx));
+					if (ret == SANDEC_DONE)
 						parserdone = 1;
 					else
 						running = 0;
@@ -300,7 +300,7 @@ int main(int a, char **argv)
 	free(sdl.abuf);
 	free(sdl.vbuf);
 
-	printf("sanloop exited with code %d, played %d FRMEs\n", ret, san_get_currframe(sanctx));
+	printf("sanloop exited with code %d, played %d FRMEs\n", ret, sandec_get_currframe(sanctx));
 
 	free(sanctx);
 out1:

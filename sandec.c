@@ -49,6 +49,9 @@
 #define FTCH	0x46544348
 #define XPAL	0x5850414c
 
+// codec47 glyhps
+#define GLYPH_COORD_VECT_SIZE 16
+#define NGLYPHS 256
 
 // internal context
 struct sanrt {
@@ -89,7 +92,6 @@ struct sanrt {
  * SAN Codec47 Glyph setup, taken from ffmpeg
  * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob_plain/HEAD:/libavcodec/sanm.c
  */
-#define GLYPH_COORD_VECT_SIZE 16
 
 static const int8_t glyph4_x[GLYPH_COORD_VECT_SIZE] = {
 	0, 1, 2, 3, 3, 3, 3, 2, 1, 0, 0, 0, 1, 2, 2, 1
@@ -962,7 +964,10 @@ static int handle_AHDR(struct sanrt *rt, uint32_t size)
 	return ret;
 }
 
-int san_one_frame(void *sanctx)
+/******************************************************************************/
+/* public interface */
+
+int sandec_decode_next_frame(void *sanctx)
 {
 	struct sanrt *rt = (struct sanrt *)sanctx;
 	uint32_t cid, csz;
@@ -983,7 +988,7 @@ int san_one_frame(void *sanctx)
 	return ret;
 }
 
-int san_init(void **ctxout)
+int sandec_init(void **ctxout)
 {
 	struct sanrt *rt;
 
@@ -999,7 +1004,7 @@ int san_init(void **ctxout)
 	return 0;
 }
 
-int san_open(void *ctx, struct sanio *io)
+int sandec_open(void *ctx, struct sanio *io)
 {
 	struct sanrt *rt = (struct sanrt *)ctx;
 	int ret, ok;
@@ -1037,31 +1042,31 @@ int san_open(void *ctx, struct sanio *io)
 	return handle_AHDR(rt, csz);
 }
 
-int san_get_framerate(void *sanctx)
+int sandec_get_framerate(void *sanctx)
 {
 	struct sanrt *rt = (struct sanrt *)sanctx;
 	return rt ? rt->framerate : -1;
 }
 
-int san_get_samplerate(void *sanctx)
+int sandec_get_samplerate(void *sanctx)
 {
 	struct sanrt *rt = (struct sanrt *)sanctx;
 	return rt ? rt->samplerate : -1;
 }
 
-int san_get_framecount(void *sanctx)
+int sandec_get_framecount(void *sanctx)
 {
 	struct sanrt *rt = (struct sanrt *)sanctx;
 	return rt ? rt->FRMEcnt : -1;
 }
 
-int san_get_version(void *sanctx)
+int sandec_get_version(void *sanctx)
 {
 	struct sanrt *rt = (struct sanrt *)sanctx;
 	return rt ? rt->version : -1;
 }
 
-int san_get_currframe(void *sanctx)
+int sandec_get_currframe(void *sanctx)
 {
 	struct sanrt *rt = (struct sanrt *)sanctx;
 	return rt ? rt->currframe : -1;
