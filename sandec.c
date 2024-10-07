@@ -388,6 +388,19 @@ static int readtag(struct sanctx *ctx, uint32_t *outtag, uint32_t *outsize)
 	return 0;
 }
 
+static int read_palette(struct sanctx *ctx)
+{
+	struct sanrt *rt = &ctx->rt;
+	uint8_t t[3];
+	for (int i = 0; i < 256;  i++) {
+		_READ(8, t + 0, 4, ctx);
+		_READ(8, t + 1, 4, ctx);
+		_READ(8, t + 2, 4, ctx);
+		rt->palette[i] = 0xff << 24 | t[2] << 16 | t[1] << 8 | t[0];
+	}
+	return 0;
+}
+
 // full frame in half width and height resolution
 static int codec47_comp1(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t h)
 {
@@ -650,19 +663,13 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size)
 static int handle_NPAL(struct sanctx *ctx, uint32_t size)
 {
 	uint8_t tmpbuf[4];
-	int j;
+	int ret;
 
 	ctx->_bsz = size;		// init byte tracking
-	for (int i = 0; i < (size / 3); i++) {
-		_READ(8, &tmpbuf[0], 1, ctx);
-		_READ(8, &tmpbuf[1], 1, ctx);
-		_READ(8, &tmpbuf[2], 1, ctx);
-		ctx->rt.palette[i] = (0xff<<24) | tmpbuf[2] << 16 | tmpbuf[1] << 8 | tmpbuf[0];
-	}
-
+	ret = read_palette(ctx);
 	san_read_unused(ctx);
 
-	return 0;
+	return ret;
 }
 
 static inline uint8_t _u8clip(int a)
@@ -677,8 +684,9 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size)
 	uint8_t t1, t2[3];
 	uint32_t t32;
 	uint16_t t16;
-	int i, j;
+	int i, j, ret;
 
+	ret = 0;
 	ctx->_bsz = size;		// init byte tracking
 	if (size == 4 || size == 6) {
 		for (i = 0; i < 256; i++) {
@@ -694,12 +702,7 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size)
 			_READ(LE16, &(ctx->rt.deltapal[i]), 3, ctx);
 		}
 		if (size >= (768 * 5 + 4)) {
-			for (i = 0; i < 256; i++) {
-				_READ(8, &t2[0], 1, ctx);
-				_READ(8, &t2[1], 1, ctx);
-				_READ(8, &t2[2], 1, ctx);
-				(ctx->rt.palette)[i] = 0xff<<24 | t2[0] << 16 | t2[1] << 8 | t2[2];
-			}
+			ret = read_palette(ctx);
 		} else {
 			memset(ctx->rt.palette, 0, 256 * 4);
 		}
@@ -707,7 +710,7 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size)
 
 	san_read_unused(ctx);
 
-	return 0;
+	return ret;
 }
 
 static int handle_IACT(struct sanctx *ctx, uint32_t size)
@@ -950,12 +953,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	if (readX(ctx, &v, 2))  /* dummy data */
 		return 3;
 
-	for (int i = 0; i < 256;  i++) {
-		_READ(8, &tmpbuf[0], 4, ctx);
-		_READ(8, &tmpbuf[1], 4, ctx);
-		_READ(8, &tmpbuf[2], 4, ctx);
-		rt->palette[i] = 0xff000000 | tmpbuf[0] << 16 | tmpbuf[1] << 8 | tmpbuf[2];
-	}
+	ret = read_palette(ctx);
 
 	if (ctx->_bsz < 20) {
 		ret = 2;
