@@ -394,7 +394,7 @@ static int read_palette(struct sanctx *ctx)
 	return 0;
 }
 
-// full frame in half width and height resolution
+/* keyframe with halved horizontal and vertical resolution */
 static int codec47_comp1(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t h)
 {
 	uint8_t val;
@@ -409,7 +409,7 @@ static int codec47_comp1(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t 
 	return 0;
 }
 
-static int codec47_block(struct sanctx *ctx, uint8_t *dst, uint8_t *p1, uint8_t *p2, uint16_t w, uint8_t *headtbl, uint16_t size)
+static int codec47_block(struct sanctx *ctx, uint8_t *dst, uint8_t *p1, uint8_t *p2, uint16_t w, uint8_t *coltbl, uint16_t size)
 {
 	uint8_t code, col[2], c;
 	uint16_t i, j;
@@ -428,13 +428,13 @@ static int codec47_block(struct sanctx *ctx, uint8_t *dst, uint8_t *p1, uint8_t 
 				dst[0] = v32;
 			} else {
 				size >>= 1;
-				codec47_block(ctx, dst, p1, p2, w, headtbl, size);
-				codec47_block(ctx, dst + size, p1 + size, p2 + size, w, headtbl, size);
+				codec47_block(ctx, dst, p1, p2, w, coltbl, size);
+				codec47_block(ctx, dst + size, p1 + size, p2 + size, w, coltbl, size);
 				dst += (size * w);
 				p1 += (size * w);
 				p2 += (size * w);
-				codec47_block(ctx, dst, p1, p2, w, headtbl, size);
-				codec47_block(ctx, dst + size, p1 + size, p2 + size, w, headtbl, size);
+				codec47_block(ctx, dst, p1, p2, w, coltbl, size);
+				codec47_block(ctx, dst + size, p1 + size, p2 + size, w, coltbl, size);
 			}
 			break;
 		case 0xfe:
@@ -459,7 +459,7 @@ static int codec47_block(struct sanctx *ctx, uint8_t *dst, uint8_t *p1, uint8_t 
 			}
 			break;
 		default:
-			c = headtbl[code & 7];
+			c = coltbl[code & 7];
 			for (i = 0; i < size; i++) {
 				memset(dst + (i * w), c, size);
 			}
@@ -474,21 +474,15 @@ static int codec47_block(struct sanctx *ctx, uint8_t *dst, uint8_t *p1, uint8_t 
 	return 0;
 }
 
-static int codec47_comp2(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t h, uint32_t seq, uint8_t *headtbl)
+static int codec47_comp2(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t h, uint8_t *coltbl)
 {
+	uint8_t *b1 = ctx->rt.buf1, *b2 = ctx->rt.buf2;
 	unsigned int i, j;
-	uint8_t *b1, *b2;
 	int ret;
-
-	if (seq != (ctx->rt.lastseq+1))
-		return 0;
-
-	b1 = ctx->rt.buf1;
-	b2 = ctx->rt.buf2;
 
 	for (j = 0; j < h; j += 8) {
 		for (i = 0; i < w; i += 8) {
-			ret = codec47_block(ctx, dst + i, b1 + i, b2 + i, w, headtbl + 8, 8);
+			ret = codec47_block(ctx, dst + i, b1 + i, b2 + i, w, coltbl, 8);
 			if (ret)
 				return ret;
 		}
@@ -499,7 +493,6 @@ static int codec47_comp2(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t 
 	return 0;
 }
 
-// RLE
 static int codec47_comp5(struct sanctx *ctx, uint8_t *dst, uint32_t left)
 {
 	uint8_t opc, rlen, col;
@@ -524,18 +517,18 @@ static int codec47_comp5(struct sanctx *ctx, uint8_t *dst, uint32_t left)
 
 static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
 {
-	// the codec47_block() compression path accesses parts of this header.
-	// instead of the seek/tell file pointer games that the ffmpeg code uses,
-	// we just read the whole 26 byte block, pass it around and read our
-	// data out of it.
+	/* the codec47_block() compression path accesses 8 bytes between "skip"
+	 * and "decsize" fields. Read the whole 26 byte header block, pass it
+	 * around and read our data out of it.
+	 */
 	uint8_t headtable[32], *dst, comp, newrot, skip;
 	uint32_t decsize;
 	uint16_t seq;
 	int ret;
 
-	/* read the whole header; start at offset 2 to align the 32bit read
+	/* read the whole header; start dest at offset 2 to align the 32bit read
 	 * at table offset 14 to a 32bit boundary.  The codec47_block() code
-	 * accesses this table with byte granularity so we're good.
+	 * accesses this table with 1-byte reads so we're good.
 	 */
 	if (readX(ctx, headtable + 2, 26))
 		return 29;
@@ -546,7 +539,6 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 	skip =   headtable[2 + 4];
 	decsize = le32_to_cpu(*(uint32_t *)(headtable + 2 + 14));
 
-	ret = 0;
 	if (seq == 0) {
 		ctx->rt.lastseq = -1;
 		memset(ctx->rt.buf1, headtable[2 + 12], ctx->rt.fbsize);
@@ -557,21 +549,23 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 			return 30;
 	}
 
+	ret = 0;
 	dst = ctx->rt.buf0 + left + (top * w);
 	switch (comp) {
 	case 0:	ret = readX(ctx, dst, w * h); break;
-	case 1: ret = codec47_comp1(ctx, dst, w, h); break;
-	case 2: ret = codec47_comp2(ctx, dst, w, h, seq, headtable + 2); break;
+	case 1:	ret = codec47_comp1(ctx, dst, w, h); break;
+	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
+			ret = codec47_comp2(ctx, dst, w, h, headtable + 10);
+		}
+		break;
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;
-	case 4: memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize); break;
-	case 5: ret = codec47_comp5(ctx, dst, decsize); break;
+	case 4:	memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize); break;
+	case 5:	ret = codec47_comp5(ctx, dst, decsize); break;
 	default: ret = 31;
 	}
 
-	if (ret == 0) {
-		ctx->rt.rotate = (seq == ctx->rt.lastseq + 1) ? newrot : 0;
-		ctx->rt.lastseq = seq;
-	}
+	ctx->rt.rotate = (seq == ctx->rt.lastseq + 1) ? newrot : 0;
+	ctx->rt.lastseq = seq;
 
 	return ret;
 }
