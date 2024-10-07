@@ -78,7 +78,7 @@ struct sanrt {
 	uint32_t iactpos;
 	uint8_t iactbuf[4096];	// for IACT chunks
 	uint32_t palette[256];	// ABGR
-	uint16_t deltapal[768];	// for XPAL chunks
+	int16_t deltapal[768];	// for XPAL chunks
 };
 
 // internal context: static stuff.
@@ -587,6 +587,7 @@ static int codec1(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, uin
 
 	for (i = 0; i < h; i++) {
 		pos = 0;
+		_READ(LE16, &dlen, 95, ctx);
 		while (dlen) {
 			_READ(8, &code, 98, ctx); dlen--;
 			rlen = (code >> 1) + 1;
@@ -719,7 +720,7 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size)
 				int cl = (t2[j] << 7) + ctx->rt.deltapal[i++];
 				t2[j] = _u8clip(cl >> 7);
 			}
-			*pal++ = 0xff << 24 | t2[2] << 16 | t2[1] << 8 | t2[0];
+			*pal++ = 0xff << 24 | (t2[2] & 0xff) << 16 | (t2[1] & 0xff) << 8 | (t2[0]  & 0xff);
 		}
 
 	} else {
@@ -928,7 +929,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		}
 
 		// copy rt->buf0 to output
-		ret = ctx->io->queue_video(ctx->io->avctx, rt->buf0, rt->w * rt->h * 1, rt->w, rt->h, rt->palette);
+		ret = ctx->io->queue_video(ctx->io->avctx, rt->buf0, rt->fbsize,
+					   rt->w, rt->h, rt->palette);
 
 		if (rt->rotate) {
 			unsigned char *tmp;
