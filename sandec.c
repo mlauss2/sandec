@@ -502,7 +502,7 @@ static int codec47_comp2(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t 
 }
 
 // RLE
-static int codec47_comp5(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t h, uint32_t left)
+static int codec47_comp5(struct sanctx *ctx, uint8_t *dst, uint32_t left)
 {
 	uint8_t opc, rlen, col;
 
@@ -562,7 +562,7 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 	case 2: ret = codec47_comp2(ctx, dst, w, h, seq, headtable); break;
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;
 	case 4: memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize); break;
-	case 5: ret = codec47_comp5(ctx, dst, w, h, decsize); break;
+	case 5: ret = codec47_comp5(ctx, dst, decsize); break;
 	default: ret = 99;
 	}
 
@@ -576,19 +576,33 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 
 static int codec1(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
 {
-	uint8_t *dst;
-	uint16_t v1;
-	int ret;
+	uint8_t *dst, code, col;
+	uint16_t rlen, dlen;
+	int ret, pos, i, j;
 
 	dst = ctx->rt.buf0 + (top * w);
-	do {
-		dst += left;
-		_READ(LE16, &v1, 98, ctx);
-		ret = codec47_comp5(ctx, dst, w, h, w);
-		if (ret)
-			return ret;
-		dst += w - left;
-	} while (--h);
+
+	for (i = 0; i < h; i++) {
+		pos = 0;
+		while (dlen) {
+			_READ(8, &code, 98, ctx); dlen--;
+			rlen = (code >> 1) + 1;
+			if (code & 1) {
+				_READ(8, &col, 97, ctx); dlen--;
+				if (col)
+					memset(dst, col, rlen);
+				pos += rlen;
+			} else {
+				for (j = 0; j < rlen; j++) {
+					_READ(8, &col, 96, ctx); dlen--;
+					if (col)
+						dst[pos] = col;
+					pos++;
+				}
+			}
+		}
+		dst += w;
+	}
 
 	ctx->rt.rotate = 0;
 	return 0;
@@ -681,30 +695,37 @@ static inline uint8_t _u8clip(int a)
 
 static int handle_XPAL(struct sanctx *ctx, uint32_t size)
 {
-	uint8_t t1, t2[3];
-	uint32_t t32;
-	uint16_t t16;
-	int i, j, ret;
+	uint32_t t32, *pal = ctx->rt.palette;
+	uint16_t dp;
+	int i, j, ret, t2[3];
 
 	ret = 0;
 	ctx->_bsz = size;		// init byte tracking
-	if (size == 4 || size == 6) {
-		for (i = 0; i < 256; i++) {
+
+	_READ(LE16, &dp, 82, ctx);	// dummy
+	_READ(LE16, &dp, 83, ctx);	// command
+
+	if (dp == 256) {
+		_READ(LE16, &dp, 85, ctx);	// dummy
+		i = 0;
+		while (i < 768) {
+			t32 = *pal;
+			t2[0] = (t32 >>  0) & 0xff;
+			t2[1] = (t32 >>  8) & 0xff;
+			t2[2] = (t32 >> 16) & 0xff;
 			for (j = 0; j < 3; j++) {
-				int t1 = (ctx->rt.palette[i] >> (16 - (j * 8))) & 0xff;
-				t2[j] = _u8clip(((t1 * 129) + ctx->rt.deltapal[(i * 3) + j]) >> 7);
+				int cl = (t2[j] << 7) + ctx->rt.deltapal[i++];
+				t2[j] = _u8clip(cl >> 7);
 			}
-			ctx->rt.palette[i] = 0xff<<24 | (t2[0] << 16) | (t2[1] << 8) | t2 [2];
+			*pal++ = 0xff << 24 | t2[2] << 16 | t2[1] << 8 | t2[0];
 		}
+
 	} else {
-		_READ(LE32, &t32, 1, ctx);
 		for (i = 0; i < 768; i++) {
-			_READ(LE16, &(ctx->rt.deltapal[i]), 3, ctx);
+			_READ(LE16, ctx->rt.deltapal + i, 84, ctx);
 		}
-		if (size >= (768 * 5 + 4)) {
+		if (dp == 512) {
 			ret = read_palette(ctx);
-		} else {
-			memset(ctx->rt.palette, 0, 256 * 4);
 		}
 	}
 
@@ -937,8 +958,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	struct sanrt *rt = &ctx->rt;
 	uint16_t v;
 	uint32_t v2;
-	int left, ret;
-	char tmpbuf[128];
+	int ret;
 
 	ret = 0;
 
@@ -946,12 +966,9 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		return 1;		// too small
 
 	ctx->_bsz = size;		// init byte tracking
-	_READ(8, &tmpbuf[0], 1, ctx);
-	_READ(8, &tmpbuf[1], 1, ctx);
-	rt->version = tmpbuf[0] | (tmpbuf[1] << 8);
+	_READ(LE16, &rt->version, 1, ctx);
 	_READ(LE16, &(rt->FRMEcnt), 2, ctx);
-	if (readX(ctx, &v, 2))  /* dummy data */
-		return 3;
+	_READ(LE16, &v, 3, ctx);
 
 	ret = read_palette(ctx);
 
