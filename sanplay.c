@@ -150,6 +150,9 @@ static void exit_sdl_vid(struct sdlpriv *p)
 {
 	SDL_DestroyRenderer(p->ren);
 	SDL_DestroyWindow(p->win);
+	free(p->abuf);
+	free(p->vbuf);
+	SDL_Quit();
 }
 
 static int init_sdl_aud(struct sdlpriv *p)
@@ -180,6 +183,8 @@ static void exit_sdl_aud(struct sdlpriv *p)
 static int init_sdl(struct sdlpriv *p)
 {
 	int ret;
+
+	memset(p, 0, sizeof(struct sdlpriv));
 	ret = init_sdl_vid(p);
 	if (ret)
 		goto err0;
@@ -240,13 +245,12 @@ int main(int a, char **argv)
 		goto out;
 	}
 
-	memset(&sdl, 0, sizeof(sdl));
 	ret = init_sdl(&sdl);
 	if (ret)
 		goto out;
 
 	sio.ioctx = &h;
-	sio.read = sio_read;
+	sio.ioread = sio_read;
 	sio.avctx = &sdl;
 	sio.queue_audio = queue_audio;
 	sio.queue_video = queue_video;
@@ -296,12 +300,9 @@ int main(int a, char **argv)
 		}
 	}
 
-	free(sdl.abuf);
-	free(sdl.vbuf);
-
 	printf("sanloop exited with code %d, played %d FRMEs\n", ret, sandec_get_currframe(sanctx));
 
-	free(sanctx);
+	sandec_exit(&sanctx);
 	exit_sdl(&sdl);
 out:
 	close(h);

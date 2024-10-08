@@ -299,7 +299,7 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 
 static inline int readX(struct sanctx *ctx, void *dst, uint32_t sz)
 {
-	int ret = ctx->io->read(ctx->io->ioctx, dst, sz);
+	int ret = ctx->io->ioread(ctx->io->ioctx, dst, sz);
 	if (ret == sz) {
 		ctx->_bsz -= ret;
 		return 0;
@@ -309,7 +309,7 @@ static inline int readX(struct sanctx *ctx, void *dst, uint32_t sz)
 
 static inline int read8(struct sanctx *ctx, uint8_t *out)
 {
-	int ret = ctx->io->read(ctx->io->ioctx, out, 1);
+	int ret = ctx->io->ioread(ctx->io->ioctx, out, 1);
 	if (ret == 1) {
 		ctx->_bsz -= 1;
 		return 0;
@@ -319,17 +319,18 @@ static inline int read8(struct sanctx *ctx, uint8_t *out)
 
 static inline int readLE16(struct sanctx *ctx, uint16_t *out)
 {
-	int ret = ctx->io->read(ctx->io->ioctx, out, 2);
+	int ret = ctx->io->ioread(ctx->io->ioctx, out, 2);
 	if (ret == 2) {
 		*out = le16_to_cpu(*out);
 		ctx->_bsz -= 2;
+		return 0;
 	}
 	return 1;
 }
 
 static inline int readLE32(struct sanctx *ctx, uint32_t *out)
 {
-	int ret = ctx->io->read(ctx->io->ioctx, out, 4);
+	int ret = ctx->io->ioread(ctx->io->ioctx, out, 4);
 	if (ret == 4) {
 		*out = le32_to_cpu(*out);
 		ctx->_bsz -= 4;
@@ -345,10 +346,7 @@ static inline void san_read_unused(struct sanctx *ctx)
 	uint8_t v;
 
 	t = ctx->_bsz;
-	if (t < 0)
-		return;
-
-	while (t--) {
+	while (t-- > 0) {
 		if (read8(ctx, &v))
 			return;
 	}
@@ -628,7 +626,7 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	rt->buf3 = rt->buf2 + bs;
 	rt->fbsize = bs;
 	rt->w = w;
-	rt->h = w;
+	rt->h = h;
 
 	return 0;
 }
@@ -1077,6 +1075,20 @@ int sandec_open(void *sanctx, struct sanio *io)
 		return ret;
 
 	return handle_AHDR(ctx, csz);
+}
+
+void sandec_exit(void **sanctx)
+{
+	struct sanctx *ctx = *(struct sanctx **)sanctx;
+	if (!ctx)
+		return;
+
+	/* delete the framebuffer */
+	if (ctx->rt.buf)
+		free(ctx->rt.buf);
+	memset(&ctx->rt, 0, sizeof(struct sanrt));
+	free(ctx);
+	*sanctx = NULL;
 }
 
 int sandec_get_framerate(void *sanctx)
