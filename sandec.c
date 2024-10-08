@@ -893,17 +893,16 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size)
 static int handle_FRME(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
-	uint32_t cid, csz, framebytes;
+	uint32_t cid, csz;
 	uint8_t v;
 	int ret;
 
-	framebytes = size;	// byte tracking
 	ret = 0;
-	while ((framebytes > 3) && (ret == 0)) {
+	while ((size > 3) && (ret == 0)) {
 		ret = readtag(ctx, &cid, &csz);
 		if (ret)
 			return 9;
-		if (csz > framebytes)
+		if (csz > size)
 			return 10;
 		switch (cid)
 		{
@@ -920,10 +919,10 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		}
 		if (csz & 1)
 			csz += 1;
-		framebytes -= csz + 8;
+		size -= csz + 8;
 	}
 
-	if (framebytes < 4 && ret == 0) {
+	if (size < 4 && ret == 0) {
 		// OK Case: most bytes consumed, no errors.
 		if (rt->to_store) {
 			memcpy(rt->buf3, rt->buf0, rt->fbsize);
@@ -946,7 +945,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		}
 
 		// consume any unread bytes
-		while (framebytes--)
+		while (size--)
 			if (read8(ctx, &v))
 				return 12;
 
