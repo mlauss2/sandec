@@ -226,12 +226,14 @@ int main(int a, char **argv)
 	struct sanio sio;
 	void *sanctx;
 	SDL_Event e;
-	int h, ret;
+	int h, ret, speedmode;
 
 	if (a < 2) {
 		printf("arg missing\n");
 		return 1;
 	}
+
+	speedmode = (a == 3) ? 1 : 0;
 
 	h = open(argv[1], O_RDONLY);
 	if (!h) {
@@ -285,7 +287,8 @@ int main(int a, char **argv)
 				ret = sandec_decode_next_frame(sanctx);
 				if (ret == SANDEC_OK) {
 					ret = render_frame(&sdl);
-					nanosleep(&ts, NULL);
+					if (!speedmode)
+						nanosleep(&ts, NULL);
 				} else {
 					printf("ret %d at %d\n", ret, sandec_get_currframe(sanctx));
 					if (ret == SANDEC_DONE)
@@ -293,10 +296,15 @@ int main(int a, char **argv)
 					else
 						running = 0;
 				}
-
 			}
-			if (parserdone && !SDL_GetQueuedAudioSize(sdl.aud))
-				running = 0;
+			if (parserdone) {
+				if (speedmode) {
+					SDL_ClearQueuedAudio(sdl.aud);
+					running = 0;
+				} else if (0 == SDL_GetQueuedAudioSize(sdl.aud)) {
+					running = 0;
+				}
+			}
 		}
 	}
 
