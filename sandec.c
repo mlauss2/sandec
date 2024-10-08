@@ -87,6 +87,7 @@ struct sanrt {
 struct sanctx {
 	struct sanio *io;
 	int32_t _bsz;		// current block size
+	int errdone;		// error or done.
 
 	// codec47 stuff
 	int8_t glyph4x4[NGLYPHS][16];
@@ -1005,18 +1006,24 @@ int sandec_decode_next_frame(void *sanctx)
 	uint32_t cid, csz;
 	int ret;
 
-	if (!ctx->io)
-		return 4;
+	/* in case of previous error, don't continue, just return it again */
+	if (ctx->errdone)
+		return ctx->errdone;
 
 	ret = readtag(ctx, &cid, &csz);
-	if (ret)
-		return -1;	// probably EOF, we're done
+	if (ret) {
+		if (ctx->rt.currframe == ctx->rt.FRMEcnt)
+			ret = -1;
+		goto out;
+	}
 
 	switch (cid) {
 	case FRME: 	ret = handle_FRME(ctx, csz); break;
 	default:	ret = 5;
 	}
 
+out:
+	ctx->errdone = ret;
 	return ret;
 }
 
@@ -1028,6 +1035,8 @@ int sandec_init(void **ctxout)
 	if (!ctx)
 		return 1;
 	memset(ctx, 0, sizeof(struct sanctx));
+	/* set to error state initially until a valid file has been opened */
+	ctx->errdone = 44;
 
 	c47_make_glyphs(ctx->glyph4x4[0], glyph4_x, glyph4_y, 4);
 	c47_make_glyphs(ctx->glyph8x8[0], glyph8_x, glyph8_y, 8);
@@ -1045,8 +1054,10 @@ int sandec_open(void *sanctx, struct sanio *io)
 	int have_anim = 0;
 	int have_ahdr = 0;
 
-	if (!io)
-		return 2;
+	if (!io) {
+		ret = 2;
+		goto out;
+	}
 	ctx->io = io;
 
 	// force-initialize the dynamic context
@@ -1054,9 +1065,9 @@ int sandec_open(void *sanctx, struct sanio *io)
 
 	while (1) {
 		ok = readtag(ctx, &cid, &csz);
-		if (ok != 0) {
+		if (ok) {
 			ret = 3;
-			break;
+			goto out;
 		}
 
 		if (!have_anim) {
@@ -1071,10 +1082,11 @@ int sandec_open(void *sanctx, struct sanio *io)
 		}
 	}
 
-	if (!have_ahdr)
-		return ret;
-
-	return handle_AHDR(ctx, csz);
+	if (have_ahdr)
+		ret = handle_AHDR(ctx, csz);
+out:
+	ctx->errdone = ret;
+	return ret;
 }
 
 void sandec_exit(void **sanctx)
