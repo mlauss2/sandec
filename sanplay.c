@@ -19,7 +19,6 @@ struct sdlpriv {
 	SDL_Renderer *ren;
 	SDL_Window *win;
 	SDL_AudioDeviceID aud;
-	SDL_Color col[256];
 
 	uint32_t abufsize;
 	uint32_t abufptr;
@@ -30,6 +29,7 @@ struct sdlpriv {
 	uint32_t vbufsize;
 	unsigned char *vbuf;
 	uint32_t pal[256];
+	uint16_t subid;
 };
 
 // this can be called multiple times per "san_one_frame()", so buffer needs
@@ -52,7 +52,8 @@ static int queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 }
 
 // this is called once per "san_one_frame()"
-static int queue_video(void *avctx, unsigned char *vdata, uint32_t size, uint16_t w, uint16_t h, uint32_t *imgpal)
+static int queue_video(void *avctx, unsigned char *vdata, uint32_t size,
+		       uint16_t w, uint16_t h, uint32_t *imgpal, uint16_t subid)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
 
@@ -69,6 +70,7 @@ static int queue_video(void *avctx, unsigned char *vdata, uint32_t size, uint16_
 	}
 	p->w = w;
 	p->h = h;
+	p->subid = subid;
 
 	return 0;
 }

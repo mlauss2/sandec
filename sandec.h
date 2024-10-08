@@ -68,7 +68,8 @@
 
 struct sanio {
 	int(*ioread)(void *ioctx, void *dst, uint32_t size);
-	int(*queue_video)(void *avctx, unsigned char *vdata, uint32_t size, uint16_t w, uint16_t h, uint32_t *pal);
+	int(*queue_video)(void *avctx, unsigned char *vdata, uint32_t size,
+			  uint16_t w, uint16_t h, uint32_t *pal, uint16_t subid);
 	int(*queue_audio)(void *avctx, unsigned char *adata, uint32_t size);
 	void *ioctx;
 	void *avctx;

@@ -65,6 +65,7 @@ struct sanrt {
 	uint16_t w;  // frame width/pitch/stride
 	uint16_t h;  // frame height
 	uint16_t version;
+	uint16_t subid;
 
 	unsigned long fbsize;	// size of the buffers below
 	unsigned char *buf0;
@@ -868,7 +869,7 @@ static int handle_TRES(struct sanctx *ctx, uint32_t size)
 	_READ(LE16, &strid, 1, ctx); // dummy
 	_READ(LE16, &strid, 1, ctx); // real strid
 #endif
-
+	ctx->rt.subid = tres[8];
 	san_read_unused(ctx);
 
 	return ret;
@@ -930,7 +931,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 		// copy rt->buf0 to output
 		ret = ctx->io->queue_video(ctx->io->avctx, rt->buf0, rt->fbsize,
-					   rt->w, rt->h, rt->palette);
+					   rt->w, rt->h, rt->palette, rt->subid);
 
 		if (rt->rotate) {
 			unsigned char *tmp;
@@ -952,6 +953,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		rt->to_store = 0;
 		rt->currframe++;
 		rt->rotate = 0;
+		rt->subid = 0;
 	}
 
 	return ret;
