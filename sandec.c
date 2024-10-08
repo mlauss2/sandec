@@ -1059,7 +1059,10 @@ int sandec_open(void *sanctx, struct sanio *io)
 	}
 	ctx->io = io;
 
-	// force-initialize the dynamic context
+	/* delete an existing framebuffer */
+	if (ctx->rt.buf && ctx->rt.fbsize)
+		free(ctx->rt.buf);
+	/* force-initialize the dynamic context */
 	memset(&ctx->rt, 0, sizeof(struct sanrt));
 
 	while (1) {
