@@ -8,6 +8,7 @@
  * ScummVM:
  * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob/HEAD:/libavcodec/sanm.c
  * https://github.com/scummvm/scummvm/blob/master/engines/scumm/smush/smush_player.cpp
+ * https://github.com/clone2727/smushplay/blob/master/codec47.cpp
  */
 
 #include <byteswap.h>
@@ -82,6 +83,7 @@ struct sanrt {
 	uint8_t iactbuf[4096];	// for IACT chunks
 	uint32_t palette[256];	// ABGR
 	int16_t deltapal[768];	// for XPAL chunks
+	uint8_t *c47ipoltbl;	// interpolation table for C47 Compression 1
 };
 
 // internal context: static stuff.
@@ -394,17 +396,41 @@ static int read_palette(struct sanctx *ctx)
 	return 0;
 }
 
-/* keyframe with halved horizontal and vertical resolution */
-static int codec47_comp1(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t h)
+static int codec47_comp1(struct sanctx *ctx, uint8_t *dst_in, uint16_t w, uint16_t h)
 {
-	uint8_t val;
+	/* input data is i-frame with half width and height. combining 2 pixels into
+	 * a 16bit value, one can then use this value as an index into the interpolation
+	 * table to get the missing color between 2 pixels (horizontally and vertically).
+	 */
+	uint8_t *itbl = ctx->rt.c47ipoltbl, *dst, p8, p82;
+	uint16_t px;
+	int i, j;
 
-	for (unsigned int j = 0; j < h; j += 2) {
-		for (unsigned int i = 0; i < w; i += 2) {
-			_READ(8, &val, 41, ctx);
-			dst[i] = dst[i + 1] = dst[w + i] = dst[w + i + 1] = val;
+	dst = dst_in + w;
+	for (i = 0; i < h; i += 2) {
+		_READ(8, &p8, 50, ctx);
+		*dst++ = p8;
+		*dst++ = p8;
+		px = p8;
+		for (j = 2; j < w; j += 2) {
+			_READ(8, &p8, 51, ctx);
+			px = (px << 8) | p8;
+			*dst++ = itbl[px];
+			*dst++ = p8;
 		}
-		dst += w * 2;
+		dst += w;
+	}
+
+	memcpy(dst, dst + w, w);
+	dst = dst_in + (w * 2);
+	for (i = 2; i < h - 1; i += 2) {
+		for (j = 0; j < w; j ++) {
+			p8 = *(dst - w);
+			p82 = *(dst + w);
+			px = (p82 << 8) | p8;
+			*dst++ = itbl[px];
+		}
+		dst += w;
 	}
 	return 0;
 }
@@ -515,13 +541,34 @@ static int codec47_comp5(struct sanctx *ctx, uint8_t *dst, uint32_t left)
 	return 0;
 }
 
+static int codec47_itable(struct sanctx *ctx)
+{
+	uint8_t *itbl, *p1, *p2, c;
+	int i, j;
+
+	if (!ctx->rt.c47ipoltbl){
+		ctx->rt.c47ipoltbl = malloc(0x10000);
+		if (!ctx->rt.c47ipoltbl)
+			return 30;
+	}
+
+	itbl = ctx->rt.c47ipoltbl;
+	for (i = 0; i < 256; i++) {
+		p1 = p2 = itbl + i;
+		for (j = 256 - i; j; j--) {
+			_READ(8, &c, 52, ctx);
+			*p1++ = c;
+			*p2 = c;
+			p2 += 256;
+		}
+		itbl += 256;
+	}
+	return 0;
+}
+
 static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
 {
-	/* the codec47_block() compression path accesses 8 bytes between "skip"
-	 * and "decsize" fields. Read the whole 26 byte header block, pass it
-	 * around and read our data out of it.
-	 */
-	uint8_t headtable[32], *dst, comp, newrot, skip;
+	uint8_t headtable[32], *dst, comp, newrot, flag;
 	uint32_t decsize;
 	uint16_t seq;
 	int ret;
@@ -536,7 +583,7 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 	seq =    le16_to_cpu(*(uint16_t *)(headtable + 2 + 0));
 	comp =   headtable[2 + 2];
 	newrot = headtable[2 + 3];
-	skip =   headtable[2 + 4];
+	flag =   headtable[2 + 4];
 	decsize = le32_to_cpu(*(uint32_t *)(headtable + 2 + 14));
 
 	if (seq == 0) {
@@ -544,9 +591,10 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 		memset(ctx->rt.buf1, headtable[2 + 12], ctx->rt.fbsize);
 		memset(ctx->rt.buf2, headtable[2 + 13], ctx->rt.fbsize);
 	}
-	if (skip & 1) {
-		if (readX(ctx, NULL, 0x8080))
-			return 30;
+	if (flag & 1) {
+		ret = codec47_itable(ctx);
+		if (ret)
+			return ret;
 	}
 
 	ret = 0;
@@ -1064,6 +1112,9 @@ int sandec_open(void *sanctx, struct sanio *io)
 	/* delete an existing framebuffer */
 	if (ctx->rt.buf && ctx->rt.fbsize)
 		free(ctx->rt.buf);
+	/* delete existing C47 interpolation table */
+	if (ctx->rt.c47ipoltbl)
+		free(ctx->rt.c47ipoltbl);
 	/* force-initialize the dynamic context */
 	memset(&ctx->rt, 0, sizeof(struct sanrt));
 
@@ -1102,6 +1153,8 @@ void sandec_exit(void **sanctx)
 	/* delete the framebuffer */
 	if (ctx->rt.buf)
 		free(ctx->rt.buf);
+	if (ctx->rt.c47ipoltbl)
+		free(ctx->rt.c47ipoltbl);
 	memset(&ctx->rt, 0, sizeof(struct sanrt));
 	free(ctx);
 	*sanctx = NULL;
