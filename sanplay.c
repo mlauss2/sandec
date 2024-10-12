@@ -28,7 +28,7 @@ struct sdlpriv {
 	uint16_t h;
 	uint32_t vbufsize;
 	unsigned char *vbuf;
-	uint32_t pal[256];
+	uint32_t *pal;
 	uint16_t subid;
 };
 
@@ -57,17 +57,12 @@ static int queue_video(void *avctx, unsigned char *vdata, uint32_t size,
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
 
-	//printf("VIDEO: %p %u %ux%x \n", vdata, size, w, h);
-	if (size > p->vbufsize) {
-		p->vbuf = realloc(p->vbuf, size);
-		if (!p->vbuf)
-			return 1011;
-		p->vbufsize = size;
-	}
-	memcpy(p->vbuf, vdata, size);
-	if (imgpal) {
-		memcpy(p->pal, imgpal, 256 * 4);
-	}
+	/* we borrow the buffer and palette. these pointers are valid until
+	 * the next invocation of san_decode_next_frame().
+	 */
+	p->vbuf = vdata;
+	p->vbufsize = size;
+	p->pal = imgpal;
 	p->w = w;
 	p->h = h;
 	p->subid = subid;
@@ -153,7 +148,6 @@ static void exit_sdl_vid(struct sdlpriv *p)
 	SDL_DestroyRenderer(p->ren);
 	SDL_DestroyWindow(p->win);
 	free(p->abuf);
-	free(p->vbuf);
 	SDL_Quit();
 }
 
@@ -223,12 +217,12 @@ static int sio_read(void *ctx, void *dst, uint32_t size)
 int main(int a, char **argv)
 {
 	int running, paused, parserdone;
-	struct timespec ts;
 	struct sdlpriv sdl;
 	struct sanio sio;
 	void *sanctx;
 	SDL_Event e;
-	int h, ret, speedmode;
+	int h, ret, speedmode, waittick;
+	uint64_t t1, t2;
 
 	if (a < 2) {
 		printf("arg missing\n");
@@ -273,10 +267,7 @@ int main(int a, char **argv)
 	running = 1;
 	paused = 0;
 	parserdone = 0;
-
-	// frame pacing
-	ts.tv_sec = 0;
-	ts.tv_nsec = 970000000 / sandec_get_framerate(sanctx);
+	waittick = 1000 / sandec_get_framerate(sanctx);
 
 	while (running) {
 		while (0 != SDL_PollEvent(&e) && running) {
@@ -286,11 +277,12 @@ int main(int a, char **argv)
 
 		if (!paused && running) {
 			if (!parserdone) {
+				t1 = SDL_GetTicks64();
 				ret = sandec_decode_next_frame(sanctx);
 				if (ret == SANDEC_OK) {
 					ret = render_frame(&sdl);
 					if (!speedmode)
-						nanosleep(&ts, NULL);
+						SDL_Delay(waittick - (SDL_GetTicks64() - t1));
 				} else {
 					printf("ret %d at %d\n", ret, sandec_get_currframe(sanctx));
 					if (ret == SANDEC_DONE)
