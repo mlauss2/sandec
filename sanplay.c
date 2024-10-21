@@ -32,8 +32,8 @@ struct sdlpriv {
 	uint16_t subid;
 };
 
-// this can be called multiple times per "san_one_frame()", so buffer needs
-// to be dynamically expanded.
+/* this can be called multiple times per "sandec_decode_next_frame()",
+ * so buffer needs to be dynamically expanded. */
 static int queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
@@ -48,10 +48,15 @@ static int queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 	memcpy(p->abuf + p->abufptr, adata, size);
 	p->abufptr += size;
 
+	/* alternatively, the buffer could also just be queued to SDL immediately,
+	 * as SDL does the same thing the code above tries to do.
+	SDL_QueueAudio(p->aud, adata, size);
+	 */
+
 	return 0;
 }
 
-// this is called once per "san_one_frame()"
+/* this is called once per "sandec_decode_next_frame()" */
 static int queue_video(void *avctx, unsigned char *vdata, uint32_t size,
 		       uint16_t w, uint16_t h, uint32_t *imgpal, uint16_t subid)
 {
@@ -160,8 +165,8 @@ static int init_sdl_aud(struct sdlpriv *p)
 	specin.format = AUDIO_S16;
 	specin.channels = 2;
 	specin.userdata = p;
-	specin.callback = 0;	// SDL_QueueAudio() !
-	specin.samples = 1024; // 4096 / stereo / 16bit
+	specin.callback = NULL;
+	specin.samples = 4096 / 2 / 2;
 	ad = SDL_OpenAudioDevice(NULL, 0, &specin, &specout, 0);
 	if (!ad)
 		return 1;
@@ -222,7 +227,7 @@ int main(int a, char **argv)
 	void *sanctx;
 	SDL_Event e;
 	int h, ret, speedmode, waittick;
-	uint64_t t1, t2;
+	uint64_t t1;
 
 	if (a < 2) {
 		printf("arg missing\n");
