@@ -212,10 +212,6 @@ static void exit_sdl(struct sdlpriv *p)
 static int sio_read(void *ctx, void *dst, uint32_t size)
 {
 	int hdl = *(int *)ctx;
-	if (!dst) {
-		lseek(hdl, size, SEEK_CUR);
-		return size;
-	}
 	return read(hdl, dst, size);
 }
 
@@ -234,7 +230,7 @@ int main(int a, char **argv)
 		return 1;
 	}
 
-	speedmode = (a == 3) ? 1 : 0;
+	speedmode = (a == 3) ? strtol(argv[2], NULL, 10) : 0;
 
 	h = open(argv[1], O_RDONLY);
 	if (!h) {
@@ -248,10 +244,11 @@ int main(int a, char **argv)
 		goto out;
 	}
 
-	ret = init_sdl(&sdl);
-	if (ret)
-		goto out;
-
+	if (speedmode < 2) {
+		ret = init_sdl(&sdl);
+		if (ret)
+			goto out;
+	}
 	sio.ioctx = &h;
 	sio.ioread = sio_read;
 	sio.avctx = &sdl;
@@ -285,7 +282,10 @@ int main(int a, char **argv)
 				t1 = SDL_GetTicks64();
 				ret = sandec_decode_next_frame(sanctx);
 				if (ret == SANDEC_OK) {
-					ret = render_frame(&sdl);
+					if (speedmode < 2)
+						ret = render_frame(&sdl);
+					else
+						ret = 0;
 					if (!speedmode)
 						SDL_Delay(waittick - (SDL_GetTicks64() - t1));
 				} else {
@@ -310,7 +310,8 @@ int main(int a, char **argv)
 	printf("sanloop exited with code %d, played %d FRMEs\n", ret, sandec_get_currframe(sanctx));
 
 	sandec_exit(&sanctx);
-	exit_sdl(&sdl);
+	if (speedmode < 2)
+		exit_sdl(&sdl);
 out:
 	close(h);
 	return ret;
