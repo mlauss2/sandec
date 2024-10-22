@@ -60,42 +60,41 @@
 struct sanrt {
 	uint8_t *fcache;
 	uint32_t currframe;
-	uint32_t framerate;
-	uint32_t maxframe;
-	uint16_t FRMEcnt;
 	uint16_t w;  		/* frame width/pitch/stride */
 	uint16_t h;  		/* frame height */
-	uint16_t version;
 	uint16_t subid;
+	uint16_t to_store;
 
-	unsigned long fbsize;	/* size of the buffers below */
-	unsigned char *buf0;
-	unsigned char *buf1;
-	unsigned char *buf2;
-	unsigned char *buf3;	/* aux buffer for "STOR" and "FTCH" */
-	unsigned char *buf;	/* baseptr */
+	uint32_t fbsize;	/* size of the buffers below */
+	uint8_t *buf0;
+	uint8_t *buf1;
+	uint8_t *buf2;
+	uint8_t *buf3;	/* aux buffer for "STOR" and "FTCH" */
+	uint8_t *buf;	/* baseptr */
 	int32_t lastseq;
 	uint32_t rotate;
-	int to_store;
 
-	uint32_t samplerate;
 	uint32_t iactpos;
-	uint8_t iactbuf[4096];	/* for IACT chunks */
-	uint32_t palette[256];	/* ABGR */
-	int16_t deltapal[768];	/* for XPAL chunks */
+	uint8_t *iactbuf;	/* 4kB for IACT chunks */
+	uint32_t *palette;	/* 256x ABGR */
+	int16_t *deltapal;	/* 768x 16bit for XPAL chunks */
 	uint8_t *c47ipoltbl;	/* interpolation table for C47 Compression 1 */
+	uint32_t framerate;
+	uint32_t maxframe;
+	uint32_t samplerate;
+	uint16_t FRMEcnt;
+	uint16_t version;
 };
 
 /* internal context: static stuff. */
 struct sanctx {
+	struct sanrt rt;
 	struct sanio *io;
 	int errdone;		/* latest error status */
 
 	/* codec47 static data */
 	int8_t glyph4x4[NGLYPHS][16];
 	int8_t glyph8x8[NGLYPHS][64];
-
-	struct sanrt rt;
 };
 
 
@@ -878,7 +877,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
-	uint8_t *ahbuf;
+	uint8_t *ahbuf, *xbuf;
 	int ret;
 
 	if (size < 768 + 26)
@@ -887,6 +886,17 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	ahbuf = malloc(size);
 	if (!ahbuf)
 		return 7;
+
+	/* allocate buffer for IACT (4096), Palette (256*4) and deltapal */
+	xbuf = malloc(4096 + 256 * 4 + 768 * 2);
+	if (!xbuf) {
+		ret = 45;
+		goto out;
+	}
+	rt->iactbuf = xbuf;
+	rt->palette = (uint32_t *)(xbuf + 4096);
+	rt->deltapal = (int16_t *)(xbuf + 4096 + 1024);
+
 	if (read_source(ctx, ahbuf, size))
 		return 8;
 
@@ -914,8 +924,11 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 			ret = 44;
 	}
 
-	free(ahbuf);
+out:
+	if (ret && xbuf)
+		free(xbuf);
 
+	free(ahbuf);
 	return ret;
 }
 
@@ -974,6 +987,9 @@ static void sandec_free_memories(struct sanctx *ctx)
 	/* delete existing FRME buffer */
 	if (ctx->rt.fcache)
 		free(ctx->rt.fcache);
+	/* delete IACT/palette/deltapal buffer */
+	if (ctx->rt.iactbuf)
+		free(ctx->rt.iactbuf);
 	/* delete an existing framebuffer */
 	if (ctx->rt.buf && ctx->rt.fbsize)
 		free(ctx->rt.buf);
