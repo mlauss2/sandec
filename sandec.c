@@ -40,7 +40,7 @@
 
 #endif
 
-// chunk ids
+/* chunk identifiers */
 #define ANIM	0x414e494d
 #define AHDR	0x41484452
 #define FRME	0x46524d45
@@ -52,51 +52,50 @@
 #define FTCH	0x46544348
 #define XPAL	0x5850414c
 
-// codec47 glyhps
+/* codec47 glyhps */
 #define GLYPH_COORD_VECT_SIZE 16
 #define NGLYPHS 256
 
-// internal context: per-file
+/* internal context: per-file */
 struct sanrt {
-	uint32_t totalsize;
+	uint8_t *fcache;
 	uint32_t currframe;
 	uint32_t framerate;
 	uint32_t maxframe;
 	uint16_t FRMEcnt;
-	uint16_t w;  // frame width/pitch/stride
-	uint16_t h;  // frame height
+	uint16_t w;  		/* frame width/pitch/stride */
+	uint16_t h;  		/* frame height */
 	uint16_t version;
 	uint16_t subid;
 
-	unsigned long fbsize;	// size of the buffers below
+	unsigned long fbsize;	/* size of the buffers below */
 	unsigned char *buf0;
 	unsigned char *buf1;
 	unsigned char *buf2;
-	unsigned char *buf3;	// aux buffer for "STOR" and "FTCH"
-	unsigned char *buf;	// baseptr
+	unsigned char *buf3;	/* aux buffer for "STOR" and "FTCH" */
+	unsigned char *buf;	/* baseptr */
 	int32_t lastseq;
 	uint32_t rotate;
 	int to_store;
 
 	uint32_t samplerate;
 	uint32_t iactpos;
-	uint8_t iactbuf[4096];	// for IACT chunks
-	uint32_t palette[256];	// ABGR
-	int16_t deltapal[768];	// for XPAL chunks
-	uint8_t *c47ipoltbl;	// interpolation table for C47 Compression 1
+	uint8_t iactbuf[4096];	/* for IACT chunks */
+	uint32_t palette[256];	/* ABGR */
+	int16_t deltapal[768];	/* for XPAL chunks */
+	uint8_t *c47ipoltbl;	/* interpolation table for C47 Compression 1 */
 };
 
-// internal context: static stuff.
+/* internal context: static stuff. */
 struct sanctx {
 	struct sanio *io;
-	int32_t _bsz;		// current block size
-	int errdone;		// error or done.
+	int errdone;		/* latest error status */
 
-	// codec47 stuff
+	/* codec47 static data */
 	int8_t glyph4x4[NGLYPHS][16];
 	int8_t glyph8x8[NGLYPHS][64];
 
-	struct sanrt rt;	// dynamic context, reset on san_open()
+	struct sanrt rt;
 };
 
 
@@ -300,84 +299,22 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 
 /******************************************************************************/
 
-
-static inline int readX(struct sanctx *ctx, void *dst, uint32_t sz)
+static inline int read_source(struct sanctx *ctx, void *dst, uint32_t sz)
 {
 	int ret = ctx->io->ioread(ctx->io->ioctx, dst, sz);
-	if (ret == sz) {
-		ctx->_bsz -= ret;
-		return 0;
-	}
-	return 1;
+	return (ret == sz) ? 0 : 1;
 }
 
-static inline int read8(struct sanctx *ctx, uint8_t *out)
+static uint32_t readtag(uint8_t *src, uint32_t *outsize)
 {
-	int ret = ctx->io->ioread(ctx->io->ioctx, out, 1);
-	if (ret == 1) {
-		ctx->_bsz -= 1;
-		return 0;
-	}
-	return 1;
-}
+	uint32_t *v = (uint32_t *)src;
 
-static inline int readLE16(struct sanctx *ctx, uint16_t *out)
-{
-	int ret = ctx->io->ioread(ctx->io->ioctx, out, 2);
-	if (ret == 2) {
-		*out = le16_to_cpu(*out);
-		ctx->_bsz -= 2;
-		return 0;
-	}
-	return 1;
-}
-
-static inline int readLE32(struct sanctx *ctx, uint32_t *out)
-{
-	int ret = ctx->io->ioread(ctx->io->ioctx, out, 4);
-	if (ret == 4) {
-		*out = le32_to_cpu(*out);
-		ctx->_bsz -= 4;
-		return 0;
-	}
-	return 1;
-}
-
-// consume unused bytes in the stream (wrt. chunk size)
-static inline void san_read_unused(struct sanctx *ctx)
-{
-	int32_t t;
-	uint8_t v;
-
-	t = ctx->_bsz;
-	while (t-- > 0) {
-		if (read8(ctx, &v))
-			return;
-	}
-}
-
-#define _READ(x, y, z, ctx)			\
-	do {					\
-		if (read##x(ctx, y))		\
-			return z;		\
-	} while (0)
-
-static int readtag(struct sanctx *ctx, uint32_t *outtag, uint32_t *outsize)
-{
-	uint32_t v[2];
-	int ret;
-
-	ret = readX(ctx, v, 8);
-	if (ret)
-		return 43;
-
-	*outtag = be32_to_cpu(v[0]);
 	*outsize = be32_to_cpu(v[1]);
 
-	return 0;
+	return be32_to_cpu(v[0]);
 }
 
-static int read_palette(struct sanctx *ctx)
+static void read_palette(struct sanctx *ctx, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
 	uint32_t *pal = rt->palette;
@@ -385,18 +322,15 @@ static int read_palette(struct sanctx *ctx)
 	int i = 0;
 
 	while (i < 256) {
-		if(readX(ctx, t, 12))
-			return 42;
-		*pal++ = 0xff << 24 | t [2] << 16 | t[ 1] << 8 | t[0];
-		*pal++ = 0xff << 24 | t [5] << 16 | t[ 4] << 8 | t[3];
-		*pal++ = 0xff << 24 | t [8] << 16 | t[ 7] << 8 | t[6];
-		*pal++ = 0xff << 24 | t[11] << 16 | t[10] << 8 | t[9];
-		i += 4;
+		t[0] = *src++;
+		t[1] = *src++;
+		t[2] = *src++;
+		*pal++ = 0xff << 24 | t[2] << 16 | t[1] << 8 | t[0];
+		i++;
 	}
-	return 0;
 }
 
-static int codec47_comp1(struct sanctx *ctx, uint8_t *dst_in, uint16_t w, uint16_t h)
+static void codec47_comp1(struct sanctx *ctx, uint8_t *src, uint8_t *dst_in, uint16_t w, uint16_t h)
 {
 	/* input data is i-frame with half width and height. combining 2 pixels into
 	 * a 16bit value, one can then use this value as an index into the interpolation
@@ -408,12 +342,12 @@ static int codec47_comp1(struct sanctx *ctx, uint8_t *dst_in, uint16_t w, uint16
 
 	dst = dst_in + w;
 	for (i = 0; i < h; i += 2) {
-		_READ(8, &p8, 50, ctx);
+		p8 = *src++;
 		*dst++ = p8;
 		*dst++ = p8;
 		px = p8;
 		for (j = 2; j < w; j += 2) {
-			_READ(8, &p8, 51, ctx);
+			p8 = *src++;
 			px = (px << 8) | p8;
 			*dst++ = itbl[px];
 			*dst++ = p8;
@@ -432,46 +366,41 @@ static int codec47_comp1(struct sanctx *ctx, uint8_t *dst_in, uint16_t w, uint16
 		}
 		dst += w;
 	}
-	return 0;
 }
 
-static int codec47_block(struct sanctx *ctx, uint8_t *dst, uint8_t *p1, uint8_t *p2, uint16_t w, uint8_t *coltbl, uint16_t size)
+static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint8_t *p1, uint8_t *p2, uint16_t w, uint8_t *coltbl, uint16_t size)
 {
 	uint8_t code, col[2], c;
 	uint16_t i, j;
 	int8_t *pglyph;
 
-	_READ(8, &code, 35, ctx);
+	code = *src++;
 	if (code >= 0xF8) {
 		switch (code) {
 		case 0xff:
 			if (size == 2) {
-				uint32_t v32;
-				_READ(LE32, &v32, 36, ctx);
-				dst[w+1] = v32 >> 24;
-				dst[w] = v32 >> 16;
-				dst[1] = v32 >>  8;
-				dst[0] = v32;
+				*(uint16_t *)(dst + 0) = *(uint16_t *)src; src += 2;
+				*(uint16_t *)(dst + w) = *(uint16_t *)src; src += 2;
 			} else {
 				size >>= 1;
-				codec47_block(ctx, dst, p1, p2, w, coltbl, size);
-				codec47_block(ctx, dst + size, p1 + size, p2 + size, w, coltbl, size);
+				src = codec47_block(ctx, src, dst, p1, p2, w, coltbl, size);
+				src = codec47_block(ctx, src, dst + size, p1 + size, p2 + size, w, coltbl, size);
 				dst += (size * w);
 				p1 += (size * w);
 				p2 += (size * w);
-				codec47_block(ctx, dst, p1, p2, w, coltbl, size);
-				codec47_block(ctx, dst + size, p1 + size, p2 + size, w, coltbl, size);
+				src = codec47_block(ctx, src, dst, p1, p2, w, coltbl, size);
+				src = codec47_block(ctx, src, dst + size, p1 + size, p2 + size, w, coltbl, size);
 			}
 			break;
 		case 0xfe:
-			_READ(8, &c, 37, ctx);
+			c = *src++;
 			for (i = 0; i < size; i++)
 				memset(dst + (i * w), c, size);
 			break;
 		case 0xfd:
-			_READ(8, &code, 38, ctx);
-			_READ(8, &col[0], 39, ctx);
-			_READ(8, &col[1], 40, ctx);
+			code = *src++;
+			col[0] = *src++;
+			col[1] = *src++;
 			pglyph = (size == 8) ? ctx->glyph8x8[code] : ctx->glyph4x4[code];
 			for (i = 0; i < size; i++) {
 				for (j = 0; j < size; j++) {
@@ -497,53 +426,48 @@ static int codec47_block(struct sanctx *ctx, uint8_t *dst, uint8_t *p1, uint8_t 
 			memcpy(dst + (i * w), p2 + mvx + ((mvy + i) * w), size);
 		}
 	}
-	return 0;
+	return src;
 }
 
-static int codec47_comp2(struct sanctx *ctx, uint8_t *dst, uint16_t w, uint16_t h, uint8_t *coltbl)
+static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint16_t w, uint16_t h, uint8_t *coltbl)
 {
 	uint8_t *b1 = ctx->rt.buf1, *b2 = ctx->rt.buf2;
 	unsigned int i, j;
-	int ret;
 
 	for (j = 0; j < h; j += 8) {
 		for (i = 0; i < w; i += 8) {
-			ret = codec47_block(ctx, dst + i, b1 + i, b2 + i, w, coltbl, 8);
-			if (ret)
-				return ret;
+			src = codec47_block(ctx, src, dst + i, b1 + i, b2 + i, w, coltbl, 8);
 		}
 		dst += (w * 8);
 		b1 += (w * 8);
 		b2 += (w * 8);
 	}
-	return 0;
 }
 
-static int codec47_comp5(struct sanctx *ctx, uint8_t *dst, uint32_t left)
+static void codec47_comp5(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint32_t left)
 {
 	uint8_t opc, rlen, col;
 
 	while (left) {
-		_READ(8, &opc, 32, ctx);
+		opc = *src++;
 		rlen = (opc >> 1) + 1;
 		if (rlen > left)
 			rlen = left;
 		if (opc & 1) {
-			_READ(8, &col, 33, ctx);
+			col = *src++;
 			memset(dst, col, rlen);
 		} else {
-			if (readX(ctx, dst, rlen))
-				return 34;
+			memcpy(dst, src, rlen);
+			src += rlen;
 		}
 		dst += rlen;
 		left -= rlen;
 	}
-	return 0;
 }
 
-static int codec47_itable(struct sanctx *ctx)
+static int codec47_itable(struct sanctx *ctx, uint8_t **src2)
 {
-	uint8_t *itbl, *p1, *p2, c;
+	uint8_t *itbl, *p1, *p2, *src = *src2;
 	int i, j;
 
 	if (!ctx->rt.c47ipoltbl){
@@ -556,17 +480,17 @@ static int codec47_itable(struct sanctx *ctx)
 	for (i = 0; i < 256; i++) {
 		p1 = p2 = itbl + i;
 		for (j = 256 - i; j; j--) {
-			_READ(8, &c, 52, ctx);
-			*p1++ = c;
-			*p2 = c;
+			*p1 = *p2 = *src++;
+			p1 += 1;
 			p2 += 256;
 		}
 		itbl += 256;
 	}
+	*src2 = src;
 	return 0;
 }
 
-static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
+static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
 {
 	uint8_t headtable[32], *dst, comp, newrot, flag;
 	uint32_t decsize;
@@ -577,8 +501,8 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 	 * at table offset 14 to a 32bit boundary.  The codec47_block() code
 	 * accesses this table with 1-byte reads so we're good.
 	 */
-	if (readX(ctx, headtable + 2, 26))
-		return 29;
+	memcpy(headtable + 2, src, 26);
+	src += 26;
 
 	seq =    le16_to_cpu(*(uint16_t *)(headtable + 2 + 0));
 	comp =   headtable[2 + 2];
@@ -592,7 +516,7 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 		memset(ctx->rt.buf2, headtable[2 + 13], ctx->rt.fbsize);
 	}
 	if (flag & 1) {
-		ret = codec47_itable(ctx);
+		ret = codec47_itable(ctx, &src);
 		if (ret)
 			return ret;
 	}
@@ -600,15 +524,15 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 	ret = 0;
 	dst = ctx->rt.buf0 + left + (top * w);
 	switch (comp) {
-	case 0:	ret = readX(ctx, dst, w * h); break;
-	case 1:	ret = codec47_comp1(ctx, dst, w, h); break;
+	case 0:	memcpy(dst, src, w * h); break;
+	case 1:	codec47_comp1(ctx, src, dst, w, h); break;
 	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
-			ret = codec47_comp2(ctx, dst, w, h, headtable + 10);
+			codec47_comp2(ctx, src, dst, w, h, headtable + 10);
 		}
 		break;
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;
 	case 4:	memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize); break;
-	case 5:	ret = codec47_comp5(ctx, dst, decsize); break;
+	case 5:	codec47_comp5(ctx, src, dst, decsize); break;
 	default: ret = 31;
 	}
 
@@ -618,7 +542,7 @@ static int codec47(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, ui
 	return ret;
 }
 
-static int codec1(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
+static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
 {
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
@@ -628,29 +552,29 @@ static int codec1(struct sanctx *ctx, uint32_t size, uint16_t w, uint16_t h, uin
 
 	for (i = 0; i < h; i++) {
 		pos = 0;
-		_READ(LE16, &dlen, 25, ctx);
+		dlen = le16_to_cpu(*(uint16_t *)src); src += 2;
 		while (dlen) {
-			_READ(8, &code, 26, ctx); dlen--;
+			code = *src++; dlen--;
 			rlen = (code >> 1) + 1;
 			if (code & 1) {
-				_READ(8, &col, 27, ctx); dlen--;
+				col = *src++; dlen--;
 				if (col)
 					memset(dst, col, rlen);
 				pos += rlen;
 			} else {
 				for (j = 0; j < rlen; j++) {
-					_READ(8, &col, 28, ctx); dlen--;
+					col = *src++;
 					if (col)
 						dst[pos] = col;
 					pos++;
 				}
+				dlen -= rlen;
 			}
 		}
 		dst += w;
 	}
 
 	ctx->rt.rotate = 0;
-	return 0;
 }
 
 static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t bpp)
@@ -681,24 +605,17 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	return 0;
 }
 
-static int handle_FOBJ(struct sanctx *ctx, uint32_t size)
+static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	uint16_t codec, left, top, w, h, buf16[16];
+	uint16_t codec, left, top, w, h;
 	struct sanrt *rt = &ctx->rt;
 	int ret;
 
-	if (size < 16)
-		return 21;
-
-	// need to track read size since not all bytes of "size" are always consumed
-	ctx->_bsz = size;		// init byte tracking
-	if (readX(ctx, buf16, 14))	/* 5*2 + 4 */
-		return 22;
-	codec = le16_to_cpu(buf16[0]);
-	left  = le16_to_cpu(buf16[1]);
-	top   = le16_to_cpu(buf16[2]);
-	w     = le16_to_cpu(buf16[3]);
-	h     = le16_to_cpu(buf16[4]);
+	codec = le16_to_cpu(*(uint16_t *)(src + 0));
+	left  = le16_to_cpu(*(uint16_t *)(src + 2));
+	top   = le16_to_cpu(*(uint16_t *)(src + 4));
+	w     = le16_to_cpu(*(uint16_t *)(src + 6));
+	h     = le16_to_cpu(*(uint16_t *)(src + 8));
 	/* 32bit unknown value */
 
 	ret = 0;
@@ -710,25 +627,17 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size)
 
 	switch (codec) {
 	case 1:
-	case 3: ret = codec1(ctx, size - 14, w, h, top, left); break;
-	case 47:ret = codec47(ctx, size - 14, w, h, top, left); break;
+	case 3: codec1(ctx, src + 14, w, h, top, left); break;
+	case 47:ret = codec47(ctx, src + 14, w, h, top, left); break;
 	default: ret = 24;
 	}
-
-	san_read_unused(ctx);
 
 	return ret;
 }
 
-static int handle_NPAL(struct sanctx *ctx, uint32_t size)
+static void handle_NPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	int ret;
-
-	ctx->_bsz = size;		// init byte tracking
-	ret = read_palette(ctx);
-	san_read_unused(ctx);
-
-	return ret;
+	read_palette(ctx, src);
 }
 
 static inline uint8_t _u8clip(int a)
@@ -738,21 +647,15 @@ static inline uint8_t _u8clip(int a)
 	else return a;
 }
 
-static int handle_XPAL(struct sanctx *ctx, uint32_t size)
+static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint32_t t32, *pal = ctx->rt.palette;
 	uint16_t dp;
-	int i, j, ret, t2[3];
+	int i, j, t2[3];
 
-	ret = 0;
-	ctx->_bsz = size;		// init byte tracking
-
-	_READ(LE16, &dp, 17, ctx);	// dummy
-	_READ(LE16, &dp, 18, ctx);	// command
+	dp = le16_to_cpu(*(uint16_t *)src + 2); src += 4;
 
 	if (dp == 256) {
-		if (readX(ctx, &dp, 2))	// dummy
-			return 19;
 		i = 0;
 		while (i < 768) {
 			t32 = *pal;
@@ -765,38 +668,22 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size)
 			}
 			*pal++ = 0xff << 24 | (t2[2] & 0xff) << 16 | (t2[1] & 0xff) << 8 | (t2[0]  & 0xff);
 		}
-
 	} else {
-		if (readX(ctx, ctx->rt.deltapal, 768 * 2))
-			return 20;
+		memcpy(ctx->rt.deltapal, src, 768 * 2);
+		src += 768 * 2;
 		if (dp == 512) {
-			ret = read_palette(ctx);
+			read_palette(ctx, src);
 		}
 	}
-
-	san_read_unused(ctx);
-
-	return ret;
 }
 
-static int handle_IACT(struct sanctx *ctx, uint32_t size)
+static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
 {
 	uint8_t v1, v2, v3, v4, *dst, *src, *src2, *inbuf, outbuf[4096];
+	uint32_t datasz = size - 18;
 	int16_t len, v16;
-	uint16_t p[10];
-	uint32_t datasz;
+	uint16_t *p = (uint16_t *)(isrc - 2);
 	int count, ret;
-
-	datasz = size - 18;
-
-	// size is always a multiple of 2 in the stream, even if the tag reports
-	// otherwise.
-	if (size & 1)
-		size += 1;
-
-	ctx->_bsz = size;		// init byte tracking
-	if (readX(ctx, p + 1, 18))	/* +2bytes to align the 32bit read for vv */
-		return 13;
 
 #if 0
 	uint32_t vv = *(uint32_t *)(&p[8]);
@@ -820,10 +707,8 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size)
 		ret = 15;
 		goto out;
 	}
-	if (readX(ctx, inbuf, datasz)) {
-		ret = 16;
-		goto out1;
-	}
+
+	memcpy(inbuf, isrc + 18, datasz);
 
 	ret = 0;
 	src = inbuf;
@@ -835,7 +720,7 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size)
 	while (datasz > 0) {
 		if (ctx->rt.iactpos >= 2) {
 			len = be16_to_cpu(*(uint16_t *)ctx->rt.iactbuf) + 2 - ctx->rt.iactpos;
-			if (len > datasz) {  // continued in next IACT chunk.
+			if (len > datasz) {  /* continued in next IACT chunk. */
 				memcpy(ctx->rt.iactbuf + ctx->rt.iactpos, src, datasz);
 				ctx->rt.iactpos += datasz;
 				datasz = 0;
@@ -850,7 +735,7 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size)
 				do {
 					v3 = *src2++;
 					if (v3 == 0x80) {
-						// endian-swap BE16 samples
+						/* endian-swap BE16 samples */
 						v4 = *src2++;
 						*dst++ = *src2++;
 						*dst++ = v4;
@@ -861,7 +746,7 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size)
 					}
 					v3 = *src2++;
 					if (v3 == 0x80) {
-						// endian-swap BE16 samples
+						/* endian-swap BE16 samples */
 						v4 = *src2++;
 						*dst++ = *src2++;
 						*dst++ = v4;
@@ -893,91 +778,79 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size)
 out1:
 	free(inbuf);
 out:
-	san_read_unused(ctx);
 	return ret;
 }
 
-// subtitles
-static int handle_TRES(struct sanctx *ctx, uint32_t size)
+/* subtitles */
+static void handle_TRES(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	uint16_t tres[9];
-	int ret;
-
-	ctx->_bsz = size;		// init byte tracking
-	ret = readX(ctx, tres, 18);
+	uint16_t *tres = (uint16_t *)src;
 
 #if 0
-	_READ(LE16, &px, 1, ctx);
-	_READ(LE16, &py, 1, ctx);
-	_READ(LE16, &f, 1, ctx);
-	_READ(LE16, &l, 1, ctx);
-	_READ(LE16, &t, 1, ctx);
-	_READ(LE16, &w, 1, ctx);
-	_READ(LE16, &h, 1, ctx);
-	_READ(LE16, &strid, 1, ctx); // dummy
-	_READ(LE16, &strid, 1, ctx); // real strid
+	px = tres[0];
+	py = tres[1];
+	f = tres[2];
+	l = tres[3];
+	t = tres[4];
+	w = tres[5];
+	h = tres[6];
+	strid1 = tres[7];
 #endif
 	ctx->rt.subid = tres[8];
-	san_read_unused(ctx);
-
-	return ret;
 }
 
-static int handle_STOR(struct sanctx *ctx, uint32_t size)
+static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	ctx->_bsz = size;		// init byte tracking
 	ctx->rt.to_store = 1;
-	san_read_unused(ctx);
-	return 0;
 }
 
-static int handle_FTCH(struct sanctx *ctx, uint32_t size)
+static void handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	ctx->_bsz = size;		// init byte tracking
 	memcpy(ctx->rt.buf0, ctx->rt.buf3, ctx->rt.fbsize);
-	san_read_unused(ctx);
-	return 0;
 }
 
 static int handle_FRME(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
+	uint8_t *src = rt->fcache;
 	uint32_t cid, csz;
-	uint8_t v;
 	int ret;
+
+	if (read_source(ctx, src, size))
+		return 8;
 
 	ret = 0;
 	while ((size > 3) && (ret == 0)) {
-		ret = readtag(ctx, &cid, &csz);
-		if (ret)
-			return 9;
+		cid = readtag(src, &csz);
 		if (csz > size)
 			return 10;
+		src += 8;
+		size -= 8;
 		switch (cid)
 		{
-		case NPAL: ret = handle_NPAL(ctx, csz); break;
-		case FOBJ: ret = handle_FOBJ(ctx, csz); break;
-		case IACT: ret = handle_IACT(ctx, csz); break;
-		case TRES: ret = handle_TRES(ctx, csz); break;
-		case STOR: ret = handle_STOR(ctx, csz); break;
-		case FTCH: ret = handle_FTCH(ctx, csz); break;
-		case XPAL: ret = handle_XPAL(ctx, csz); break;
+		case NPAL: handle_NPAL(ctx, csz, src); break;
+		case FOBJ: ret = handle_FOBJ(ctx, csz, src); break;
+		case IACT: ret = handle_IACT(ctx, csz, src); break;
+		case TRES: handle_TRES(ctx, csz, src); break;
+		case STOR: handle_STOR(ctx, csz, src); break;
+		case FTCH: handle_FTCH(ctx, csz, src); break;
+		case XPAL: handle_XPAL(ctx, csz, src); break;
 		default:
 			ret = 11;
 			break;
 		}
 		if (csz & 1)
 			csz += 1;
-		size -= csz + 8;
+		src += csz;
+		size -= csz;
 	}
 
+	/* OK case: all bytes of the FRME read, no errors */
 	if (size < 4 && ret == 0) {
-		// OK Case: most bytes consumed, no errors.
-		if (rt->to_store) {
+		/* STOR */
+		if (rt->to_store)
 			memcpy(rt->buf3, rt->buf0, rt->fbsize);
-		}
 
-		// copy rt->buf0 to output
 		ret = ctx->io->queue_video(ctx->io->avctx, rt->buf0, rt->fbsize,
 					   rt->w, rt->h, rt->palette, rt->subid);
 
@@ -993,11 +866,6 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 			rt->buf0 = tmp;
 		}
 
-		// consume any unread bytes
-		while (size--)
-			if (read8(ctx, &v))
-				return 12;
-
 		rt->to_store = 0;
 		rt->currframe++;
 		rt->rotate = 0;
@@ -1010,40 +878,45 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
-	uint16_t v16[3];
-	uint32_t v32[5];
+	uint8_t *ahbuf;
 	int ret;
 
-	if (size < 768 + 6)
-		return 6;		// too small
+	if (size < 768 + 26)
+		return 6;		/* too small */
 
-	ctx->_bsz = size;		// init byte tracking
-	ret = readX(ctx, v16, 3 * 2);
-	if (ret)
+	ahbuf = malloc(size);
+	if (!ahbuf)
 		return 7;
-	rt->version = le16_to_cpu(v16[0]);
-	rt->FRMEcnt = le16_to_cpu(v16[1]);
+	if (read_source(ctx, ahbuf, size))
+		return 8;
+
+	rt->version = le16_to_cpu(*(uint16_t *)(ahbuf + 0));
+	rt->FRMEcnt = le16_to_cpu(*(uint16_t *)(ahbuf + 2));
 	/* unk16 */
 
-	ret = read_palette(ctx);
+	read_palette(ctx, ahbuf + 6);
 
-	if (ctx->_bsz < 20) {
-		ret = 8;
-	} else {
-		ret = readX(ctx, v32, 5 * 4);
-		if (ret)
-			return 2;
-		rt->framerate =  le32_to_cpu(v32[0]);
-		rt->maxframe =   le32_to_cpu(v32[1]);
-		rt->samplerate = le32_to_cpu(v32[2]);
-		/* unk32_1 */
-		/* unk32_2 */
-		ret = 0;
+	rt->framerate =  le32_to_cpu(*(uint32_t *)(ahbuf + 768 + 6 + 0));
+	rt->maxframe =   le32_to_cpu(*(uint32_t *)(ahbuf + 768 + 6 + 4));
+	rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 768 + 6 + 8));
+
+	/* "maxframe" indicates the maximum size of one FRME object
+	 * with chunk ID and chunk size, in the stream (usually the first)
+	 * plus 1 byte.
+	 */
+	ret = 0;
+	if ((rt->maxframe > 9) && (rt->maxframe < 4 * 1024 * 1024)) {
+		rt->maxframe -= 9;
+		if (rt->maxframe & 1)
+			rt->maxframe += 1;	/* make it even */
+		rt->fcache = malloc(rt->maxframe);
+		if (!rt->fcache)
+			ret = 44;
 	}
 
-	san_read_unused(ctx);
+	free(ahbuf);
 
-	return 0;
+	return ret;
 }
 
 /******************************************************************************/
@@ -1052,22 +925,24 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 int sandec_decode_next_frame(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
-	uint32_t cid, csz;
+	uint32_t c[2];
 	int ret;
 
 	/* in case of previous error, don't continue, just return it again */
 	if (ctx->errdone)
 		return ctx->errdone;
 
-	ret = readtag(ctx, &cid, &csz);
+	ret = read_source(ctx, c, 8);
 	if (ret) {
 		if (ctx->rt.currframe == ctx->rt.FRMEcnt)
 			ret = -1;
 		goto out;
 	}
 
-	switch (cid) {
-	case FRME: 	ret = handle_FRME(ctx, csz); break;
+	c[0] = be32_to_cpu(c[0]);
+	c[1] = be32_to_cpu(c[1]);
+	switch (c[0]) {
+	case FRME: 	ret = handle_FRME(ctx, c[1]); break;
 	default:	ret = 5;
 	}
 
@@ -1094,14 +969,26 @@ int sandec_init(void **ctxout)
 	return 0;
 }
 
+static void sandec_free_memories(struct sanctx *ctx)
+{
+	/* delete existing FRME buffer */
+	if (ctx->rt.fcache)
+		free(ctx->rt.fcache);
+	/* delete an existing framebuffer */
+	if (ctx->rt.buf && ctx->rt.fbsize)
+		free(ctx->rt.buf);
+	/* delete existing C47 interpolation table */
+	if (ctx->rt.c47ipoltbl)
+		free(ctx->rt.c47ipoltbl);
+	memset(&ctx->rt, 0, sizeof(struct sanrt));
+}
+
 int sandec_open(void *sanctx, struct sanio *io)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
-	int ret, ok;
-	uint32_t cid;
-	uint32_t csz;
-	int have_anim = 0;
-	int have_ahdr = 0;
+	int ret, have_anim = 0, have_ahdr = 0;
+	uint32_t cid, csz;
+	uint8_t c[8];
 
 	if (!io) {
 		ret = 2;
@@ -1109,22 +996,15 @@ int sandec_open(void *sanctx, struct sanio *io)
 	}
 	ctx->io = io;
 
-	/* delete an existing framebuffer */
-	if (ctx->rt.buf && ctx->rt.fbsize)
-		free(ctx->rt.buf);
-	/* delete existing C47 interpolation table */
-	if (ctx->rt.c47ipoltbl)
-		free(ctx->rt.c47ipoltbl);
-	/* force-initialize the dynamic context */
-	memset(&ctx->rt, 0, sizeof(struct sanrt));
+	sandec_free_memories(ctx);
 
 	while (1) {
-		ok = readtag(ctx, &cid, &csz);
-		if (ok) {
+		ret = read_source(ctx, &c[0], 4 * 2);
+		if (ret) {
 			ret = 3;
 			goto out;
 		}
-
+		cid = readtag(&c[0], &csz);
 		if (!have_anim) {
 			if (cid == ANIM) {
 				have_anim = 1;
@@ -1150,12 +1030,7 @@ void sandec_exit(void **sanctx)
 	if (!ctx)
 		return;
 
-	/* delete the framebuffer */
-	if (ctx->rt.buf)
-		free(ctx->rt.buf);
-	if (ctx->rt.c47ipoltbl)
-		free(ctx->rt.c47ipoltbl);
-	memset(&ctx->rt, 0, sizeof(struct sanrt));
+	sandec_free_memories(ctx);
 	free(ctx);
 	*sanctx = NULL;
 }
