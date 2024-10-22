@@ -212,7 +212,7 @@ static void exit_sdl(struct sdlpriv *p)
 static int sio_read(void *ctx, void *dst, uint32_t size)
 {
 	int hdl = *(int *)ctx;
-	return read(hdl, dst, size);
+	return read(hdl, dst, size) == size;
 }
 
 int main(int a, char **argv)

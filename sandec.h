@@ -27,11 +27,12 @@
  *
  *
  * fetch data callback:  destbuf is always valid, amount is always 1 or more.
- * the decoder does linear forward reads, no seeks.
+ * the decoder does linear forward reads, no seeks.  Return 1 if the requested
+ * amount of data was put in the buffer, otherwise or on error return 0.
  *
  * int my_data_read(void *ioctx, char *destbuf, int amount)
- * {
- *	return read(ioctx, destbuf, amount)
+ * {    // return 1 if all data was read, 0 on errors or not enough data.
+ *	return (read(ioctx, destbuf, amount) == amount);
  * }
  *
  *

@@ -27,20 +27,28 @@
 #define be32_to_cpu(x) bswap_32(x)
 #define be16_to_cpu(x) bswap_16(x)
 
+/* chunk identifiers LE */
+#define ANIM	0x4d494e41
+#define AHDR	0x52444841
+#define FRME	0x454d5246
+#define NPAL	0x4c41504e
+#define FOBJ	0x4a424f46
+#define IACT	0x54434149
+#define TRES	0x53455254
+#define STOR	0x524f5453
+#define FTCH	0x48435446
+#define XPAL	0x4c415058
+
+
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+
 
 #define be32_to_cpu(x)  (x)
 #define be16_to_cpu(x)  (x)
 #define le32_to_cpu(x)  bswap_32(x)
 #define le16_to_cpu(x)  bswap_16(x)
 
-#else
-
-#error "unknown endianness"
-
-#endif
-
-/* chunk identifiers */
+/* chunk identifiers BE */
 #define ANIM	0x414e494d
 #define AHDR	0x41484452
 #define FRME	0x46524d45
@@ -51,6 +59,13 @@
 #define STOR	0x53544f52
 #define FTCH	0x46544348
 #define XPAL	0x5850414c
+
+
+#else
+
+#error "unknown endianness"
+
+#endif
 
 /* codec47 glyhps */
 #define GLYPH_COORD_VECT_SIZE 16
@@ -64,7 +79,6 @@ struct sanrt {
 	uint16_t h;  		/* frame height */
 	uint16_t subid;
 	uint16_t to_store;
-
 	uint32_t fbsize;	/* size of the buffers below */
 	uint8_t *buf0;
 	uint8_t *buf1;
@@ -73,7 +87,6 @@ struct sanrt {
 	uint8_t *buf;	/* baseptr */
 	int32_t lastseq;
 	uint32_t rotate;
-
 	uint32_t iactpos;
 	uint8_t *iactbuf;	/* 4kB for IACT chunks */
 	uint32_t *palette;	/* 256x ABGR */
@@ -93,8 +106,8 @@ struct sanctx {
 	int errdone;		/* latest error status */
 
 	/* codec47 static data */
-	int8_t glyph4x4[NGLYPHS][16];
-	int8_t glyph8x8[NGLYPHS][64];
+	int8_t c47_glyph4x4[NGLYPHS][16];
+	int8_t c47_glyph8x8[NGLYPHS][64];
 };
 
 
@@ -103,23 +116,23 @@ struct sanctx {
  * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob_plain/HEAD:/libavcodec/sanm.c
  */
 
-static const int8_t glyph4_x[GLYPH_COORD_VECT_SIZE] = {
+static const int8_t c47_glyph4_x[GLYPH_COORD_VECT_SIZE] = {
 	0, 1, 2, 3, 3, 3, 3, 2, 1, 0, 0, 0, 1, 2, 2, 1
 };
 
-static const int8_t glyph4_y[GLYPH_COORD_VECT_SIZE] = {
+static const int8_t c47_glyph4_y[GLYPH_COORD_VECT_SIZE] = {
 	0, 0, 0, 0, 1, 2, 3, 3, 3, 3, 2, 1, 1, 1, 2, 2
 };
 
-static const int8_t glyph8_x[GLYPH_COORD_VECT_SIZE] = {
+static const int8_t c47_glyph8_x[GLYPH_COORD_VECT_SIZE] = {
 	0, 2, 5, 7, 7, 7, 7, 7, 7, 5, 2, 0, 0, 0, 0, 0
 };
 
-static const int8_t glyph8_y[GLYPH_COORD_VECT_SIZE] = {
+static const int8_t c47_glyph8_y[GLYPH_COORD_VECT_SIZE] = {
 	0, 0, 0, 0, 1, 3, 4, 6, 7, 7, 7, 7, 6, 4, 3, 1
 };
 
-static const int8_t motion_vectors[256][2] = {
+static const int8_t c47_motion_vectors[256][2] = {
 	{   0,   0 }, {  -1, -43 }, {   6, -43 }, {  -9, -42 }, {  13, -41 },
 	{ -16, -40 }, {  19, -39 }, { -23, -36 }, {  26, -34 }, {  -2, -33 },
 	{   4, -33 }, { -29, -32 }, {  -9, -32 }, {  11, -31 }, { -16, -29 },
@@ -189,7 +202,7 @@ enum GlyphDir {
 	NO_DIR
 };
 
-static enum GlyphEdge which_edge(int x, int y, int edge_size)
+static enum GlyphEdge c47_which_edge(int x, int y, int edge_size)
 {
 	const int edge_max = edge_size - 1;
 
@@ -205,7 +218,7 @@ static enum GlyphEdge which_edge(int x, int y, int edge_size)
 		return NO_EDGE;
 }
 
-static enum GlyphDir which_direction(enum GlyphEdge edge0, enum GlyphEdge edge1)
+static enum GlyphDir c47_which_direction(enum GlyphEdge edge0, enum GlyphEdge edge1)
 {
 	if ((edge0 == LEFT_EDGE && edge1 == RIGHT_EDGE) ||
 		(edge1 == LEFT_EDGE && edge0 == RIGHT_EDGE) ||
@@ -250,13 +263,13 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 	for (i = 0; i < GLYPH_COORD_VECT_SIZE; i++) {
 		int x0 = xvec[i];
 		int y0 = yvec[i];
-		enum GlyphEdge edge0 = which_edge(x0, y0, side_length);
+		enum GlyphEdge edge0 = c47_which_edge(x0, y0, side_length);
 
 		for (j = 0; j < GLYPH_COORD_VECT_SIZE; j++, pglyph += glyph_size) {
 			int x1 = xvec[j];
 			int y1 = yvec[j];
-			enum GlyphEdge edge1 = which_edge(x1, y1, side_length);
-			enum GlyphDir dir = which_direction(edge0, edge1);
+			enum GlyphEdge edge1 = c47_which_edge(x1, y1, side_length);
+			enum GlyphDir dir = c47_which_direction(edge0, edge1);
 			int npoints = _max(abs(x1 - x0), abs(y1 - y0));
 			int ipoint;
 
@@ -300,17 +313,7 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 
 static inline int read_source(struct sanctx *ctx, void *dst, uint32_t sz)
 {
-	int ret = ctx->io->ioread(ctx->io->ioctx, dst, sz);
-	return (ret == sz) ? 0 : 1;
-}
-
-static uint32_t readtag(uint8_t *src, uint32_t *outsize)
-{
-	uint32_t *v = (uint32_t *)src;
-
-	*outsize = be32_to_cpu(v[1]);
-
-	return be32_to_cpu(v[0]);
+	return !(ctx->io->ioread(ctx->io->ioctx, dst, sz));
 }
 
 static void read_palette(struct sanctx *ctx, uint8_t *src)
@@ -331,14 +334,18 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 
 static void codec47_comp1(struct sanctx *ctx, uint8_t *src, uint8_t *dst_in, uint16_t w, uint16_t h)
 {
-	/* input data is i-frame with half width and height. combining 2 pixels into
-	 * a 16bit value, one can then use this value as an index into the interpolation
-	 * table to get the missing color between 2 pixels (horizontally and vertically).
+	/* input data is i-frame with half width and height. combining 2 pixels
+	 * into a 16bit value, one can then use this value as an index into
+	 * the interpolation table to get the missing color between 2 pixels.
 	 */
 	uint8_t *itbl = ctx->rt.c47ipoltbl, *dst, p8, p82;
 	uint16_t px;
 	int i, j;
 
+	/* start with 2nd row and create every other.  The first 2 pixels in each
+	 * row are taken from the source, the next one is interpolated from the
+	 * last and the following one.
+	 */
 	dst = dst_in + w;
 	for (i = 0; i < h; i += 2) {
 		p8 = *src++;
@@ -354,12 +361,15 @@ static void codec47_comp1(struct sanctx *ctx, uint8_t *src, uint8_t *dst_in, uin
 		dst += w;
 	}
 
+	/* do the rows: the first is a copy of the 2nd line, the missing ones
+	 * are interpolated using the pixels of the rows above and below.
+	 */
 	memcpy(dst_in, dst_in + w, w);
 	dst = dst_in + (w * 2);
 	for (i = 2; i < h - 1; i += 2) {
-		for (j = 0; j < w; j ++) {
-			p8 = *(dst - w);
-			p82 = *(dst + w);
+		for (j = 0; j < w; j ++) {	/* walk along the full row */
+			p8 = *(dst - w);	/* pixel from row above */
+			p82 = *(dst + w);	/* pixel from row below */
 			px = (p82 << 8) | p8;
 			*dst++ = itbl[px];
 		}
@@ -400,7 +410,7 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst, ui
 			code = *src++;
 			col[0] = *src++;
 			col[1] = *src++;
-			pglyph = (size == 8) ? ctx->glyph8x8[code] : ctx->glyph4x4[code];
+			pglyph = (size == 8) ? ctx->c47_glyph8x8[code] : ctx->c47_glyph4x4[code];
 			for (i = 0; i < size; i++) {
 				for (j = 0; j < size; j++) {
 					dst[j + (i * w)] = col[!*pglyph++];
@@ -419,8 +429,8 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst, ui
 			}
 		}
 	} else {
-		const int8_t mvx = motion_vectors[code][0];
-		const int8_t mvy = motion_vectors[code][1];
+		const int8_t mvx = c47_motion_vectors[code][0];
+		const int8_t mvy = c47_motion_vectors[code][1];
 		for (i = 0; i < size; i++) {
 			memcpy(dst + (i * w), p2 + mvx + ((mvy + i) * w), size);
 		}
@@ -469,7 +479,7 @@ static int codec47_itable(struct sanctx *ctx, uint8_t **src2)
 	uint8_t *itbl, *p1, *p2, *src = *src2;
 	int i, j;
 
-	if (!ctx->rt.c47ipoltbl){
+	if (!ctx->rt.c47ipoltbl) {
 		ctx->rt.c47ipoltbl = malloc(0x10000);
 		if (!ctx->rt.c47ipoltbl)
 			return 30;
@@ -526,7 +536,7 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	case 0:	memcpy(dst, src, w * h); break;
 	case 1:	codec47_comp1(ctx, src, dst, w, h); break;
 	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
-			codec47_comp2(ctx, src, dst, w, h, headtable + 10);
+			codec47_comp2(ctx, src, dst, w, h, headtable + 2 + 8);
 		}
 		break;
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;
@@ -679,24 +689,16 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
 {
 	uint8_t v1, v2, v3, v4, *dst, *src, *src2, *inbuf, outbuf[4096];
+	uint16_t count, len, *p = (uint16_t *)isrc;
 	uint32_t datasz = size - 18;
-	int16_t len, v16;
-	uint16_t *p = (uint16_t *)(isrc - 2);
-	int count, ret;
+	int16_t v16;
+	int ret;
 
-#if 0
-	uint32_t vv = *(uint32_t *)(&p[8]);
-	printf("IACT sz %u code %u flags %u unknown %u uid %u trkid %u frame %u"
-	       " maxframes %u data_left_in_track %u iactpos %d\n", size,
-	       le16_tp_cpu(p[1]), le16_tp_cpu(p[2]), le16_tp_cpu(p[3]),
-	       le16_tp_cpu(p[4]), le16_tp_cpu(p[5]), le16_tp_cpu(p[6]),
-	       le16_tp_cpu(p[7]), le32_tp_cpu(vv), ctx->rt.iactpos);
-#endif
-
-	if (le16_to_cpu(p[1]) != 8  ||
-	    le16_to_cpu(p[2]) != 46 ||
-	    le16_to_cpu(p[3]) != 0  ||
-	    le16_to_cpu(p[4]) != 0) {
+	/* this code only works when these parameters are met: */
+	if (le16_to_cpu(p[0]) != 8  ||
+	    le16_to_cpu(p[1]) != 46 ||
+	    le16_to_cpu(p[2]) != 0  ||
+	    le16_to_cpu(p[3]) != 0) {
 		ret = 14;
 		goto out;
 	}
@@ -819,10 +821,10 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		return 8;
 
 	ret = 0;
-	while ((size > 3) && (ret == 0)) {
-		cid = readtag(src, &csz);
-		if (csz > size)
-			return 10;
+	while ((size > 7) && (ret == 0)) {
+		cid =             *(uint32_t *)(src + 0);
+		csz = be32_to_cpu(*(uint32_t *)(src + 4));
+
 		src += 8;
 		size -= 8;
 		switch (cid)
@@ -844,8 +846,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		size -= csz;
 	}
 
-	/* OK case: all bytes of the FRME read, no errors */
-	if (size < 4 && ret == 0) {
+	/* OK case: all usable bytes of the FRME read, no errors */
+	if (ret == 0) {
 		/* STOR */
 		if (rt->to_store)
 			memcpy(rt->buf3, rt->buf0, rt->fbsize);
@@ -854,7 +856,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 					   rt->w, rt->h, rt->palette, rt->subid);
 
 		if (rt->rotate) {
-			unsigned char *tmp;
+			uint8_t *tmp;
 			if (rt->rotate == 2) {
 				tmp = rt->buf1;
 				rt->buf1 = rt->buf2;
@@ -887,7 +889,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	if (!ahbuf)
 		return 7;
 
-	/* allocate buffer for IACT (4096), Palette (256*4) and deltapal */
+	/* buffer for IACT (4096), Palette (256*4) and deltapal (768*2) */
 	xbuf = malloc(4096 + 256 * 4 + 768 * 2);
 	if (!xbuf) {
 		ret = 45;
@@ -895,7 +897,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	}
 	rt->iactbuf = xbuf;
 	rt->palette = (uint32_t *)(xbuf + 4096);
-	rt->deltapal = (int16_t *)(xbuf + 4096 + 1024);
+	rt->deltapal = (int16_t *)(xbuf + 4096 + (256 * 4));
 
 	if (read_source(ctx, ahbuf, size))
 		return 8;
@@ -904,14 +906,14 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	rt->FRMEcnt = le16_to_cpu(*(uint16_t *)(ahbuf + 2));
 	/* unk16 */
 
-	read_palette(ctx, ahbuf + 6);
+	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
 
-	rt->framerate =  le32_to_cpu(*(uint32_t *)(ahbuf + 768 + 6 + 0));
-	rt->maxframe =   le32_to_cpu(*(uint32_t *)(ahbuf + 768 + 6 + 4));
-	rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 768 + 6 + 8));
+	rt->framerate =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
+	rt->maxframe =   le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
+	rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
 
 	/* "maxframe" indicates the maximum size of one FRME object
-	 * with chunk ID and chunk size, in the stream (usually the first)
+	 * including chunk ID and chunk size in the stream (usually the first)
 	 * plus 1 byte.
 	 */
 	ret = 0;
@@ -930,6 +932,23 @@ out:
 
 	free(ahbuf);
 	return ret;
+}
+
+static void sandec_free_memories(struct sanctx *ctx)
+{
+	/* delete existing FRME buffer */
+	if (ctx->rt.fcache)
+		free(ctx->rt.fcache);
+	/* delete IACT/palette/deltapal buffer */
+	if (ctx->rt.iactbuf)
+		free(ctx->rt.iactbuf);
+	/* delete an existing framebuffer */
+	if (ctx->rt.buf && ctx->rt.fbsize)
+		free(ctx->rt.buf);
+	/* delete existing C47 interpolation table */
+	if (ctx->rt.c47ipoltbl)
+		free(ctx->rt.c47ipoltbl);
+	memset(&ctx->rt, 0, sizeof(struct sanrt));
 }
 
 /******************************************************************************/
@@ -952,7 +971,6 @@ int sandec_decode_next_frame(void *sanctx)
 		goto out;
 	}
 
-	c[0] = be32_to_cpu(c[0]);
 	c[1] = be32_to_cpu(c[1]);
 	switch (c[0]) {
 	case FRME: 	ret = handle_FRME(ctx, c[1]); break;
@@ -975,36 +993,18 @@ int sandec_init(void **ctxout)
 	/* set to error state initially until a valid file has been opened */
 	ctx->errdone = 44;
 
-	c47_make_glyphs(ctx->glyph4x4[0], glyph4_x, glyph4_y, 4);
-	c47_make_glyphs(ctx->glyph8x8[0], glyph8_x, glyph8_y, 8);
+	c47_make_glyphs(ctx->c47_glyph4x4[0], c47_glyph4_x, c47_glyph4_y, 4);
+	c47_make_glyphs(ctx->c47_glyph8x8[0], c47_glyph8_x, c47_glyph8_y, 8);
 	*ctxout = ctx;
 
 	return 0;
-}
-
-static void sandec_free_memories(struct sanctx *ctx)
-{
-	/* delete existing FRME buffer */
-	if (ctx->rt.fcache)
-		free(ctx->rt.fcache);
-	/* delete IACT/palette/deltapal buffer */
-	if (ctx->rt.iactbuf)
-		free(ctx->rt.iactbuf);
-	/* delete an existing framebuffer */
-	if (ctx->rt.buf && ctx->rt.fbsize)
-		free(ctx->rt.buf);
-	/* delete existing C47 interpolation table */
-	if (ctx->rt.c47ipoltbl)
-		free(ctx->rt.c47ipoltbl);
-	memset(&ctx->rt, 0, sizeof(struct sanrt));
 }
 
 int sandec_open(void *sanctx, struct sanio *io)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
 	int ret, have_anim = 0, have_ahdr = 0;
-	uint32_t cid, csz;
-	uint8_t c[8];
+	uint32_t c[2];
 
 	if (!io) {
 		ret = 2;
@@ -1020,21 +1020,20 @@ int sandec_open(void *sanctx, struct sanio *io)
 			ret = 3;
 			goto out;
 		}
-		cid = readtag(&c[0], &csz);
 		if (!have_anim) {
-			if (cid == ANIM) {
+			if (c[0] == ANIM) {
 				have_anim = 1;
 			}
 			continue;
 		}
-		if (cid == AHDR) {
+		if (c[0] == AHDR) {
 			have_ahdr = 1;
 			break;
 		}
 	}
 
 	if (have_ahdr)
-		ret = handle_AHDR(ctx, csz);
+		ret = handle_AHDR(ctx, be32_to_cpu(c[1]));
 out:
 	ctx->errdone = ret;
 	return ret;
@@ -1054,29 +1053,29 @@ void sandec_exit(void **sanctx)
 int sandec_get_framerate(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
-	return ctx ? ctx->rt.framerate : -1;
+	return ctx ? ctx->rt.framerate : 0;
 }
 
 int sandec_get_samplerate(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
-	return ctx ? ctx->rt.samplerate : -1;
+	return ctx ? ctx->rt.samplerate : 0;
 }
 
 int sandec_get_framecount(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
-	return ctx ? ctx->rt.FRMEcnt : -1;
+	return ctx ? ctx->rt.FRMEcnt : 0;
 }
 
 int sandec_get_version(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
-	return ctx ? ctx->rt.version : -1;
+	return ctx ? ctx->rt.version : 0;
 }
 
 int sandec_get_currframe(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
-	return ctx ? ctx->rt.currframe : -1;
+	return ctx ? ctx->rt.currframe : 0;
 }
