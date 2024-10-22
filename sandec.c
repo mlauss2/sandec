@@ -354,7 +354,7 @@ static void codec47_comp1(struct sanctx *ctx, uint8_t *src, uint8_t *dst_in, uin
 		dst += w;
 	}
 
-	memcpy(dst, dst + w, w);
+	memcpy(dst_in, dst_in + w, w);
 	dst = dst_in + (w * 2);
 	for (i = 2; i < h - 1; i += 2) {
 		for (j = 0; j < w; j ++) {
