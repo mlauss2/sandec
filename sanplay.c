@@ -37,6 +37,8 @@ struct sdlpriv {
 static int queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
+	if (!p)
+		return 0;
 
 	while ((p->abufptr + size) > p->abufsize) {
 		uint32_t newsize = p->abufsize + 16384;
@@ -61,6 +63,8 @@ static int queue_video(void *avctx, unsigned char *vdata, uint32_t size,
 		       uint16_t w, uint16_t h, uint32_t *imgpal, uint16_t subid)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
+	if (!p)
+		return 0;
 
 	/* we borrow the buffer and palette. these pointers are valid until
 	 * the next invocation of san_decode_next_frame().
@@ -251,7 +255,7 @@ int main(int a, char **argv)
 	}
 	sio.ioctx = &h;
 	sio.ioread = sio_read;
-	sio.avctx = &sdl;
+	sio.avctx = (speedmode < 2) ? &sdl : NULL;
 	sio.queue_audio = queue_audio;
 	sio.queue_video = queue_video;
 
