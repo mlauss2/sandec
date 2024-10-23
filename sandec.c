@@ -688,31 +688,20 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
 {
-	uint8_t v1, v2, v3, v4, *dst, *src, *src2, *inbuf, outbuf[4096];
+	uint8_t v1, v2, v3, v4, *dst, *src, *src2, outbuf[4096];
 	uint16_t count, len, *p = (uint16_t *)isrc;
 	uint32_t datasz = size - 18;
 	int16_t v16;
-	int ret;
 
 	/* this code only works when these parameters are met: */
 	if (le16_to_cpu(p[0]) != 8  ||
 	    le16_to_cpu(p[1]) != 46 ||
 	    le16_to_cpu(p[2]) != 0  ||
 	    le16_to_cpu(p[3]) != 0) {
-		ret = 14;
-		goto out;
+		return 14;
 	}
 
-	inbuf = malloc(datasz);
-	if (!inbuf) {
-		ret = 15;
-		goto out;
-	}
-
-	memcpy(inbuf, isrc + 18, datasz);
-
-	ret = 0;
-	src = inbuf;
+	src = isrc + 18;
 
 	/* algorithm taken from ScummVM/engines/scumm/smush/smush_player.cpp.
 	 * I only changed the output generator for LSB samples (while the source
@@ -758,9 +747,9 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
 
 					}
 				} while (--count);
-				ret = ctx->io->queue_audio(ctx->io->avctx, outbuf, 4096);
+				int ret = ctx->io->queue_audio(ctx->io->avctx, outbuf, 4096);
 				if (ret)
-					goto out1;
+					return ret;
 				datasz -= len;
 				src += len;
 				ctx->rt.iactpos = 0;
@@ -776,10 +765,8 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
 			datasz--;
 		}
 	}
-out1:
-	free(inbuf);
-out:
-	return ret;
+
+	return 0;
 }
 
 /* subtitles */
