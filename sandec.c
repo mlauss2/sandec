@@ -393,8 +393,8 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst, ui
 		switch (code) {
 		case 0xff:
 			if (size == 2) {
-				*(uint16_t *)(dst + 0) = *(uint16_t *)src; src += 2;
-				*(uint16_t *)(dst + w) = *(uint16_t *)src; src += 2;
+				dst[0] = *src++; dst[1] = *src++;
+				dst[w] = *src++; dst[w + 1] = *src++;
 			} else {
 				size >>= 1;
 				src = codec47_block(ctx, src, dst, p1, p2, w, coltbl, size);
@@ -653,14 +653,15 @@ static inline uint8_t _u8clip(int a)
 
 static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
+	const uint16_t cmd = be16_to_cpu(*(uint16_t *)(src + 2));
 	uint32_t t32, *pal = ctx->rt.palette;
 	int i, j, t2[3];
 
-	t32 = be32_to_cpu(*(uint32_t *)src);
+
 	src += 4;
 
 	/* cmd1: apply delta */
-	if (t32 == 1) {
+	if (cmd == 1) {
 		i = 0;
 		while (i < 768) {
 			t32 = *pal;
@@ -674,7 +675,7 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			*pal++ = 0xff << 24 | (t2[2] & 0xff) << 16 | (t2[1] & 0xff) << 8 | (t2[0]  & 0xff);
 		}
 	/* cmd2: read deltapal values */
-	} else if (t32 == 2) {
+	} else if (cmd == 2) {
 		memcpy(ctx->rt.deltapal, src, 768 * 2);
 		if (size > (768 * 2 + 4))
 			read_palette(ctx, src + (768 * 2));
