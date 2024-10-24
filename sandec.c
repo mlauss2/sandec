@@ -11,7 +11,6 @@
  * https://github.com/clone2727/smushplay/blob/master/codec47.cpp
  */
 
-#include <byteswap.h>
 #include <stdlib.h>
 #include <string.h>
 #include "sandec.h"
@@ -19,6 +18,13 @@
 #ifndef _max
 #define _max(a,b) ((a) > (b) ? (a) : (b))
 #endif
+
+#define bswap_16(value) \
+	((((value) & 0xff) << 8) | ((value) >> 8))
+
+#define bswap_32(value) \
+	(((uint32_t)bswap_16((uint16_t)((value) & 0xffff)) << 16) | \
+	  (uint32_t)bswap_16((uint16_t)((value) >> 16)))
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 
