@@ -662,18 +662,16 @@ static inline uint8_t _u8clip(int a)
 	else return a;
 }
 
-static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
+static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint32_t t32, *pal = ctx->rt.palette;
 	int i, j, t2[3];
 
-	if (size >= (768 * 2 + 4)) {
-		if (size >= (768 * 3 + 4))
-			src += 4;
-		memcpy(ctx->rt.deltapal, src, 768 * 2);
-		if (size >= (768 * 3 + 4))
-			read_palette(ctx, src + (768 * 2));
-	} else  if ((size == 6) || (size == 4)) {
+	t32 = be32_to_cpu(*(uint32_t *)src);
+	src += 4;
+
+	/* cmd1: apply delta */
+	if (t32 == 1) {
 		i = 0;
 		while (i < 768) {
 			t32 = *pal;
@@ -686,7 +684,15 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			}
 			*pal++ = 0xff << 24 | (t2[2] & 0xff) << 16 | (t2[1] & 0xff) << 8 | (t2[0]  & 0xff);
 		}
+	/* cmd2: read deltapal values */
+	} else if (t32 == 2) {
+		memcpy(ctx->rt.deltapal, src, 768 * 2);
+		if (size > (768 * 2 + 4))
+			read_palette(ctx, src + (768 * 2));
+	} else {
+		return 50;		/*  unknown XPAL cmd */
 	}
+	return 0;
 }
 
 static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
@@ -825,7 +831,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case TRES: handle_TRES(ctx, csz, src); break;
 		case STOR: handle_STOR(ctx, csz, src); break;
 		case FTCH: handle_FTCH(ctx, csz, src); break;
-		case XPAL: handle_XPAL(ctx, csz, src); break;
+		case XPAL: ret = handle_XPAL(ctx, csz, src); break;
 		default:
 			ret = 11;
 			break;
