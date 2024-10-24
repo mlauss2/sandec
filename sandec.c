@@ -479,7 +479,7 @@ static void codec47_comp5(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint32
 	}
 }
 
-static int codec47_itable(struct sanctx *ctx, uint8_t **src2)
+static void codec47_itable(struct sanctx *ctx, uint8_t **src2)
 {
 	uint8_t *itbl, *p1, *p2, *src = *src2;
 	int i, j;
@@ -495,7 +495,6 @@ static int codec47_itable(struct sanctx *ctx, uint8_t **src2)
 		itbl += 256;
 	}
 	*src2 = src;
-	return 0;
 }
 
 static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
@@ -520,9 +519,7 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	}
 	src += 26;
 	if (flag & 1) {
-		ret = codec47_itable(ctx, &src);
-		if (ret)
-			return ret;
+		codec47_itable(ctx, &src);
 	}
 
 	ret = 0;
@@ -537,7 +534,7 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;
 	case 4:	memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize); break;
 	case 5:	codec47_comp5(ctx, src, dst, decsize); break;
-	default: ret = 31;
+	default: ret = 16;
 	}
 
 	ctx->rt.rotate = (seq == ctx->rt.lastseq + 1) ? newrot : 0;
@@ -627,13 +624,13 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		ret = fobj_alloc_buffers(rt, _max(rt->w, left + w), _max(rt->h, top + h), 1);
 	}
 	if (ret != 0)
-		return 23;
+		return 14;
 
 	switch (codec) {
 	case 1:
 	case 3: codec1(ctx, src + 14, w, h, top, left); break;
 	case 47:ret = codec47(ctx, src + 14, w, h, top, left); break;
-	default: ret = 24;
+	default: ret = 15;
 	}
 
 	return ret;
@@ -680,7 +677,7 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		if (size > (768 * 2 + 4))
 			read_palette(ctx, src + (768 * 2));
 	} else {
-		return 50;		/*  unknown XPAL cmd */
+		return 13;		/*  unknown XPAL cmd */
 	}
 	return 0;
 }
@@ -697,7 +694,7 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
 	    le16_to_cpu(p[1]) != 46 ||
 	    le16_to_cpu(p[2]) != 0  ||
 	    le16_to_cpu(p[3]) != 0) {
-		return 14;
+		return 12;
 	}
 
 	src = isrc + 18;
@@ -783,7 +780,7 @@ static void handle_TRES(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	h = tres[6];
 	strid1 = tres[7];
 #endif
-	ctx->rt.subid = tres[8];
+	ctx->rt.subid = le16_to_cpu(tres[8]);
 }
 
 static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
@@ -804,7 +801,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	int ret;
 
 	if (read_source(ctx, src, size))
-		return 8;
+		return 10;
 
 	ret = 0;
 	while ((size > 7) && (ret == 0)) {
@@ -813,6 +810,10 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 		src += 8;
 		size -= 8;
+
+		if (csz > size)
+			return 17;
+
 		switch (cid)
 		{
 		case NPAL: handle_NPAL(ctx, csz, src); break;
@@ -826,6 +827,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 			ret = 11;
 			break;
 		}
+		/* all objects in the SAN stream are padded so their length
+		 * is even. */
 		if (csz & 1)
 			csz += 1;
 		src += csz;
@@ -870,17 +873,17 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	int ret;
 
 	if (size < 768 + 26)
-		return 6;		/* too small */
+		return 5;		/* too small */
 
 	ahbuf = malloc(size);
 	if (!ahbuf)
-		return 7;
+		return 6;
 
-	/* buffer for IACT (4096), Palette (256*4), deltapal (768*2),
+	/* buffer for IACT buffer (4096), Palette (256*4), deltapal (768*2),
 	 * and c47 interpolation table (0x10000) */
 	xbuf = malloc(4096 + 256 * 4 + 768 * 2 + 0x10000);
 	if (!xbuf) {
-		ret = 45;
+		ret = 7;
 		goto out;
 	}
 	rt->iactbuf = xbuf;
@@ -893,12 +896,11 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 
 	rt->version = le16_to_cpu(*(uint16_t *)(ahbuf + 0));
 	rt->FRMEcnt = le16_to_cpu(*(uint16_t *)(ahbuf + 2));
-	/* unk16 */
 
 	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
 
 	rt->framerate =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
-	maxframe =   le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
+	maxframe =       le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
 	rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
 
 	/* "maxframe" indicates the maximum size of one FRME object
@@ -912,7 +914,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 			maxframe += 1;	/* make it even */
 		rt->fcache = malloc(maxframe);
 		if (!rt->fcache)
-			ret = 44;
+			ret = 9;
 	}
 
 out:
@@ -960,7 +962,7 @@ int sandec_decode_next_frame(void *sanctx)
 	c[1] = be32_to_cpu(c[1]);
 	switch (c[0]) {
 	case FRME: 	ret = handle_FRME(ctx, c[1]); break;
-	default:	ret = 5;
+	default:	ret = 4;
 	}
 
 out:
