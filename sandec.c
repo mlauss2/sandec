@@ -665,11 +665,15 @@ static inline uint8_t _u8clip(int a)
 static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint32_t t32, *pal = ctx->rt.palette;
-	uint16_t dp;
 	int i, j, t2[3];
 
-	dp = le16_to_cpu(*(uint16_t *)src + 2); src += 4;
-	if (dp == 256) {
+	if (size >= (768 * 2 + 4)) {
+		if (size >= (768 * 3 + 4))
+			src += 4;
+		memcpy(ctx->rt.deltapal, src, 768 * 2);
+		if (size >= (768 * 3 + 4))
+			read_palette(ctx, src + (768 * 2));
+	} else  if ((size == 6) || (size == 4)) {
 		i = 0;
 		while (i < 768) {
 			t32 = *pal;
@@ -681,12 +685,6 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 				t2[j] = _u8clip(cl >> 7);
 			}
 			*pal++ = 0xff << 24 | (t2[2] & 0xff) << 16 | (t2[1] & 0xff) << 8 | (t2[0]  & 0xff);
-		}
-	} else {
-		memcpy(ctx->rt.deltapal, src, 768 * 2);
-		if (dp == 512) {
-			src += 768 * 2;
-			read_palette(ctx, src);
 		}
 	}
 }
