@@ -76,7 +76,6 @@
 #define _SANDEC_H_
 
 #include <inttypes.h>
-#include <sys/types.h>
 
 /* status codes */
 #define SANDEC_OK	0

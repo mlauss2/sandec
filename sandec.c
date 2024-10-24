@@ -11,8 +11,8 @@
  * https://github.com/clone2727/smushplay/blob/master/codec47.cpp
  */
 
+#include <memory.h>
 #include <stdlib.h>
-#include <string.h>
 #include "sandec.h"
 
 #ifndef _max
@@ -79,30 +79,29 @@
 
 /* internal context: per-file */
 struct sanrt {
-	uint8_t *fcache;
-	uint32_t currframe;
-	uint16_t w;  		/* frame width/pitch/stride */
-	uint16_t h;  		/* frame height */
-	uint16_t subid;
-	uint16_t to_store;
-	uint32_t fbsize;	/* size of the buffers below */
-	uint8_t *buf0;
-	uint8_t *buf1;
-	uint8_t *buf2;
-	uint8_t *buf3;	/* aux buffer for "STOR" and "FTCH" */
-	uint8_t *buf;	/* baseptr */
-	int32_t lastseq;
-	uint32_t rotate;
-	uint32_t iactpos;
-	uint8_t *iactbuf;	/* 4kB for IACT chunks */
-	uint32_t *palette;	/* 256x ABGR */
-	int16_t *deltapal;	/* 768x 16bit for XPAL chunks */
-	uint8_t *c47ipoltbl;	/* interpolation table for C47 Compression 1 */
-	uint32_t framerate;
-	uint32_t maxframe;
-	uint32_t samplerate;
-	uint16_t FRMEcnt;
-	uint16_t version;
+	uint8_t *fcache;	/* 8 one cached FRME object		*/
+	uint8_t *buf0;		/* 8 current front buffer		*/
+	uint8_t *buf1;		/* 8 c47 delta buffer 1			*/
+	uint8_t *buf2;		/* 8 c47 delta buffer 2			*/
+	uint16_t w;		/* 2 image width/pitch			*/
+	uint16_t h;		/* 2 image height			*/
+	int16_t  lastseq;	/* 2 c47 last sequence id		*/
+	uint16_t rotate;	/* 2 c47 buffer rotation code		*/
+	uint16_t subid;		/* 2 subtitle message number		*/
+	uint16_t to_store;	/* 2 STOR encountered			*/
+	uint16_t currframe;	/* 2 current frame index		*/
+	uint16_t iactpos;	/* 2 IACT buffer write pointer		*/
+	uint8_t *iactbuf;	/* 8 4kB for IACT chunks 		*/
+	uint8_t *c47ipoltbl;	/* 8 c47 interpolation table Compression 1 */
+	uint8_t *buf3;		/* 8 aux buffer for "STOR" and "FTCH"	*/
+	int16_t  *deltapal;	/* 8 768x 16bit for XPAL chunks		*/
+	uint32_t *palette;	/* 8 256x ABGR				*/
+	uint8_t  *buf;		/* 8 fb baseptr				*/
+	uint32_t fbsize;	/* 4 size of the framebuffers		*/
+	uint32_t framerate;	/* 4 fps				*/
+	uint32_t samplerate;	/* 4 audio samplerate in Hz		*/
+	uint16_t FRMEcnt;	/* 2 number of FRMEs in SAN		*/
+	uint16_t version;	/* 2 SAN version number			*/
 };
 
 /* internal context: static stuff. */
@@ -485,12 +484,6 @@ static int codec47_itable(struct sanctx *ctx, uint8_t **src2)
 	uint8_t *itbl, *p1, *p2, *src = *src2;
 	int i, j;
 
-	if (!ctx->rt.c47ipoltbl) {
-		ctx->rt.c47ipoltbl = malloc(0x10000);
-		if (!ctx->rt.c47ipoltbl)
-			return 30;
-	}
-
 	itbl = ctx->rt.c47ipoltbl;
 	for (i = 0; i < 256; i++) {
 		p1 = p2 = itbl + i;
@@ -507,29 +500,25 @@ static int codec47_itable(struct sanctx *ctx, uint8_t **src2)
 
 static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
 {
-	uint8_t headtable[32], *dst, comp, newrot, flag;
+	uint8_t *insrc = src, *dst, comp, newrot, flag;
 	uint32_t decsize;
 	uint16_t seq;
 	int ret;
 
-	/* read the whole header; start dest at offset 2 to align the 32bit read
-	 * at table offset 14 to a 32bit boundary.  The codec47_block() code
-	 * accesses this table with 1-byte reads so we're good.
-	 */
-	memcpy(headtable + 2, src, 26);
-	src += 26;
-
-	seq =    le16_to_cpu(*(uint16_t *)(headtable + 2 + 0));
-	comp =   headtable[2 + 2];
-	newrot = headtable[2 + 3];
-	flag =   headtable[2 + 4];
-	decsize = le32_to_cpu(*(uint32_t *)(headtable + 2 + 14));
+	seq =    le16_to_cpu(*(uint16_t *)(src + 0));
+	comp =   src[2];
+	newrot = src[3];
+	flag =   src[4];
+	/* this 32bit value is not always aligned at a 4-byte boundary! */
+	decsize  = le16_to_cpu(*(uint16_t *)(src + 14));
+	decsize |= le16_to_cpu(*(uint16_t *)(src + 16)) << 16;
 
 	if (seq == 0) {
 		ctx->rt.lastseq = -1;
-		memset(ctx->rt.buf1, headtable[2 + 12], ctx->rt.fbsize);
-		memset(ctx->rt.buf2, headtable[2 + 13], ctx->rt.fbsize);
+		memset(ctx->rt.buf1, src[12], ctx->rt.fbsize);
+		memset(ctx->rt.buf2, src[13], ctx->rt.fbsize);
 	}
+	src += 26;
 	if (flag & 1) {
 		ret = codec47_itable(ctx, &src);
 		if (ret)
@@ -542,7 +531,7 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	case 0:	memcpy(dst, src, w * h); break;
 	case 1:	codec47_comp1(ctx, src, dst, w, h); break;
 	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
-			codec47_comp2(ctx, src, dst, w, h, headtable + 2 + 8);
+			codec47_comp2(ctx, src, dst, w, h, insrc + 8);
 		}
 		break;
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;
@@ -876,6 +865,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
 	uint8_t *ahbuf, *xbuf;
+	uint32_t maxframe;
 	int ret;
 
 	if (size < 768 + 26)
@@ -885,8 +875,9 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	if (!ahbuf)
 		return 7;
 
-	/* buffer for IACT (4096), Palette (256*4) and deltapal (768*2) */
-	xbuf = malloc(4096 + 256 * 4 + 768 * 2);
+	/* buffer for IACT (4096), Palette (256*4), deltapal (768*2),
+	 * and c47 interpolation table (0x10000) */
+	xbuf = malloc(4096 + 256 * 4 + 768 * 2 + 0x10000);
 	if (!xbuf) {
 		ret = 45;
 		goto out;
@@ -894,6 +885,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	rt->iactbuf = xbuf;
 	rt->palette = (uint32_t *)(xbuf + 4096);
 	rt->deltapal = (int16_t *)(xbuf + 4096 + (256 * 4));
+	rt->c47ipoltbl = (uint8_t *)(xbuf + 4096 + (256 * 4) + (768 * 2));
 
 	if (read_source(ctx, ahbuf, size))
 		return 8;
@@ -905,7 +897,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
 
 	rt->framerate =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
-	rt->maxframe =   le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
+	maxframe =   le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
 	rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
 
 	/* "maxframe" indicates the maximum size of one FRME object
@@ -913,11 +905,11 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	 * plus 1 byte.
 	 */
 	ret = 0;
-	if ((rt->maxframe > 9) && (rt->maxframe < 4 * 1024 * 1024)) {
-		rt->maxframe -= 9;
-		if (rt->maxframe & 1)
-			rt->maxframe += 1;	/* make it even */
-		rt->fcache = malloc(rt->maxframe);
+	if ((maxframe > 9) && (maxframe < 4 * 1024 * 1024)) {
+		maxframe -= 9;
+		if (maxframe & 1)
+			maxframe += 1;	/* make it even */
+		rt->fcache = malloc(maxframe);
 		if (!rt->fcache)
 			ret = 44;
 	}
@@ -935,15 +927,12 @@ static void sandec_free_memories(struct sanctx *ctx)
 	/* delete existing FRME buffer */
 	if (ctx->rt.fcache)
 		free(ctx->rt.fcache);
-	/* delete IACT/palette/deltapal buffer */
+	/* delete IACT/palette/deltapal/c47ipoltbl buffer */
 	if (ctx->rt.iactbuf)
 		free(ctx->rt.iactbuf);
 	/* delete an existing framebuffer */
 	if (ctx->rt.buf && ctx->rt.fbsize)
 		free(ctx->rt.buf);
-	/* delete existing C47 interpolation table */
-	if (ctx->rt.c47ipoltbl)
-		free(ctx->rt.c47ipoltbl);
 	memset(&ctx->rt, 0, sizeof(struct sanrt));
 }
 
