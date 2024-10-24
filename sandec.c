@@ -669,7 +669,6 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	int i, j, t2[3];
 
 	dp = le16_to_cpu(*(uint16_t *)src + 2); src += 4;
-
 	if (dp == 256) {
 		i = 0;
 		while (i < 768) {
@@ -685,8 +684,8 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		}
 	} else {
 		memcpy(ctx->rt.deltapal, src, 768 * 2);
-		src += 768 * 2;
 		if (dp == 512) {
+			src += 768 * 2;
 			read_palette(ctx, src);
 		}
 	}
