@@ -4,9 +4,10 @@ What works:
 - Can successfully parse all .SAN files found on Outlaws CDs/Game dir
 - Audio works
 - Video display works
+- reasonable A/V sync
 
-What does not work:
-- A/V sync in player is crude at best.
+What does not yet work:
+- pause / fullscreen
 
 Build:
 - Have SDL2

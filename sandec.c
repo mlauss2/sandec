@@ -547,35 +547,30 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 {
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
-	int pos, i, j;
+	int i, j;
 
-	dst = ctx->rt.buf0 + (top * w);
-
+	dst = ctx->rt.buf0 + (top * w) + left;
 	for (i = 0; i < h; i++) {
-		pos = 0;
 		dlen = le16_to_cpu(*(uint16_t *)src); src += 2;
-		while (dlen) {
+		while (dlen > 0) {
 			code = *src++; dlen--;
 			rlen = (code >> 1) + 1;
 			if (code & 1) {
 				col = *src++; dlen--;
 				if (col)
 					memset(dst, col, rlen);
-				pos += rlen;
+				dst += rlen;
 			} else {
 				for (j = 0; j < rlen; j++) {
 					col = *src++;
 					if (col)
-						dst[pos] = col;
-					pos++;
+						*dst = col;
+					dst++;
 				}
 				dlen -= rlen;
 			}
 		}
-		dst += w;
 	}
-
-	ctx->rt.rotate = 0;
 }
 
 static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t bpp)
