@@ -800,8 +800,9 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 	ret = 0;
 	while ((size > 7) && (ret == 0)) {
-		cid =             *(uint32_t *)(src + 0);
-		csz = be32_to_cpu(*(uint32_t *)(src + 4));
+		cid = *(uint16_t *)(src + 0) | (*(uint16_t *)(src + 2)) << 16;
+		csz = *(uint16_t *)(src + 4) | (*(uint16_t *)(src + 6)) << 16;
+		csz = be32_to_cpu(csz);
 
 		src += 8;
 		size -= 8;
