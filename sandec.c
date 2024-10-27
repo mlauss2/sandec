@@ -661,8 +661,8 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			t2[1] = (t32 >>  8) & 0xff;
 			t2[2] = (t32 >> 16) & 0xff;
 			for (j = 0; j < 3; j++) {
-				int cl = (t2[j] << 7) + le16_to_cpu(ctx->rt.deltapal[i++]);
-				t2[j] = _u8clip(cl >> 7);
+				int cl = (t2[j] * 129) + le16_to_cpu(ctx->rt.deltapal[i++]);
+				t2[j] = _u8clip(cl / 128);
 			}
 			*pal++ = 0xff << 24 | (t2[2] & 0xff) << 16 | (t2[1] & 0xff) << 8 | (t2[0]  & 0xff);
 		}
