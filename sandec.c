@@ -33,6 +33,23 @@
 #define be32_to_cpu(x) bswap_32(x)
 #define be16_to_cpu(x) bswap_16(x)
 
+
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+
+
+#define be32_to_cpu(x)  (x)
+#define be16_to_cpu(x)  (x)
+#define le32_to_cpu(x)  bswap_32(x)
+#define le16_to_cpu(x)  bswap_16(x)
+
+
+#else
+
+#error "unknown endianness"
+
+#endif
+
+
 /* chunk identifiers LE */
 #define ANIM	0x4d494e41
 #define AHDR	0x52444841
@@ -45,33 +62,6 @@
 #define FTCH	0x48435446
 #define XPAL	0x4c415058
 
-
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-
-
-#define be32_to_cpu(x)  (x)
-#define be16_to_cpu(x)  (x)
-#define le32_to_cpu(x)  bswap_32(x)
-#define le16_to_cpu(x)  bswap_16(x)
-
-/* chunk identifiers BE */
-#define ANIM	0x414e494d
-#define AHDR	0x41484452
-#define FRME	0x46524d45
-#define NPAL	0x4e50414c
-#define FOBJ	0x464f424a
-#define IACT	0x49414354
-#define TRES	0x54524553
-#define STOR	0x53544f52
-#define FTCH	0x46544348
-#define XPAL	0x5850414c
-
-
-#else
-
-#error "unknown endianness"
-
-#endif
 
 /* codec47 glyhps */
 #define GLYPH_COORD_VECT_SIZE 16
@@ -649,7 +639,6 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	uint32_t t32, *pal = ctx->rt.palette;
 	int i, j, t2[3];
 
-
 	src += 4;
 
 	/* cmd1: apply delta */
@@ -801,6 +790,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	ret = 0;
 	while ((size > 7) && (ret == 0)) {
 		cid = *(uint16_t *)(src + 0) | (*(uint16_t *)(src + 2)) << 16;
+		cid = le32_to_cpu(cid);
 		csz = *(uint16_t *)(src + 4) | (*(uint16_t *)(src + 6)) << 16;
 		csz = be32_to_cpu(csz);
 
