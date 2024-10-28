@@ -33,15 +33,24 @@
 #define be32_to_cpu(x) bswap_32(x)
 #define be16_to_cpu(x) bswap_16(x)
 
+/* read an unaligned 32bit value from memory */
+static inline uint32_t ua32(uint8_t *p)
+{
+	return p[0] | p[1] << 8 | p[2] << 16 | p[3] << 24;
+}
 
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-
 
 #define be32_to_cpu(x)  (x)
 #define be16_to_cpu(x)  (x)
 #define le32_to_cpu(x)  bswap_32(x)
 #define le16_to_cpu(x)  bswap_16(x)
 
+/* read an unaligned 32bit value from memory */
+static inline uint32_t ua32(uint8_t *p)
+{
+	return p[3] | p[2] << 8 | p[1] << 16 | p[0] << 24;
+}
 
 #else
 
@@ -498,9 +507,7 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	comp =   src[2];
 	newrot = src[3];
 	flag =   src[4];
-	/* this 32bit value is not always aligned at a 4-byte boundary! */
-	decsize  = le16_to_cpu(*(uint16_t *)(src + 14));
-	decsize |= le16_to_cpu(*(uint16_t *)(src + 16)) << 16;
+	decsize  = le32_to_cpu(ua32(src + 14));
 
 	if (seq == 0) {
 		ctx->rt.lastseq = -1;
@@ -789,10 +796,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 	ret = 0;
 	while ((size > 7) && (ret == 0)) {
-		cid = *(uint16_t *)(src + 0) | (*(uint16_t *)(src + 2)) << 16;
-		cid = le32_to_cpu(cid);
-		csz = *(uint16_t *)(src + 4) | (*(uint16_t *)(src + 6)) << 16;
-		csz = be32_to_cpu(csz);
+		cid = le32_to_cpu(ua32(src + 0));
+		csz = be32_to_cpu(ua32(src + 4));
 
 		src += 8;
 		size -= 8;
