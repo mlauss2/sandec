@@ -675,10 +675,10 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
 {
-	uint8_t v1, v2, v3, v4, *dst, *src, *src2, outbuf[4096];
+	uint8_t v1, v2, v3, *src, *src2, outbuf[4096];
 	uint16_t count, len, *p = (uint16_t *)isrc;
 	uint32_t datasz = size - 18;
-	int16_t v16;
+	int16_t v16, *dst;
 
 	/* this code only works when these parameters are met: */
 	if (le16_to_cpu(p[0]) != 8  ||
@@ -703,34 +703,29 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
 				datasz = 0;
 			} else {
 				memcpy(ctx->rt.iactbuf + ctx->rt.iactpos, src, len);
-				dst = outbuf;
+				dst = (int16_t *)outbuf;
 				src2 = ctx->rt.iactbuf + 2;
 				v1 = *src2++;
 				v2 = v1 >> 4;
 				v1 &= 0x0f;
 				count = 1024;
 				do {
+					/* NOTE: this creates 16bit LE samples */
 					v3 = *src2++;
 					if (v3 == 0x80) {
-						/* endian-swap BE16 samples */
-						v4 = *src2++;
-						*dst++ = *src2++;
-						*dst++ = v4;
+						*dst++ = src2[0] << 8 | src2[1];
+						src2 += 2;
 					} else {
 						v16 = (int8_t)v3 << v2;
-						*dst++ = (int8_t)(v16) & 0xff;
-						*dst++ = (int8_t)(v16 >> 8) & 0xff;
+						*dst++ = v16;
 					}
 					v3 = *src2++;
 					if (v3 == 0x80) {
-						/* endian-swap BE16 samples */
-						v4 = *src2++;
-						*dst++ = *src2++;
-						*dst++ = v4;
+						*dst++ = src2[0] << 8 | src2[1];
+						src2 += 2;
 					} else {
 						v16 = (int8_t)v3 << v1;
-						*dst++ = (int8_t)(v16) & 0xff;
-						*dst++ = (int8_t)(v16 >> 8) & 0xff;
+						*dst++ = v16;
 
 					}
 				} while (--count);
