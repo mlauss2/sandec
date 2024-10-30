@@ -58,6 +58,13 @@ static inline uint32_t ua32(uint8_t *p)
 
 #endif
 
+/* sizes of various internal static buffers */
+#define SZ_IACT		(4096)
+#define SZ_PAL		(256 * 4)
+#define SZ_DELTAPAL	(768 * 2)
+#define SZ_C47IPTBL	(256 * 256)
+#define SZ_AUDIOOUT	(4096)
+
 
 /* chunk identifiers LE */
 #define ANIM	0x4d494e41
@@ -82,6 +89,7 @@ struct sanrt {
 	uint8_t *buf0;		/* 8 current front buffer		*/
 	uint8_t *buf1;		/* 8 c47 delta buffer 1			*/
 	uint8_t *buf2;		/* 8 c47 delta buffer 2			*/
+	uint8_t *abuf;		/* 8 audio output buffer		*/
 	uint16_t w;		/* 2 image width/pitch			*/
 	uint16_t h;		/* 2 image height			*/
 	int16_t  lastseq;	/* 2 c47 last sequence id		*/
@@ -673,12 +681,11 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	return 0;
 }
 
-static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
+static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	uint8_t v1, v2, v3, *src, *src2, outbuf[4096];
-	uint16_t count, len, *p = (uint16_t *)isrc;
-	uint32_t datasz = size - 18;
-	int16_t v16, *dst;
+	uint16_t count, len, *p = (uint16_t *)src;
+	uint8_t v1, v2, v3, *src2, *ib;
+	int16_t *dst;
 
 	/* this code only works when these parameters are met: */
 	if (le16_to_cpu(p[0]) != 8  ||
@@ -688,27 +695,26 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
 		return 12;
 	}
 
-	src = isrc + 18;
+	src += 18;	/* skip header */
+	size -= 18;
+	ib = ctx->rt.iactbuf;
 
-	/* algorithm taken from ScummVM/engines/scumm/smush/smush_player.cpp.
-	 * I only changed the output generator for LSB samples (while the source
-	 * and ScummVM output MSB samples).
-	 */
-	while (datasz > 0) {
+	/* algorithm taken from ScummVM/engines/scumm/smush/smush_player.cpp */
+	while (size > 0) {
 		if (ctx->rt.iactpos >= 2) {
-			len = be16_to_cpu(*(uint16_t *)ctx->rt.iactbuf) + 2 - ctx->rt.iactpos;
-			if (len > datasz) {  /* continued in next IACT chunk. */
-				memcpy(ctx->rt.iactbuf + ctx->rt.iactpos, src, datasz);
-				ctx->rt.iactpos += datasz;
-				datasz = 0;
+			len = be16_to_cpu(*(uint16_t *)ib) + 2 - ctx->rt.iactpos;
+			if (len > size) {  /* continued in next IACT chunk. */
+				memcpy(ib + ctx->rt.iactpos, src, size);
+				ctx->rt.iactpos += size;
+				size = 0;
 			} else {
-				memcpy(ctx->rt.iactbuf + ctx->rt.iactpos, src, len);
-				dst = (int16_t *)outbuf;
-				src2 = ctx->rt.iactbuf + 2;
+				memcpy(ib + ctx->rt.iactpos, src, len);
+				dst = (int16_t *)ctx->rt.abuf;
+				src2 = ib + 2;
 				v1 = *src2++;
 				v2 = v1 >> 4;
 				v1 &= 0x0f;
-				count = 1024;
+				count = 1024 * 2;
 				do {
 					/* NOTE: this creates 16bit LE samples */
 					v3 = *src2++;
@@ -716,35 +722,25 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *isrc)
 						*dst++ = src2[0] << 8 | src2[1];
 						src2 += 2;
 					} else {
-						v16 = (int8_t)v3 << v2;
-						*dst++ = v16;
-					}
-					v3 = *src2++;
-					if (v3 == 0x80) {
-						*dst++ = src2[0] << 8 | src2[1];
-						src2 += 2;
-					} else {
-						v16 = (int8_t)v3 << v1;
-						*dst++ = v16;
-
+						*dst++ = ((int8_t)v3) << ((count & 1) ? v1 : v2);
 					}
 				} while (--count);
-				int ret = ctx->io->queue_audio(ctx->io->avctx, outbuf, 4096);
+				int ret = ctx->io->queue_audio(ctx->io->avctx, ctx->rt.abuf, SZ_AUDIOOUT);
 				if (ret)
 					return ret;
-				datasz -= len;
+				size -= len;
 				src += len;
 				ctx->rt.iactpos = 0;
 			}
 		} else {
-			if (datasz > 1 && ctx->rt.iactpos == 0) {
-				*ctx->rt.iactbuf = *src++;
-				ctx->rt.iactpos = 1;
-				datasz--;
+			if (size > 1 && ctx->rt.iactpos == 0) {
+				*ib = *src++;
+				ctx->rt.iactpos++;
+				size--;
 			}
-			*(ctx->rt.iactbuf + ctx->rt.iactpos) = *src++;
+			*(ib + ctx->rt.iactpos) = *src++;
 			ctx->rt.iactpos++;
-			datasz--;
+			size--;
 		}
 	}
 
@@ -854,34 +850,36 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
-	uint8_t *ahbuf, *xbuf;
+	uint8_t *ahbuf, *xbuf = NULL;
 	uint32_t maxframe;
 	int ret;
 
-	if (size < 768 + 26)
-		return 5;		/* too small */
-
-	ahbuf = malloc(size);
+	ahbuf = (uint8_t *)malloc(size);
 	if (!ahbuf)
-		return 6;
-
-	/* buffer for IACT buffer (4096), Palette (256*4), deltapal (768*2),
-	 * and c47 interpolation table (0x10000) */
-	xbuf = malloc(4096 + 256 * 4 + 768 * 2 + 0x10000);
-	if (!xbuf) {
-		ret = 7;
+		return 5;
+	if (read_source(ctx, ahbuf, size)) {
+		ret = 6;
 		goto out;
 	}
-	rt->iactbuf = xbuf;
-	rt->palette = (uint32_t *)(xbuf + 4096);
-	rt->deltapal = (int16_t *)(xbuf + 4096 + (256 * 4));
-	rt->c47ipoltbl = (uint8_t *)(xbuf + 4096 + (256 * 4) + (768 * 2));
-
-	if (read_source(ctx, ahbuf, size))
-		return 8;
 
 	rt->version = le16_to_cpu(*(uint16_t *)(ahbuf + 0));
 	rt->FRMEcnt = le16_to_cpu(*(uint16_t *)(ahbuf + 2));
+	if (rt->version != 2) {
+		ret = 7;
+		goto out;
+	}
+
+	/* allocate memory for static work buffers */
+	xbuf = malloc(SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL + SZ_AUDIOOUT);
+	if (!xbuf) {
+		ret = 8;
+		goto out;
+	}
+	rt->iactbuf = (uint8_t *)xbuf;
+	rt->palette = (uint32_t *)(xbuf + SZ_IACT);
+	rt->deltapal = (int16_t *)(xbuf + SZ_IACT + SZ_PAL);
+	rt->c47ipoltbl = (uint8_t *)(xbuf + SZ_IACT + SZ_PAL + SZ_DELTAPAL);
+	rt->abuf = (uint8_t *)(xbuf + SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL);
 
 	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
 
@@ -898,7 +896,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		maxframe -= 9;
 		if (maxframe & 1)
 			maxframe += 1;	/* make it even */
-		rt->fcache = malloc(maxframe);
+		rt->fcache = (uint8_t *)malloc(maxframe);
 		if (!rt->fcache)
 			ret = 9;
 	}
@@ -916,7 +914,7 @@ static void sandec_free_memories(struct sanctx *ctx)
 	/* delete existing FRME buffer */
 	if (ctx->rt.fcache)
 		free(ctx->rt.fcache);
-	/* delete IACT/palette/deltapal/c47ipoltbl buffer */
+	/* delete work buffers */
 	if (ctx->rt.iactbuf)
 		free(ctx->rt.iactbuf);
 	/* delete an existing framebuffer */
@@ -934,6 +932,8 @@ int sandec_decode_next_frame(void *sanctx)
 	uint32_t c[2];
 	int ret;
 
+	if (!ctx)
+		return 1;
 	/* in case of previous error, don't continue, just return it again */
 	if (ctx->errdone)
 		return ctx->errdone;
@@ -941,7 +941,7 @@ int sandec_decode_next_frame(void *sanctx)
 	ret = read_source(ctx, c, 8);
 	if (ret) {
 		if (ctx->rt.currframe == ctx->rt.FRMEcnt)
-			ret = -1;
+			ret = SANDEC_DONE;	/* seems we reached file end */
 		goto out;
 	}
 
@@ -960,7 +960,9 @@ int sandec_init(void **ctxout)
 {
 	struct sanctx *ctx;
 
-	ctx = malloc(sizeof(struct sanctx));
+	if (!ctxout)
+		return 1;
+	ctx = (struct sanctx *)malloc(sizeof(struct sanctx));
 	if (!ctx)
 		return 1;
 	memset(ctx, 0, sizeof(struct sanctx));
@@ -980,8 +982,8 @@ int sandec_open(void *sanctx, struct sanio *io)
 	int ret, have_anim = 0, have_ahdr = 0;
 	uint32_t c[2];
 
-	if (!io) {
-		ret = 2;
+	if (!io || !sanctx) {
+		ret = 1;
 		goto out;
 	}
 	ctx->io = io;
@@ -1015,7 +1017,11 @@ out:
 
 void sandec_exit(void **sanctx)
 {
-	struct sanctx *ctx = *(struct sanctx **)sanctx;
+	struct sanctx *ctx;
+
+	if (!sanctx)
+		return;
+	ctx = *(struct sanctx **)sanctx;
 	if (!ctx)
 		return;
 
