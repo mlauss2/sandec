@@ -4,7 +4,6 @@
  * (c) 2024 Manuel Lauss <manuel.lauss@gmail.com>
  */
 
-#define __USE_MISC
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -226,7 +225,7 @@ int main(int a, char **argv)
 	struct sanio sio;
 	void *sanctx;
 	SDL_Event e;
-	int h, ret, speedmode, waittick;
+	int fr, h, ret, speedmode, waittick, corrtick;
 	uint64_t t1;
 
 	if (a < 2) {
@@ -265,18 +264,20 @@ int main(int a, char **argv)
 		goto out;
 	}
 
+	fr = sandec_get_framerate(sanctx);
 	printf("SAN ver %u fps %u sr %u FRMEs %u\n", sandec_get_version(sanctx),
-	       sandec_get_framerate(sanctx), sandec_get_samplerate(sanctx),
+	       fr, sandec_get_samplerate(sanctx),
 	       sandec_get_framecount(sanctx));
 
 
 	running = 1;
 	paused = 0;
 	parserdone = 0;
-	int fr = sandec_get_framerate(sanctx);
+	
 	if (!fr)
 		fr = 2;
 	waittick = 1000 / fr;
+	corrtick = 1000 - (waittick * fr);
 
 	while (running) {
 		while (0 != SDL_PollEvent(&e) && running) {
@@ -293,8 +294,12 @@ int main(int a, char **argv)
 						ret = render_frame(&sdl);
 					else
 						ret = 0;
-					if (!speedmode)
-						SDL_Delay(waittick - (SDL_GetTicks64() - t1));
+					if (!speedmode) {
+						int rwt = waittick;
+						if (((fr - 1) == sandec_get_currframe(sanctx) % fr))
+							rwt += corrtick;
+						SDL_Delay(rwt - (SDL_GetTicks64() - t1));
+					}
 				} else {
 					printf("ret %d at %d\n", ret, sandec_get_currframe(sanctx));
 					if (ret == SANDEC_DONE)
