@@ -273,7 +273,10 @@ int main(int a, char **argv)
 	running = 1;
 	paused = 0;
 	parserdone = 0;
-	waittick = 1000 / sandec_get_framerate(sanctx);
+	int fr = sandec_get_framerate(sanctx);
+	if (!fr)
+		fr = 2;
+	waittick = 1000 / fr;
 
 	while (running) {
 		while (0 != SDL_PollEvent(&e) && running) {
