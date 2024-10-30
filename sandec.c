@@ -1,6 +1,7 @@
 /*
- * SAN ANIM file decoder for Outlaws ".SAN" video files.
- * Outlaws SAN files use SMUSH codecs 1+47 and IACT 22.05kHz 16-bit stereo Audio.
+ * A/V decoder for LucasARts Outlaws ".SAN" and ".NUT" video files.
+ *  SMUSH Video codecs 1 + 47 with 8-bit palletized 640x480 video,
+ *  IACT scaled audio in 22,05kHz 16bit Stereo Little-endian format.
  *
  * Written in 2024 by Manuel Lauss <manuel.lauss@gmail.com>
  *
@@ -32,6 +33,7 @@
 #define le16_to_cpu(x) (x)
 #define be32_to_cpu(x) bswap_32(x)
 #define be16_to_cpu(x) bswap_16(x)
+#define cpu_to_le16(x) (x)
 
 /* read an unaligned 32bit value from memory */
 static inline uint32_t ua32(uint8_t *p)
@@ -45,6 +47,7 @@ static inline uint32_t ua32(uint8_t *p)
 #define be16_to_cpu(x)  (x)
 #define le32_to_cpu(x)  bswap_32(x)
 #define le16_to_cpu(x)  bswap_16(x)
+#define cpu_to_le16(x)  bswap_16(x)
 
 /* read an unaligned 32bit value from memory */
 static inline uint32_t ua32(uint8_t *p)
@@ -486,9 +489,9 @@ static void codec47_comp5(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint32
 	}
 }
 
-static void codec47_itable(struct sanctx *ctx, uint8_t **src2)
+static uint8_t* codec47_itable(struct sanctx *ctx, uint8_t *src)
 {
-	uint8_t *itbl, *p1, *p2, *src = *src2;
+	uint8_t *itbl, *p1, *p2;
 	int i, j;
 
 	itbl = ctx->rt.c47ipoltbl;
@@ -501,7 +504,7 @@ static void codec47_itable(struct sanctx *ctx, uint8_t **src2)
 		}
 		itbl += 256;
 	}
-	*src2 = src;
+	return src;
 }
 
 static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
@@ -524,7 +527,7 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	}
 	src += 26;
 	if (flag & 1) {
-		codec47_itable(ctx, &src);
+		src = codec47_itable(ctx, src);
 	}
 
 	ret = 0;
@@ -716,13 +719,12 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 				v1 &= 0x0f;
 				count = 1024 * 2;
 				do {
-					/* NOTE: this creates 16bit LE samples */
 					v3 = *src2++;
 					if (v3 == 0x80) {
-						*dst++ = src2[0] << 8 | src2[1];
+						*dst++ = cpu_to_le16(src2[0] << 8 | src2[1]);
 						src2 += 2;
 					} else {
-						*dst++ = ((int8_t)v3) << ((count & 1) ? v1 : v2);
+						*dst++ = cpu_to_le16((int8_t)v3) << ((count & 1) ? v1 : v2);
 					}
 				} while (--count);
 				int ret = ctx->io->queue_audio(ctx->io->avctx, ctx->rt.abuf, SZ_AUDIOOUT);
