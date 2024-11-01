@@ -419,36 +419,35 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst, ui
 		case 0xfe:
 			c = *src++;
 			for (i = 0; i < size; i++)
-				memset(dst + (i * w), c, size);
+				for (j = 0; j < size; j++)
+					dst[(i * w) + j] = c;
 			break;
 		case 0xfd:
 			code = *src++;
 			col[0] = *src++;
 			col[1] = *src++;
 			pglyph = (size == 8) ? ctx->c47_glyph8x8[code] : ctx->c47_glyph4x4[code];
-			for (i = 0; i < size; i++) {
-				for (j = 0; j < size; j++) {
-					dst[j + (i * w)] = col[!*pglyph++];
-				}
-			}
+			for (i = 0; i < size; i++)
+				for (j = 0; j < size; j++)
+					dst[(i * w) + j] = col[!*pglyph++];
 			break;
 		case 0xfc:
-			for (i = 0; i < size; i++) {
-				memcpy(dst + (i * w), p1 + (i * w), size);
-			}
+			for (i = 0; i < size; i++)
+				for (j = 0; j < size; j++)
+					dst[(i * w) + j] = p1[(i * w) + j];
 			break;
 		default:
 			c = coltbl[code & 7];
-			for (i = 0; i < size; i++) {
-				memset(dst + (i * w), c, size);
-			}
+			for (i = 0; i < size; i++)
+				for (j = 0; j < size; j++)
+					dst[(i * w) + j] = c;
 		}
 	} else {
 		const int8_t mvx = c47_motion_vectors[code][0];
 		const int8_t mvy = c47_motion_vectors[code][1];
-		for (i = 0; i < size; i++) {
-			memcpy(dst + (i * w), p2 + mvx + ((mvy + i) * w), size);
-		}
+		for (i = 0; i < size; i++)
+			for (j = 0; j < size; j++)
+				dst[(i * w) + j] = p2[((mvy + i) * w) + mvx + j];
 	}
 	return src;
 }
@@ -470,7 +469,7 @@ static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint16
 
 static void codec47_comp5(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint32_t left)
 {
-	uint8_t opc, rlen, col;
+	uint8_t opc, rlen, col, j;
 
 	while (left) {
 		opc = *src++;
@@ -479,12 +478,12 @@ static void codec47_comp5(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint32
 			rlen = left;
 		if (opc & 1) {
 			col = *src++;
-			memset(dst, col, rlen);
+			for (j = 0; j < rlen; j++)
+				*dst++ = col;
 		} else {
-			memcpy(dst, src, rlen);
-			src += rlen;
+			for (j = 0; j < rlen; j++)
+				*dst++ = *src++;
 		}
-		dst += rlen;
 		left -= rlen;
 	}
 }
@@ -566,7 +565,8 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 			if (code & 1) {
 				col = *src++; dlen--;
 				if (col)
-					memset(dst, col, rlen);
+					for (j = 0; j < rlen; j++)
+						dst[j] = col;
 				dst += rlen;
 			} else {
 				for (j = 0; j < rlen; j++) {
