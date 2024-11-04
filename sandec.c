@@ -807,9 +807,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case STOR: handle_STOR(ctx, csz, src); break;
 		case FTCH: handle_FTCH(ctx, csz, src); break;
 		case XPAL: ret = handle_XPAL(ctx, csz, src); break;
-		default:
-			ret = 11;
-			break;
+		default:   ret = 0;     /* unknown chunk, ignore */
 		}
 		/* all objects in the SAN stream are padded so their length
 		 * is even. */
