@@ -749,22 +749,15 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	return 0;
 }
 
-/* subtitles */
+/* subtitles: index of message in the Outlaws LOCAL.MSG file, 10000 - 12001.
+ * As long as subid is set to non-zero, the subtitle needs to be overlaid
+ * over the image.  The chunk also provides hints about where to place
+ * the subtitle, which we ignore here.
+ */
 static void handle_TRES(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint16_t *tres = (uint16_t *)src;
-
-#if 0
-	px = tres[0];
-	py = tres[1];
-	f = tres[2];
-	l = tres[3];
-	t = tres[4];
-	w = tres[5];
-	h = tres[6];
-	strid1 = tres[7];
-#endif
-	ctx->rt.subid = le16_to_cpu(tres[8]);
+	ctx->rt.subid = size >= 10 ? le16_to_cpu(tres[8]) : 0;
 }
 
 static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)

@@ -19,6 +19,8 @@
  * Queue new video frame callback: Called once per frame after a new frame
  *  is available.  The pointers given to this callback are valid until
  *  the next invocation of sandec_decode_next_frame().
+ * the subid parameter indicates which message id from the Outlaws LOCAL.MSG
+ *  file should be displayed for subtitles. If it is zero, do not show any.
  *
  * int my_queue_videoframe(void *avctx, char *image...)
  * {
