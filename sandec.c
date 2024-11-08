@@ -452,9 +452,9 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst, ui
 	return src;
 }
 
-static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint16_t w, uint16_t h, uint8_t *coltbl)
+static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint16_t w, uint16_t h, uint16_t left, uint16_t top, uint8_t *coltbl)
 {
-	uint8_t *b1 = ctx->rt.buf1, *b2 = ctx->rt.buf2;
+	uint8_t *b1 = ctx->rt.buf1 + left + (top * w), *b2 = ctx->rt.buf2 + left + (top * w);
 	unsigned int i, j;
 
 	for (j = 0; j < h; j += 8) {
@@ -520,8 +520,8 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 
 	if (seq == 0) {
 		ctx->rt.lastseq = -1;
-		memset(ctx->rt.buf1, src[12], ctx->rt.fbsize);
-		memset(ctx->rt.buf2, src[13], ctx->rt.fbsize);
+		memset(ctx->rt.buf1 + (top * w), src[12], w * h);
+		memset(ctx->rt.buf2 + (top * w), src[13], w * h);
 	}
 	src += 26;
 	if (flag & 1) {
@@ -535,7 +535,7 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	case 0:	memcpy(dst, src, w * h); break;
 	case 1:	codec47_comp1(ctx, src, dst, w, h); break;
 	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
-			codec47_comp2(ctx, src, dst, w, h, insrc + 8);
+			codec47_comp2(ctx, src, dst, w, h, left, top, insrc + 8);
 		}
 		break;
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;

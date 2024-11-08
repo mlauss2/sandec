@@ -1,5 +1,5 @@
 Simple SDL2-based decoder/player for LucasArts Outlaws "SAN" movies.
-(and Curse of Monkey Island now too)
+(and Curse of Monkey Island, Shadows of the Empire now too)
 
 What works:
 - Linux/Unix.
@@ -10,6 +10,7 @@ What works:
     some frames are missing text, which is most noticeable in the intro file.
     Also, COMI lies about audio samplerate: all SAN files advertise
     11.025kHz, but it is actually 22.05kHz, just like all of Outlaws' files.
+  - "Shadows of the Empire" videos are now supported too.
 - Video/Audio decoding works without any known artifacts.
 - good enough A/V sync in player
 - tested on AMD64, ARM64, MIPS32el.
@@ -24,6 +25,8 @@ Build:
 - run "make"
 
 Use:
-- call "sanplay /path/to/Outlaws/OP_CR.SAN"
+- call  sanplay /path/to/Outlaws/OP_CR.SAN
+        sanplay /path/to/SOTE/L00INTRO.SAN
+        sanplay /path/to/COMI/OPENING.SAN
 
-20241104
+20241108
