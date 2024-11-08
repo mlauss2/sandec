@@ -516,12 +516,12 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	comp =   src[2];
 	newrot = src[3];
 	flag =   src[4];
-	decsize  = le32_to_cpu(ua32(src + 14));
+	decsize  = le32_to_cpu(ua32(src + 14));	/* decoded (raw frame) size */
 
 	if (seq == 0) {
 		ctx->rt.lastseq = -1;
-		memset(ctx->rt.buf1 + (top * w), src[12], w * h);
-		memset(ctx->rt.buf2 + (top * w), src[13], w * h);
+		memset(ctx->rt.buf1 + (top * w), src[12], decsize);
+		memset(ctx->rt.buf2 + (top * w), src[13], decsize);
 	}
 	src += 26;
 	if (flag & 1) {
