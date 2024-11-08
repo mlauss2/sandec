@@ -488,7 +488,7 @@ static void codec47_comp5(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint32
 	}
 }
 
-static uint8_t* codec47_itable(struct sanctx *ctx, uint8_t *src)
+static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 {
 	uint8_t *itbl, *p1, *p2;
 	int i, j;
@@ -503,7 +503,6 @@ static uint8_t* codec47_itable(struct sanctx *ctx, uint8_t *src)
 		}
 		itbl += 256;
 	}
-	return src;
 }
 
 static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
@@ -526,7 +525,8 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	}
 	src += 26;
 	if (flag & 1) {
-		src = codec47_itable(ctx, src);
+		codec47_itable(ctx, src);
+		src += 0x8080;
 	}
 
 	ret = 0;
@@ -633,7 +633,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	case 1:
 	case 3: codec1(ctx, src + 14, w, h, top, left); break;
 	case 47:ret = codec47(ctx, src + 14, w, h, top, left); break;
-	default: ret = 15;
+	default: ret = 0;
 	}
 
 	return ret;
@@ -654,24 +654,23 @@ static inline uint8_t _u8clip(int a)
 static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	const uint16_t cmd = be16_to_cpu(*(uint16_t *)(src + 2));
-	uint32_t t32, *pal = ctx->rt.palette;
+	uint32_t *pal = ctx->rt.palette;
+	int16_t *dp = ctx->rt.deltapal;
 	int i, j, t2[3];
 
 	src += 4;
 
 	/* cmd1: apply delta */
 	if (cmd == 1) {
-		i = 0;
-		while (i < 768) {
-			t32 = *pal;
-			t2[0] = (t32 >>  0) & 0xff;
-			t2[1] = (t32 >>  8) & 0xff;
-			t2[2] = (t32 >> 16) & 0xff;
+		for (i = 0; i < 768; i += 3) {
+			t2[0] = (*pal >>  0) & 0xff;
+			t2[1] = (*pal >>  8) & 0xff;
+			t2[2] = (*pal >> 16) & 0xff;
 			for (j = 0; j < 3; j++) {
-				int cl = (t2[j] * 129) + le16_to_cpu(ctx->rt.deltapal[i++]);
-				t2[j] = _u8clip(cl / 128);
+				int cl = (t2[j] * 129) + le16_to_cpu(*dp++);
+				t2[j] = _u8clip(cl / 128) & 0xff;
 			}
-			*pal++ = 0xff << 24 | (t2[2] & 0xff) << 16 | (t2[1] & 0xff) << 8 | (t2[0]  & 0xff);
+			*pal++ = 0xff << 24 | t2[2] << 16 | t2[1] << 8 | t2[0];
 		}
 	/* cmd2: read deltapal values */
 	} else if (cmd == 2) {
@@ -693,10 +692,8 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	/* this code only works when these parameters are met: */
 	if (le16_to_cpu(p[0]) != 8  ||
 	    le16_to_cpu(p[1]) != 46 ||
-	    le16_to_cpu(p[2]) != 0  ||
-	    le16_to_cpu(p[3]) != 0) {
-		return 12;
-	}
+	    le16_to_cpu(p[3]) != 0)
+		return 0;		/* not an IACT scaled audio track */
 
 	src += 18;	/* skip header */
 	size -= 18;
