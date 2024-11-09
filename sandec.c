@@ -586,16 +586,26 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 
 static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t bpp)
 {
-	const uint32_t bs = w * h * bpp;
-	unsigned char *b;
+	uint16_t wb, hb;
+	uint32_t bs;
+	uint8_t *b;
+
+	/* align sizes to 8 bytes */
+	wb = (w + 7) & ~7;
+	hb = (h + 7) & ~7;
+
+	/* don't support strides different from image width (yet) */
+	if (wb != w)
+		return 50;
 
 	/* codec47 requires up to 4 buffers the size of the image.
 	 * a front buffer, 2 work buffers and an aux buffer to occasionally
 	 * save the frontbuffer to/from.
 	 */
-	b = (unsigned char *)malloc(bs * 4);
+	bs = wb * hb * bpp;
+	b = (uint8_t *)malloc(bs * 4);
 	if (!b)
-		return 1;
+		return 51;
 
 	if (rt->buf)
 		free(rt->buf);
@@ -605,7 +615,7 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	rt->buf1 = rt->buf0 + bs;
 	rt->buf2 = rt->buf1 + bs;
 	rt->buf3 = rt->buf2 + bs;
-	rt->fbsize = bs;
+	rt->fbsize = w * h * bpp;	/* image size reported to caller */
 	rt->w = w;
 	rt->h = h;
 
@@ -630,7 +640,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		ret = fobj_alloc_buffers(rt, _max(rt->w, left + w), _max(rt->h, top + h), 1);
 	}
 	if (ret != 0)
-		return 14;
+		return ret;
 
 	switch (codec) {
 	case 1:
