@@ -67,6 +67,7 @@ static inline uint32_t ua32(uint8_t *p)
 #define SZ_DELTAPAL	(768 * 2)
 #define SZ_C47IPTBL	(256 * 256)
 #define SZ_AUDIOOUT	(4096)
+#define SZ_ALL (SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL + SZ_AUDIOOUT)
 
 
 /* chunk identifiers LE */
@@ -873,16 +874,16 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	}
 
 	/* allocate memory for static work buffers */
-	xbuf = malloc(SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL + SZ_AUDIOOUT);
+	xbuf = malloc(SZ_ALL);
 	if (!xbuf) {
 		ret = 8;
 		goto out;
 	}
 	rt->iactbuf = (uint8_t *)xbuf;
-	rt->palette = (uint32_t *)(xbuf + SZ_IACT);
-	rt->deltapal = (int16_t *)(xbuf + SZ_IACT + SZ_PAL);
-	rt->c47ipoltbl = (uint8_t *)(xbuf + SZ_IACT + SZ_PAL + SZ_DELTAPAL);
-	rt->abuf = (uint8_t *)(xbuf + SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL);
+	rt->palette = (uint32_t *)((uint8_t *)(rt->iactbuf) + SZ_IACT);
+	rt->deltapal = (int16_t *)((uint8_t *)rt->palette + SZ_PAL);
+	rt->c47ipoltbl = (uint8_t *)rt->deltapal + SZ_DELTAPAL;
+	rt->abuf = (uint8_t *)rt->c47ipoltbl + SZ_C47IPTBL;
 
 	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
 
