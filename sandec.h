@@ -10,9 +10,10 @@
  *  with new data, so the callback needs to either queue the data immediately,
  *  or append it to a buffer for later consumption.
  *
- * int my_queue_audio(void *avctx, char *audio...)
+ * void my_queue_audio(void *avctx, char *abuf, uint32_t bufsize)
  * {
- *   return 0; // 0 == data successfully copied, other = error
+ *  avctx:  context data from struct sanio
+ *  abuf, bufsize: audio data buffer and size in bytes of data in buffer.
  * }
  *
  *
@@ -22,15 +23,20 @@
  * the subid parameter indicates which message id from the Outlaws LOCAL.MSG
  *  file should be displayed for subtitles. If it is zero, do not show any.
  *
- * int my_queue_videoframe(void *avctx, char *image...)
+ * void my_queue_videoframe(void *avctx, char *vbuf, uint32_t bufsize,
+ *                        (uint16_t w, uint16_t h, uint32_t* pal, uint16_t subid)
  * {
- *  return 0;  // 0 == data successfully copied, other = error
+ *  avctx: context data from struct sanio
+ *  vbuf, bufsize: image data and size of buffer
+ *  w, h: width/height in pixels of image
+ *  pal: 256 * 4 byte buffer with palette data in ARGB format
+ *  subid: index of the subtitle to display, or zero.
  * }
  *
  *
  * fetch data callback:  destbuf is always valid, amount is always 1 or more.
- * the decoder does linear forward reads, no seeks.  Return 1 if the requested
- * amount of data was put in the buffer, otherwise or on error return 0.
+ * Return 1 if the requested amount of data was put in the buffer,
+ *  otherwise or on error return 0.
  *
  * int my_data_read(void *ioctx, char *destbuf, int amount)
  * {    // return 1 if all data was read, 0 on errors or not enough data.
@@ -56,12 +62,11 @@
  * myio.queue_video = my_queue_video;
  *
  * int ret = sandec_open(sancontext, &myio);
- * if (ret) { // error, code says where it occured }
- *
- * while (ret == 0) {
+ * while (ret == SANDEC_OK) {
  *  ret = sandec_decode_next_frame(sancontext);
- *  if (ret != SANDEC_OK) { // error or done; cant decode any more. }
- *  else { render_video_and_audio(my_avctx); }
+ *  if (ret != SANDEC_OK)
+ * 	break;
+ *  render_video_and_audio(my_avctx);
  * }
  * if (ret != SANDEC_DONE) { // report error code please }
  * sandec_exit(&sancontext);
@@ -86,9 +91,9 @@
 
 struct sanio {
 	int(*ioread)(void *ioctx, void *dst, uint32_t size);
-	int(*queue_video)(void *avctx, unsigned char *vdata, uint32_t size,
+	void(*queue_video)(void *avctx, unsigned char *vdata, uint32_t size,
 			  uint16_t w, uint16_t h, uint32_t *pal, uint16_t subid);
-	int(*queue_audio)(void *avctx, unsigned char *adata, uint32_t size);
+	void(*queue_audio)(void *avctx, unsigned char *adata, uint32_t size);
 	void *ioctx;
 	void *avctx;
 };
@@ -108,6 +113,7 @@ int sandec_decode_next_frame(void *sanctx);
 /* destroy all context. call this as last step. */
 void sandec_exit(void **sanctx);
 
+/* these return valid values after sandec_open() return SANDEC_OK */
 /* get frames per sec value */
 int sandec_get_framerate(void *sanctx);
 

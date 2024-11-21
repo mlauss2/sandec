@@ -697,7 +697,7 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	return 0;
 }
 
-static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
+static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint16_t count, len, *p = (uint16_t *)src;
 	uint8_t v1, v2, v3, *src2, *ib;
@@ -707,7 +707,7 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	if (le16_to_cpu(p[0]) != 8  ||
 	    le16_to_cpu(p[1]) != 46 ||
 	    le16_to_cpu(p[3]) != 0)
-		return 0;		/* not an IACT scaled audio track */
+		return;		/* not an IACT scaled audio track */
 
 	src += 18;	/* skip header */
 	size -= 18;
@@ -738,9 +738,7 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 						*dst++ = cpu_to_le16((int8_t)v3) << ((count & 1) ? v1 : v2);
 					}
 				} while (--count);
-				int ret = ctx->io->queue_audio(ctx->io->avctx, ctx->rt.abuf, SZ_AUDIOOUT);
-				if (ret)
-					return ret;
+				ctx->io->queue_audio(ctx->io->avctx, ctx->rt.abuf, SZ_AUDIOOUT);
 				size -= len;
 				src += len;
 				ctx->rt.iactpos = 0;
@@ -756,8 +754,6 @@ static int handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			size--;
 		}
 	}
-
-	return 0;
 }
 
 /* subtitles: index of message in the Outlaws LOCAL.MSG file, 10000 - 12001.
@@ -806,7 +802,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		{
 		case NPAL: handle_NPAL(ctx, csz, src); break;
 		case FOBJ: ret = handle_FOBJ(ctx, csz, src); break;
-		case IACT: ret = handle_IACT(ctx, csz, src); break;
+		case IACT: handle_IACT(ctx, csz, src); break;
 		case TRES: handle_TRES(ctx, csz, src); break;
 		case STOR: handle_STOR(ctx, csz, src); break;
 		case FTCH: handle_FTCH(ctx, csz, src); break;
@@ -827,8 +823,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		if (rt->to_store)
 			memcpy(rt->buf3, rt->buf0, rt->fbsize);
 
-		ret = ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
-					   rt->w, rt->h, rt->palette, rt->subid);
+		ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
+				     rt->w, rt->h, rt->palette, rt->subid);
 
 		if (rt->rotate) {
 			uint8_t *tmp;
@@ -856,7 +852,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	struct sanrt *rt = &ctx->rt;
 	uint8_t *ahbuf, *xbuf = NULL;
 	uint32_t maxframe;
-	int ret;
+	int ret = SANDEC_OK;
 
 	ahbuf = (uint8_t *)malloc(size);
 	if (!ahbuf)
@@ -879,6 +875,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		ret = 8;
 		goto out;
 	}
+
 	rt->iactbuf = (uint8_t *)xbuf;
 	rt->palette = (uint32_t *)((uint8_t *)(rt->iactbuf) + SZ_IACT);
 	rt->deltapal = (int16_t *)((uint8_t *)rt->palette + SZ_PAL);
@@ -895,7 +892,6 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	 * including chunk ID and chunk size in the stream (usually the first)
 	 * plus 1 byte.
 	 */
-	ret = 0;
 	if ((maxframe > 9) && (maxframe < 4 * 1024 * 1024)) {
 		maxframe -= 9;
 		if (maxframe & 1)
@@ -906,7 +902,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	}
 
 out:
-	if (ret && xbuf)
+	if ((ret != SANDEC_OK) && xbuf)
 		free(xbuf);
 
 	free(ahbuf);

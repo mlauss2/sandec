@@ -29,21 +29,26 @@ struct sdlpriv {
 	unsigned char *vbuf;
 	uint32_t *pal;
 	uint16_t subid;
+	int err;
 };
 
 /* this can be called multiple times per "sandec_decode_next_frame()",
  * so buffer needs to be dynamically expanded. */
-static int queue_audio(void *avctx, unsigned char *adata, uint32_t size)
+static void queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
-	if (!p)
-		return 0;
+	if (!p || p->err) {
+		p->err = 1;
+		return;
+	}
 
 	while ((p->abufptr + size) > p->abufsize) {
 		uint32_t newsize = p->abufsize + 16384;
 		p->abuf = realloc(p->abuf, newsize);
-		if (!p->abuf)
-			return 1010;
+		if (!p->abuf) {
+			p->err = 2;
+			return;
+		}
 		p->abufsize = newsize;
 	}
 	memcpy(p->abuf + p->abufptr, adata, size);
@@ -53,17 +58,15 @@ static int queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 	 * as SDL does the same thing the code above tries to do.
 	SDL_QueueAudio(p->aud, adata, size);
 	 */
-
-	return 0;
 }
 
 /* this is called once per "sandec_decode_next_frame()" */
-static int queue_video(void *avctx, unsigned char *vdata, uint32_t size,
+static void queue_video(void *avctx, unsigned char *vdata, uint32_t size,
 		       uint16_t w, uint16_t h, uint32_t *imgpal, uint16_t subid)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
-	if (!p)
-		return 0;
+	if (!p || p->err)
+		return;
 
 	/* we borrow the buffer and palette. these pointers are valid until
 	 * the next invocation of san_decode_next_frame().
@@ -74,8 +77,6 @@ static int queue_video(void *avctx, unsigned char *vdata, uint32_t size,
 	p->w = w;
 	p->h = h;
 	p->subid = subid;
-
-	return 0;
 }
 
 static int render_frame(struct sdlpriv *p)
@@ -85,6 +86,9 @@ static int render_frame(struct sdlpriv *p)
 	SDL_Palette *pal;
 	SDL_Rect sr;
 	int ret;
+
+	if (p->err)
+		return p->err;
 
 	sr.x = sr.y = 0;
 	sr.w = p->w;
