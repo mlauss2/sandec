@@ -37,10 +37,8 @@ struct sdlpriv {
 static void queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
-	if (!p || p->err) {
-		p->err = 1;
+	if (!p || p->err)
 		return;
-	}
 
 	while ((p->abufptr + size) > p->abufsize) {
 		uint32_t newsize = p->abufsize + 16384;
