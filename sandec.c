@@ -647,7 +647,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	case 1:
 	case 3: codec1(ctx, src + 14, w, h, top, left); break;
 	case 47:ret = codec47(ctx, src + 14, w, h, top, left); break;
-	default: ret = 0;
+	default: ret = 10;
 	}
 
 	return ret;
