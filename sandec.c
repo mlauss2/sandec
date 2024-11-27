@@ -1,6 +1,6 @@
 /*
- * A/V decoder for LucasARts Outlaws ".SAN" and ".NUT" video files.
- *  SMUSH Video codecs 1 + 47 with 8-bit palletized 640x480 video,
+ * A/V decoder for LucasArts Outlaws ".SAN" and ".NUT" video files.
+ *  SMUSH Video codecs 1/47/48 with 8-bit palletized 640x480 video,
  *  IACT scaled audio in 22,05kHz 16bit Stereo Little-endian format.
  *
  * Written in 2024 by Manuel Lauss <manuel.lauss@gmail.com>
@@ -10,6 +10,7 @@
  * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob/HEAD:/libavcodec/sanm.c
  * https://github.com/scummvm/scummvm/blob/master/engines/scumm/smush/smush_player.cpp
  * https://github.com/clone2727/smushplay/blob/master/codec47.cpp
+ * https://github.com/clone2727/smushplay/blob/master/codec48.cpp
  */
 
 #include <memory.h>
@@ -128,6 +129,60 @@ struct sanctx {
 	int8_t c47_glyph8x8[NGLYPHS][64];
 };
 
+/* Codec48 motion vectors */
+static const int8_t c48_mv[256][2] = {
+	{  0,   0}, {  1,   0}, {  2,   0}, {  3,   0}, {  5,   0},
+	{  8,   0}, { 13,   0}, { 21,   0}, { -1,   0}, { -2,   0},
+	{ -3,   0}, { -5,   0}, { -8,   0}, {-13,   0}, {-17,   0},
+	{-21,   0}, {  0,   1}, {  1,   1}, {  2,   1}, {  3,   1},
+	{  5,   1}, {  8,   1}, { 13,   1}, { 21,   1}, { -1,   1},
+	{ -2,   1}, { -3,   1}, { -5,   1}, { -8,   1}, {-13,   1},
+	{-17,   1}, {-21,   1}, {  0,   2}, {  1,   2}, {  2,   2},
+	{  3,   2}, {  5,   2}, {  8,   2}, { 13,   2}, { 21,   2},
+	{ -1,   2}, { -2,   2}, { -3,   2}, { -5,   2}, { -8,   2},
+	{-13,   2}, {-17,   2}, {-21,   2}, {  0,   3}, {  1,   3},
+	{  2,   3}, {  3,   3}, {  5,   3}, {  8,   3}, { 13,   3},
+	{ 21,   3}, { -1,   3}, { -2,   3}, { -3,   3}, { -5,   3},
+	{ -8,   3}, {-13,   3}, {-17,   3}, {-21,   3}, {  0,   5},
+	{  1,   5}, {  2,   5}, {  3,   5}, {  5,   5}, {  8,   5},
+	{ 13,   5}, { 21,   5}, { -1,   5}, { -2,   5}, { -3,   5},
+	{ -5,   5}, { -8,   5}, {-13,   5}, {-17,   5}, {-21,   5},
+	{  0,   8}, {  1,   8}, {  2,   8}, {  3,   8}, {  5,   8},
+	{  8,   8}, { 13,   8}, { 21,   8}, { -1,   8}, { -2,   8},
+	{ -3,   8}, { -5,   8}, { -8,   8}, {-13,   8}, {-17,   8},
+	{-21,   8}, {  0,  13}, {  1,  13}, {  2,  13}, {  3,  13},
+	{  5,  13}, {  8,  13}, { 13,  13}, { 21,  13}, { -1,  13},
+	{ -2,  13}, { -3,  13}, { -5,  13}, { -8,  13}, {-13,  13},
+	{-17,  13}, {-21,  13}, {  0,  21}, {  1,  21}, {  2,  21},
+	{  3,  21}, {  5,  21}, {  8,  21}, { 13,  21}, { 21,  21},
+	{ -1,  21}, { -2,  21}, { -3,  21}, { -5,  21}, { -8,  21},
+	{-13,  21}, {-17,  21}, {-21,  21}, {  0,  -1}, {  1,  -1},
+	{  2,  -1}, {  3,  -1}, {  5,  -1}, {  8,  -1}, { 13,  -1},
+	{ 21,  -1}, { -1,  -1}, { -2,  -1}, { -3,  -1}, { -5,  -1},
+	{ -8,  -1}, {-13,  -1}, {-17,  -1}, {-21,  -1}, {  0,  -2},
+	{  1,  -2}, {  2,  -2}, {  3,  -2}, {  5,  -2}, {  8,  -2},
+	{ 13,  -2}, { 21,  -2}, { -1,  -2}, { -2,  -2}, { -3,  -2},
+	{ -5,  -2}, { -8,  -2}, {-13,  -2}, {-17,  -2}, {-21,  -2},
+	{  0,  -3}, {  1,  -3}, {  2,  -3}, {  3,  -3}, {  5,  -3},
+	{  8,  -3}, { 13,  -3}, { 21,  -3}, { -1,  -3}, { -2,  -3},
+	{ -3,  -3}, { -5,  -3}, { -8,  -3}, {-13,  -3}, {-17,  -3},
+	{-21,  -3}, {  0,  -5}, {  1,  -5}, {  2,  -5}, {  3,  -5},
+	{  5,  -5}, {  8,  -5}, { 13,  -5}, { 21,  -5}, { -1,  -5},
+	{ -2,  -5}, { -3,  -5}, { -5,  -5}, { -8,  -5}, {-13,  -5},
+	{-17,  -5}, {-21,  -5}, {  0,  -8}, {  1,  -8}, {  2,  -8},
+	{  3,  -8}, {  5,  -8}, {  8,  -8}, { 13,  -8}, { 21,  -8},
+	{ -1,  -8}, { -2,  -8}, { -3,  -8}, { -5,  -8}, { -8,  -8},
+	{-13,  -8}, {-17,  -8}, {-21,  -8}, {  0, -13}, {  1, -13},
+	{  2, -13}, {  3, -13}, {  5, -13}, {  8, -13}, { 13, -13},
+	{ 21, -13}, { -1, -13}, { -2, -13}, { -3, -13}, { -5, -13},
+	{ -8, -13}, {-13, -13}, {-17, -13}, {-21, -13}, {  0, -17},
+	{  1, -17}, {  2, -17}, {  3, -17}, {  5, -17}, {  8, -17},
+	{ 13, -17}, { 21, -17}, { -1, -17}, { -2, -17}, { -3, -17},
+	{ -5, -17}, { -8, -17}, {-13, -17}, {-17, -17}, {-21, -17},
+	{  0, -21}, {  1, -21}, {  2, -21}, {  3, -21}, {  5, -21},
+	{  8, -21}, { 13, -21}, { 21, -21}, { -1, -21}, { -2, -21},
+	{ -3, -21}, { -5, -21}, { -8, -21}, {-13, -21}, {-17, -21},
+};
 
 /******************************************************************************
  * SAN Codec47 Glyph setup, taken from ffmpeg
@@ -555,6 +610,199 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	return ret;
 }
 
+/******************************************************************************/
+
+/* scale 4x4 input block to 8x8 output block */
+static void c48_4to8(uint8_t *dst, uint8_t *src, uint16_t w)
+{
+	uint16_t p;
+	/* dst is always aligned, so we can do at least 16bit stores */
+	for (int i = 0; i < 4; i++) {
+		for (int j = 0; j < 8; j += 2) { /* 1px > 2x2 block */
+			p = *src++;
+			p = (p << 8) | p; /* 1x2 line */
+			*((uint16_t *)(dst + w * 0 + j)) = p;  // 0|0
+			*((uint16_t *)(dst + w * 1 + j)) = p;  // 0|1
+		}
+		dst += w * 2;
+	}
+}
+
+/* copy a line with cnt bytes from src to dst, due to MV values src and dest
+ * are rarely 16/32bit aligned.  Leave it up to the compiler to optimize
+ * this for the target, the cnt are known at compile time.
+ */
+static inline void c48_cp(uint8_t *dst, uint8_t *src, uint8_t cnt)
+{
+	while (cnt--)
+		*dst++ = *src++;
+}
+
+/* process an 8x8 block */
+static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
+{
+	uint8_t opc, sb[16];
+	int16_t mvofs;
+	int i, j, k;
+
+	opc = *src++;
+	switch (opc) {
+	case 0xFF:	/* 1x1 -> 8x8 block scale */
+		for (i = 0; i < 16; i++)
+			sb[i] = *src;
+		src++;
+		c48_4to8(dst, sb, w);
+		break;
+	case 0xFE:	/* 1x 8x8 copy from deltabuf, 16bit mv from src */
+		mvofs = (int16_t)le16_to_cpu(*(int16_t*)src); src += 2;
+		for (i = 0; i < 8; i++) {
+			int32_t ofs = w * i;
+			c48_cp(dst + ofs, db + ofs + mvofs, 8);
+		}
+		break;
+	case 0xFD:	/* 2x2 -> 8x8 block scale */
+		sb[ 5] = *src++;
+		sb[ 7] = *src++;
+		sb[13] = *src++;
+		sb[15] = *src++;
+
+		sb[0] = sb[1] = sb[4] = sb[5];
+		sb[2] = sb[3] = sb[6] = sb[7];
+		sb[8] = sb[9] = sb[12] = sb[13];
+		sb[10] = sb[11] = sb[14] = sb[15];
+		c48_4to8(dst, sb, w);
+		break;
+	case 0xFC:	/* 4x copy 4x4 block, per-block c48_mv, index from source */
+		for (i = 0; i < 8; i += 4) {
+			for (k = 0; k < 8; k += 4) {
+				mvofs = c48_mv[*src][0] + (c48_mv[*src][1] * w);
+				src++;
+				for (j = 0; j < 4; j++) {
+					int32_t ofs = (w * (j + i)) + k;
+					c48_cp(dst + ofs, db + ofs + mvofs, 4);
+				}
+			}
+		}
+		break;
+	case 0xFB: 	/* Copy 4x 4x4 blocks, per-block mv from source */
+		for (i = 0; i < 8; i += 4) {			/* 2 */
+			for (k = 0; k < 8; k += 4) {		/* 2 */
+				mvofs = le16_to_cpu(*(int16_t *)src); src += 2;
+				for (j = 0; j < 4; j++) {	/* 4 */
+					int32_t ofs = (w * (j + i)) + k;
+					c48_cp(dst + ofs, db + ofs + mvofs, 4);
+				}
+			}
+		}
+		break;
+	case 0xFA:	/* scale 4x4 input block to 8x8 dest block */
+		c48_4to8(dst, src, w);
+		src += 16;
+		break;
+	case 0xF9:	/* 16x 2x2 copy from delta, per-block c48_mv */
+		for (i = 0; i < 8; i += 2) {				/* 4 */
+			for (j = 0; j < 8; j += 2) {			/* 4 */
+				int32_t ofs = (w * i) + j;
+				mvofs = c48_mv[*src][0] + (c48_mv[*src][1] * w);
+				src++;
+				c48_cp(dst + ofs + 0, db + ofs + 0 + mvofs, 2);
+				c48_cp(dst + ofs + w, db + ofs + w + mvofs, 2);
+			}
+		}
+		break;
+	case 0xF8:	/* 16x 2x2 blocks copy, mv from source */
+		for (i = 0; i < 8; i += 2) {				/* 4 */
+			for (j = 0; j < 8; j += 2) {			/* 4 */
+				int32_t ofs = w * i + j;
+				mvofs = le16_to_cpu(*(int16_t *)src); src += 2;
+				c48_cp(dst + ofs + 0, db + ofs + 0 + mvofs, 2);
+				c48_cp(dst + ofs + w, db + ofs + w + mvofs, 2);
+			}
+		}
+		break;
+	case 0xF7:	/* copy 8x8 block from src to dest */
+		for (i = 0; i < 8; i++) {
+			int32_t ofs = i * w;
+			c48_cp(dst + ofs, src, 8);
+			src += 8;
+		}
+		break;
+	default:	/* copy 8x8 block from prev, c48_mv */
+		mvofs = c48_mv[opc][0] + (c48_mv[opc][1]) * w;
+		for (i = 0; i < 8; i++) {
+			int32_t ofs = i * w;
+			c48_cp(dst + ofs, db + ofs + mvofs, 8);
+		}
+		break;
+	}
+	return src;
+}
+
+static void codec48_comp3(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
+			  uint8_t *db, uint16_t w, uint16_t h)
+{
+	int i, j;
+
+	for (i = 0; i < h; i += 8) {
+		for (j = 0; j < w; j += 8) {
+			src = c48_block(src, dst + j, db + j, w);
+		}
+		dst += w * 8;
+		db += w * 8;
+	}
+}
+
+static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
+{
+	uint8_t comp, flag, *dst;
+	uint32_t pktsize, decsize;
+	uint16_t seq;
+	int ret;
+
+	comp =	src[0];		/* subcodec */
+	if (src[1] != 1)	/* mvec table variant, always 1 with MotS */
+		return 26;
+
+	seq = le16_to_cpu(*(uint16_t*)(src + 2));
+
+	/* decsize is the size of the raw frame when seq == 0, otherwise it's
+	 * identical to pktsize, which indicates the number of bytes in the
+	 * datastream for this codec48 packet.
+	 */
+	decsize = le32_to_cpu(ua32(src + 4));
+	pktsize = le32_to_cpu(ua32(src + 8));
+	flag =	src[12];
+
+	if (seq == 0) {
+		ctx->rt.lastseq = -1;
+		memset(ctx->rt.buf0, 0, decsize);
+		memset(ctx->rt.buf2, 0, decsize);
+	}
+
+	src += 16;
+	if (flag & 8) {
+		codec47_itable(ctx, src);
+		src += 0x8080;
+	}
+
+	ret = 0;
+
+	dst = ctx->rt.buf0;
+	switch (comp) {
+	case 0:	memcpy(dst, src, pktsize); break;
+	case 2: codec47_comp5(ctx, src, dst, decsize); break;
+	case 3: codec48_comp3(ctx, src, dst, ctx->rt.buf2, w, h); break;
+	case 5: codec47_comp1(ctx, src, dst, w, h); break;
+	default: ret = 17; break;
+	}
+
+	ctx->rt.lastseq = seq;
+	ctx->rt.rotate = 1;		/* swap 0 and 2 */
+	ctx->rt.vbuf = ctx->rt.buf0;
+
+	return ret;
+}
+
 static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
 {
 	uint8_t *dst, code, col;
@@ -649,6 +897,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	case 1:
 	case 3: codec1(ctx, src + 14, w, h, top, left); break;
 	case 47:ret = codec47(ctx, src + 14, w, h, top, left); break;
+	case 48:ret = codec48(ctx, src + 14, w, h, top, left); break;
 	default: ret = 10;
 	}
 
