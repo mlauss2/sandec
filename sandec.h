@@ -129,4 +129,7 @@ int sandec_get_samplerate(void *sanctx);
 /* get ANIM version */
 int sandec_get_version(void *sanctx);
 
+/* use the interpolation table to double a source image */
+int sandec_interpolate(void *sanctx, void *src, void *dst, uint16_t srcw, uint16_t srch);
+
 #endif

@@ -1059,3 +1059,11 @@ int sandec_get_currframe(void *sanctx)
 	struct sanctx *ctx = (struct sanctx *)sanctx;
 	return ctx ? ctx->rt.currframe : 0;
 }
+
+int sandec_interpolate(void *sanctx, void *src, void *dst, uint16_t srcw, uint16_t srch)
+{
+	struct sanctx *ctx = (struct sanctx *)sanctx;
+	if (!src || !dst || !ctx)
+		return 20;
+	codec47_comp1(ctx, src, dst, srcw, srch);
+}

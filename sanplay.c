@@ -30,6 +30,8 @@ struct sdlpriv {
 	uint32_t *pal;
 	uint16_t subid;
 	int err;
+	void *img;
+	void *sanctx;
 };
 
 /* this can be called multiple times per "sandec_decode_next_frame()",
@@ -89,10 +91,12 @@ static int render_frame(struct sdlpriv *p)
 		return p->err;
 
 	sr.x = sr.y = 0;
-	sr.w = p->w;
-	sr.h = p->h;
+	sr.w = p->w * 2;
+	sr.h = p->h * 2;
 
-	sur = SDL_CreateRGBSurfaceWithFormatFrom(p->vbuf, p->w, p->h, 8, p->w, SDL_PIXELFORMAT_INDEX8);
+	ret = sandec_interpolate(p->sanctx, p->vbuf, p->img, sr.w, sr.h);
+
+	sur = SDL_CreateRGBSurfaceWithFormatFrom(p->img, sr.w, sr.h, 8, sr.w, SDL_PIXELFORMAT_INDEX8);
 	if (!sur) {
 		printf("ERR: %s\n", SDL_GetError());
 		return 1001;
@@ -137,7 +141,7 @@ static int init_sdl_vid(struct sdlpriv *p)
 	SDL_Window *win = SDL_CreateWindow("SAN Player",
 					   SDL_WINDOWPOS_CENTERED,
 					   SDL_WINDOWPOS_CENTERED,
-					    640, 480, SDL_WINDOW_RESIZABLE);
+					   1280, 960, SDL_WINDOW_RESIZABLE);
 	if (!win)
 		return 82;
 
@@ -149,6 +153,7 @@ static int init_sdl_vid(struct sdlpriv *p)
 		return 83;
 	}
 	p->ren = ren;
+	p->img = malloc(1280*960);
 
 	return 0;
 }
@@ -158,6 +163,8 @@ static void exit_sdl_vid(struct sdlpriv *p)
 	SDL_DestroyRenderer(p->ren);
 	SDL_DestroyWindow(p->win);
 	free(p->abuf);
+	if (p->img)
+		free(p->img);
 	SDL_Quit();
 }
 
@@ -271,7 +278,7 @@ int main(int a, char **argv)
 	       fr, sandec_get_samplerate(sanctx),
 	       sandec_get_framecount(sanctx));
 
-
+	sdl.sanctx = sanctx;
 	running = 1;
 	paused = 0;
 	parserdone = 0;
