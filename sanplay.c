@@ -77,6 +77,13 @@ static void queue_video(void *avctx, unsigned char *vdata, uint32_t size,
 	p->w = w;
 	p->h = h;
 	p->subid = subid;
+
+	if (p->img) {
+		sandec_interpolate(p->sanctx, vdata, p->img, w*2, h*2);
+		p->w = w * 2;
+		p->h = h * 2;
+		p->vbuf = p->img;
+	}
 }
 
 static int render_frame(struct sdlpriv *p)
@@ -91,12 +98,10 @@ static int render_frame(struct sdlpriv *p)
 		return p->err;
 
 	sr.x = sr.y = 0;
-	sr.w = p->w * 2;
-	sr.h = p->h * 2;
+	sr.w = p->w;
+	sr.h = p->h;
 
-	ret = sandec_interpolate(p->sanctx, p->vbuf, p->img, sr.w, sr.h);
-
-	sur = SDL_CreateRGBSurfaceWithFormatFrom(p->img, sr.w, sr.h, 8, sr.w, SDL_PIXELFORMAT_INDEX8);
+	sur = SDL_CreateRGBSurfaceWithFormatFrom(p->vbuf, sr.w, sr.h, 8, sr.w, SDL_PIXELFORMAT_INDEX8);
 	if (!sur) {
 		printf("ERR: %s\n", SDL_GetError());
 		return 1001;
