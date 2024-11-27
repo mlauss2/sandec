@@ -79,7 +79,7 @@ static void queue_video(void *avctx, unsigned char *vdata, uint32_t size,
 	p->subid = subid;
 
 	if (p->img) {
-		sandec_interpolate(p->sanctx, vdata, p->img, w*2, h*2);
+		sandec_2x2upsample(p->sanctx, vdata, p->img, w, h);
 		p->w = w * 2;
 		p->h = h * 2;
 		p->vbuf = p->img;

@@ -114,6 +114,7 @@ struct sanrt {
 	uint32_t samplerate;	/* 4 audio samplerate in Hz		*/
 	uint16_t FRMEcnt;	/* 2 number of FRMEs in SAN		*/
 	uint16_t version;	/* 2 SAN version number			*/
+	uint8_t have_itable;	/* 1 do we have itable data		*/
 };
 
 /* internal context: static stuff. */
@@ -505,6 +506,7 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 		}
 		itbl += 256;
 	}
+	ctx->rt.have_itable = 1;
 }
 
 static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
@@ -923,6 +925,23 @@ static void sandec_free_memories(struct sanctx *ctx)
 	memset(&ctx->rt, 0, sizeof(struct sanrt));
 }
 
+/* bilinear 2x2 upsampler */
+static void naive_2x(uint8_t *src, uint8_t *dst, uint16_t w, uint16_t h)
+{
+	int i, j;
+	uint8_t *d1;
+
+	for (i = 0; i < h; i++) {
+		d1 = dst;
+		for (j = 0; j < w; j++) {
+			*dst++ = *src;
+			*dst++ = *src++;
+		}
+		memcpy(dst, d1, 2 * w);
+		dst += 2 * w;
+	}
+}
+
 /******************************************************************************/
 /* public interface */
 
@@ -1060,10 +1079,13 @@ int sandec_get_currframe(void *sanctx)
 	return ctx ? ctx->rt.currframe : 0;
 }
 
-int sandec_interpolate(void *sanctx, void *src, void *dst, uint16_t srcw, uint16_t srch)
+int sandec_2x2upsample(void *sanctx, void *src, void *dst, uint16_t srcw, uint16_t srch)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
 	if (!src || !dst || !ctx)
 		return 20;
-	codec47_comp1(ctx, src, dst, srcw, srch);
+	if (!ctx->rt.have_itable)
+		naive_2x(src, dst, srcw, srch);
+	else
+		codec47_comp1(ctx, src, dst, srcw * 2, srch * 2);
 }
