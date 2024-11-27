@@ -239,7 +239,7 @@ int main(int a, char **argv)
 	struct sanio sio;
 	void *sanctx;
 	SDL_Event e;
-	int fr, h, ret, speedmode, waittick, corrtick;
+	int fr, h, ret, speedmode, waittick;
 	uint64_t t1;
 
 	if (a < 2) {
@@ -291,7 +291,6 @@ int main(int a, char **argv)
 	if (!fr)
 		fr = 2;
 	waittick = 1000 / fr;
-	corrtick = 1000 - (waittick * fr);
 
 	while (running) {
 		while (0 != SDL_PollEvent(&e) && running) {
@@ -309,10 +308,7 @@ int main(int a, char **argv)
 					else
 						ret = 0;
 					if (!speedmode) {
-						int rwt = waittick;
-						if (((fr - 1) == sandec_get_currframe(sanctx) % fr))
-							rwt += corrtick;
-						SDL_Delay(rwt - (SDL_GetTicks64() - t1));
+						SDL_Delay(waittick - (SDL_GetTicks64() - t1));
 					}
 				} else {
 					printf("ret %d at %d\n", ret, sandec_get_currframe(sanctx));
