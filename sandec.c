@@ -106,7 +106,6 @@ struct sanrt {
 	uint16_t iactpos;	/* 2 IACT buffer write pointer		*/
 	uint8_t *iactbuf;	/* 8 4kB for IACT chunks 		*/
 	uint8_t *c47ipoltbl;	/* 8 c47 interpolation table Compression 1 */
-	uint8_t *buf3;		/* 8 aux buffer for "STOR" and "FTCH"	*/
 	int16_t  *deltapal;	/* 8 768x 16bit for XPAL chunks		*/
 	uint32_t *palette;	/* 8 256x ABGR				*/
 	uint8_t  *buf;		/* 8 fb baseptr				*/
@@ -849,12 +848,12 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	if (wb != w)
 		return 50;
 
-	/* codec47 requires up to 4 buffers the size of the image.
-	 * a front buffer, 2 work buffers and an aux buffer to occasionally
-	 * save the frontbuffer to/from.
+	/* we require up to 3 buffers the size of the image.
+	 * a front buffer + 2 work buffers. work buffer 1 is also used to store
+	 * the frontbuffer on "STOR".
 	 */
 	bs = wb * hb * bpp;
-	b = (uint8_t *)malloc(bs * 4);
+	b = (uint8_t *)malloc(bs * 3);
 	if (!b)
 		return 51;
 
@@ -865,7 +864,6 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	rt->buf0 = b;
 	rt->buf1 = rt->buf0 + bs;
 	rt->buf2 = rt->buf1 + bs;
-	rt->buf3 = rt->buf2 + bs;
 	rt->fbsize = w * h * bpp;	/* image size reported to caller */
 	rt->w = w;
 	rt->h = h;
@@ -1025,7 +1023,7 @@ static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static void handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	memcpy(ctx->rt.buf0, ctx->rt.buf3, ctx->rt.fbsize);
+	memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize);
 }
 
 static int handle_FRME(struct sanctx *ctx, uint32_t size)
@@ -1072,7 +1070,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	if (ret == 0) {
 		/* STOR */
 		if (rt->to_store)
-			memcpy(rt->buf3, rt->buf0, rt->fbsize);
+			memcpy(rt->buf1, rt->buf0, rt->fbsize);
 
 		ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
 				     rt->w, rt->h, rt->palette, rt->subid);
