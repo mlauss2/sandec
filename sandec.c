@@ -404,13 +404,13 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 	}
 }
 
-static void codec47_comp1(struct sanctx *ctx, uint8_t *src, uint8_t *dst_in, uint16_t w, uint16_t h)
+static void codec47_comp1(uint8_t *src, uint8_t *dst_in, uint8_t *itbl, uint16_t w, uint16_t h)
 {
 	/* input data is i-frame with half width and height. combining 2 pixels
 	 * into a 16bit value, one can then use this value as an index into
 	 * the interpolation table to get the missing color between 2 pixels.
 	 */
-	uint8_t *itbl = ctx->rt.c47ipoltbl, *dst, p8, p82;
+	uint8_t *dst, p8, p82;
 	uint16_t px;
 	int i, j;
 
@@ -509,7 +509,9 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst, ui
 	return src;
 }
 
-static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint16_t w, uint16_t h, uint16_t left, uint16_t top, uint8_t *coltbl)
+static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
+			  uint16_t w, uint16_t h, uint16_t left, uint16_t top,
+			  uint8_t *coltbl)
 {
 	uint8_t *b1 = ctx->rt.buf1 + left + (top * w), *b2 = ctx->rt.buf2 + left + (top * w);
 	unsigned int i, j;
@@ -524,7 +526,7 @@ static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint16
 	}
 }
 
-static void codec47_comp5(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint32_t left)
+static void codec47_comp5(uint8_t *src, uint8_t *dst, uint32_t left)
 {
 	uint8_t opc, rlen, col, j;
 
@@ -591,14 +593,14 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	dst = ctx->rt.buf0 + left + (top * w);
 	switch (comp) {
 	case 0:	memcpy(dst, src, w * h); break;
-	case 1:	codec47_comp1(ctx, src, dst, w, h); break;
+	case 1:	codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h); break;
 	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
 			codec47_comp2(ctx, src, dst, w, h, left, top, insrc + 8);
 		}
 		break;
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;
 	case 4:	memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize); break;
-	case 5:	codec47_comp5(ctx, src, dst, decsize); break;
+	case 5:	codec47_comp5(src, dst, decsize); break;
 	default: ret = 16;
 	}
 
@@ -737,8 +739,8 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
 	return src;
 }
 
-static void codec48_comp3(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
-			  uint8_t *db, uint16_t w, uint16_t h)
+static void codec48_comp3(uint8_t *src, uint8_t *dst, uint8_t *db,
+			  uint8_t *itbl, uint16_t w, uint16_t h)
 {
 	int i, j;
 
@@ -789,9 +791,9 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0:	memcpy(dst, src, pktsize); break;
-	case 2: codec47_comp5(ctx, src, dst, decsize); break;
-	case 3: codec48_comp3(ctx, src, dst, ctx->rt.buf2, w, h); break;
-	case 5: codec47_comp1(ctx, src, dst, w, h); break;
+	case 2: codec47_comp5(src, dst, decsize); break;
+	case 3: codec48_comp3(src, dst, ctx->rt.buf2, ctx->rt.c47ipoltbl, w, h); break;
+	case 5: codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h); break;
 	default: ret = 17; break;
 	}
 
@@ -1334,5 +1336,5 @@ int sandec_2x2upsample(void *sanctx, void *src, void *dst, uint16_t srcw, uint16
 	if (!ctx->rt.have_itable)
 		naive_2x(src, dst, srcw, srch);
 	else
-		codec47_comp1(ctx, src, dst, srcw * 2, srch * 2);
+		codec47_comp1(src, dst, ctx->rt.c47ipoltbl, srcw * 2, srch * 2);
 }
