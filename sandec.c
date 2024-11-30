@@ -11,6 +11,8 @@
  * https://github.com/scummvm/scummvm/blob/master/engines/scumm/smush/smush_player.cpp
  * https://github.com/clone2727/smushplay/blob/master/codec47.cpp
  * https://github.com/clone2727/smushplay/blob/master/codec48.cpp
+ *
+ * SPDX-License-Identifier: LGPL-2.1-only
  */
 
 #include <memory.h>
@@ -629,8 +631,8 @@ static void c48_4to8(uint8_t *dst, uint8_t *src, uint16_t w)
 	}
 }
 
-/* copy a line with cnt bytes from src to dst, due to MV values src and dest
- * are rarely 16/32bit aligned.  Leave it up to the compiler to optimize
+/* copy a line with cnt bytes from src to dst, due to MV values dest is
+ * rarely 16/32bit aligned.  Leave it up to the compiler to optimize
  * this for the target, the cnt are known at compile time.
  */
 static inline void c48_cp(uint8_t *dst, uint8_t *src, uint8_t cnt)
@@ -766,9 +768,9 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 
 	seq = le16_to_cpu(*(uint16_t*)(src + 2));
 
-	/* decsize is the size of the raw frame when seq == 0, otherwise it's
-	 * identical to pktsize, which indicates the number of bytes in the
-	 * datastream for this codec48 packet.
+	/* decsize is the size of the raw frame aligned to 8x8 blocks
+	 * when seq == 0, otherwise it's identical to pktsize, which
+	 * indicates the number of bytes in the datastream for this packet.
 	 */
 	decsize = le32_to_cpu(ua32(src + 4));
 	pktsize = le32_to_cpu(ua32(src + 8));
@@ -787,7 +789,6 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	}
 
 	ret = 0;
-
 	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0:	memcpy(dst, src, pktsize); break;
@@ -836,15 +837,21 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	ctx->rt.vbuf = ctx->rt.buf0;
 }
 
-static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t bpp)
+static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t bpp, unsigned align)
 {
 	uint16_t wb, hb;
 	uint32_t bs;
 	uint8_t *b;
 
-	/* align sizes to 8 bytes */
-	wb = (w + 7) & ~7;
-	hb = (h + 7) & ~7;
+	if (align > 1) {
+		/* align sizes */
+		align -= 1;
+		wb = (w + align) & ~align;
+		hb = (h + align) & ~align;
+	} else {
+		wb = w;
+		hb = h;
+	}
 
 	/* don't support strides different from image width (yet) */
 	if (wb != w)
@@ -875,7 +882,7 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 
 static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	uint16_t codec, left, top, w, h;
+	uint16_t codec, left, top, w, h, align;
 	struct sanrt *rt = &ctx->rt;
 	int ret;
 
@@ -886,9 +893,10 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	h     = le16_to_cpu(*(uint16_t *)(src + 8));
 	/* 32bit unknown value */
 
+	align = (codec == 48) ? 8 : 2;
 	ret = 0;
 	if ((rt->w < (left + w)) || (rt->h < (top + h))) {
-		ret = fobj_alloc_buffers(rt, _max(rt->w, left + w), _max(rt->h, top + h), 1);
+		ret = fobj_alloc_buffers(rt, _max(rt->w, left + w), _max(rt->h, top + h), 1, align);
 	}
 	if (ret != 0)
 		return ret;
