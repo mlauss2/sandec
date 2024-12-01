@@ -1182,23 +1182,6 @@ static void sandec_free_memories(struct sanctx *ctx)
 	memset(&ctx->rt, 0, sizeof(struct sanrt));
 }
 
-/* bilinear 2x2 upsampler */
-static void naive_2x(uint8_t *src, uint8_t *dst, uint16_t w, uint16_t h)
-{
-	int i, j;
-	uint8_t *d1;
-
-	for (i = 0; i < h; i++) {
-		d1 = dst;
-		for (j = 0; j < w; j++) {
-			*dst++ = *src;
-			*dst++ = *src++;
-		}
-		memcpy(dst, d1, 2 * w);
-		dst += 2 * w;
-	}
-}
-
 /******************************************************************************/
 /* public interface */
 
@@ -1334,15 +1317,4 @@ int sandec_get_currframe(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
 	return ctx ? ctx->rt.currframe : 0;
-}
-
-int sandec_2x2upsample(void *sanctx, void *src, void *dst, uint16_t srcw, uint16_t srch)
-{
-	struct sanctx *ctx = (struct sanctx *)sanctx;
-	if (!src || !dst || !ctx)
-		return 20;
-	if (!ctx->rt.have_itable)
-		naive_2x(src, dst, srcw, srch);
-	else
-		codec47_comp1(src, dst, ctx->rt.c47ipoltbl, srcw * 2, srch * 2);
 }

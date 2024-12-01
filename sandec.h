@@ -129,14 +129,4 @@ int sandec_get_samplerate(void *sanctx);
 /* get ANIM version */
 int sandec_get_version(void *sanctx);
 
-/* upsample an image.  Uses the interpolation table if available to
- * get smoother result, or does a naive 1x1->2x2 bilinear upscale.
- * @sanctx: context obtained from sandec_init().
- * @src: pointer so source image, usually a video frame.
- * @dst: pointer to buffer for upsampled image. must be at least 4x size of src.
- * @srcw: width of SOURCE image.
- * @srch: height of SOURCE image.
- */
-int sandec_2x2upsample(void *sanctx, void *src, void *dst, uint16_t srcw, uint16_t srch);
-
 #endif

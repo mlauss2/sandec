@@ -30,8 +30,6 @@ struct sdlpriv {
 	uint32_t *pal;
 	uint16_t subid;
 	int err;
-	void *img;
-	void *sanctx;
 };
 
 /* this can be called multiple times per "sandec_decode_next_frame()",
@@ -77,13 +75,6 @@ static void queue_video(void *avctx, unsigned char *vdata, uint32_t size,
 	p->w = w;
 	p->h = h;
 	p->subid = subid;
-
-	if (p->img) {
-		sandec_2x2upsample(p->sanctx, vdata, p->img, w, h);
-		p->w = w * 2;
-		p->h = h * 2;
-		p->vbuf = p->img;
-	}
 }
 
 static int render_frame(struct sdlpriv *p)
@@ -146,7 +137,7 @@ static int init_sdl_vid(struct sdlpriv *p)
 	SDL_Window *win = SDL_CreateWindow("SAN Player",
 					   SDL_WINDOWPOS_CENTERED,
 					   SDL_WINDOWPOS_CENTERED,
-					   1280, 960, SDL_WINDOW_RESIZABLE);
+					   640, 480, SDL_WINDOW_RESIZABLE);
 	if (!win)
 		return 82;
 
@@ -158,7 +149,6 @@ static int init_sdl_vid(struct sdlpriv *p)
 		return 83;
 	}
 	p->ren = ren;
-	p->img = malloc(1280*960);
 
 	return 0;
 }
@@ -168,8 +158,6 @@ static void exit_sdl_vid(struct sdlpriv *p)
 	SDL_DestroyRenderer(p->ren);
 	SDL_DestroyWindow(p->win);
 	free(p->abuf);
-	if (p->img)
-		free(p->img);
 	SDL_Quit();
 }
 
@@ -283,7 +271,6 @@ int main(int a, char **argv)
 	       fr, sandec_get_samplerate(sanctx),
 	       sandec_get_framecount(sanctx));
 
-	sdl.sanctx = sanctx;
 	running = 1;
 	paused = 0;
 	parserdone = 0;
@@ -291,7 +278,6 @@ int main(int a, char **argv)
 	if (!fr)
 		fr = 2;
 	waittick = 1000 / fr;
-
 	while (running) {
 		while (0 != SDL_PollEvent(&e) && running) {
 			if (e.type == SDL_QUIT)
@@ -303,13 +289,11 @@ int main(int a, char **argv)
 				t1 = SDL_GetTicks64();
 				ret = sandec_decode_next_frame(sanctx);
 				if (ret == SANDEC_OK) {
-					if (speedmode < 2)
+					if (speedmode < 2) {
 						ret = render_frame(&sdl);
-					else
-						ret = 0;
-					if (!speedmode) {
 						SDL_Delay(waittick - (SDL_GetTicks64() - t1));
-					}
+					} else
+						ret = 0;
 				} else {
 					printf("ret %d at %d\n", ret, sandec_get_currframe(sanctx));
 					if (ret == SANDEC_DONE)
