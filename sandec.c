@@ -924,13 +924,12 @@ static uint8_t *c37_blk(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, uin
 	int k, l;
 	int32_t ofs, mvofs;
 	uint32_t bc;
-	uint8_t opc;
+	uint8_t opc, c;
 
-c37_again:
 	if ((*skipcnt) > 0) {
 		for (k = 0; k < 4; k++) { /* 4x4 block copy */
 			ofs = k * w;
-			*(uint32_t *)(dst + ofs) = *(uint32_t *)(db + ofs);
+			c48_cp(dst + ofs, db + ofs, 4);
 		}
 		--(*skipcnt);
 		return src;
@@ -943,34 +942,24 @@ c37_again:
 			for (l = 0; l < 4; l++)
 				*(dst + k * w + l) = *src++;
 		}
-	} else if (f4) {
-		if (opc == 0xfe) {
-			for (k = 0; k < 4; k++) {
-				bc = *src++;
-				bc |= bc << 24 | bc << 16 | bc << 8;
-				*(uint32_t *)(dst + k * w) = bc;
-			}
-		} else if (opc == 0xfd) {
-			bc = *src++;
-			bc |= bc << 24 | bc << 16 | bc << 8;
-			for (k = 0; k < 4; k++) {
-				*(uint32_t *)(dst + k * w) = bc;
-			}
-		} else {
-			goto c37_else;
+	} else if (f4 && (opc == 0xfe)) {
+		for (k = 0; k < 4; k++) {
+			c = *src++;
+			for (l = 0; l < 4; l++)
+				dst[k * w + l] = c;
 		}
+	} else if (f4 && (opc == 0xfd)) {
+			c = *src++;
+			for (k = 0; k < 4; k++)
+				for (l = 0; l < 4; l++)
+					dst[k * w + l] = c;
+	} else if (c4 && (opc == 0)) {
+		*skipcnt = (*src++);
 	} else {
-c37_else:
-		if (opc == 0 && c4) {
-			*skipcnt = *src++;
-			/* j -= 4 in original */
-			goto c37_again;
-		} else {
-			mvofs = c37_mv[mvidx][opc*2] + (c37_mv[mvidx][opc*2 + 1] * w);
-			for (k = 0; k < 4; k++) {
-				ofs = k * w;
-				c48_cp(dst + ofs, db + ofs + mvofs, 4);
-			}
+		mvofs = c37_mv[mvidx][opc*2] + (c37_mv[mvidx][opc*2 + 1] * w);
+		for (k = 0; k < 4; k++) {
+			ofs = k * w;
+			c48_cp(dst + ofs, db + ofs + mvofs, 4);
 		}
 	}
 	return src;
@@ -982,6 +971,7 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 	int i, j;
 	uint8_t skipcnt;
 
+	skipcnt = 0;
 	for (i = 0; i < h; i += 4) {
 		for (j = 0; j < w; j += 4) {
 			src = c37_blk(src, dst + j, db + j, w, h, mvidx, f4, c4, &skipcnt);
@@ -1010,19 +1000,26 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		memset(ctx->rt.buf2, 0, decsize);
 	}
 
+	/* unlike c47/c48, buffers need to be pre-flipped */
+	if ((seq & 1) || !(flag & 1)) {
+		void *tmp = ctx->rt.buf0;
+		ctx->rt.buf0 = ctx->rt.buf2;
+		ctx->rt.buf2 = tmp;
+	}
+
 	src += 16;
 	ret = 0;
 	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0: memcpy(dst, src, decsize); break;
 	case 2: codec47_comp5(src, dst, decsize); break;
-	case 3:
+	case 3: /* fallthrough */
 	case 4: codec37_comp3(src, dst, ctx->rt.buf2, w, h, mvidx, flag & 4, comp == 4); break;
 	default: ret = 17; break;
 	}
 
 	ctx->rt.lastseq = seq;
-	ctx->rt.rotate = 1;		/* swap 0 and 2 */
+	ctx->rt.rotate = 0;
 	ctx->rt.vbuf = ctx->rt.buf0;
 
 	return ret;
