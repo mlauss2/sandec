@@ -451,7 +451,9 @@ static void codec47_comp1(uint8_t *src, uint8_t *dst_in, uint8_t *itbl, uint16_t
 	}
 }
 
-static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst, uint8_t *p1, uint8_t *p2, uint16_t w, uint8_t *coltbl, uint16_t size)
+static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
+			      uint8_t *p1, uint8_t *p2, uint16_t w,
+			      uint8_t *coltbl, uint16_t size)
 {
 	uint8_t code, col[2], c;
 	uint16_t i, j;
@@ -512,7 +514,7 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst, ui
 }
 
 static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
-			  uint16_t w, uint16_t h, uint16_t left, uint16_t top,
+			  uint16_t w, uint16_t h, int16_t left, int16_t top,
 			  uint8_t *coltbl)
 {
 	uint8_t *b1 = ctx->rt.buf1 + left + (top * w), *b2 = ctx->rt.buf2 + left + (top * w);
@@ -567,7 +569,8 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 	ctx->rt.have_itable = 1;
 }
 
-static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
+static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left)
 {
 	uint8_t *insrc = src, *dst, comp, newrot, flag;
 	uint32_t decsize;
@@ -754,7 +757,8 @@ static void codec48_comp3(uint8_t *src, uint8_t *dst, uint8_t *db,
 	}
 }
 
-static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
+static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left)
 {
 	uint8_t comp, flag, *dst;
 	uint32_t pktsize, decsize;
@@ -804,7 +808,8 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uin
 	return ret;
 }
 
-static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint16_t top, uint16_t left)
+static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left)
 {
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
@@ -881,13 +886,14 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 
 static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	uint16_t codec, left, top, w, h, align;
 	struct sanrt *rt = &ctx->rt;
+	uint16_t codec, w, h, align;
+	int16_t left, top;
 	int ret;
 
 	codec = le16_to_cpu(*(uint16_t *)(src + 0));
-	left  = le16_to_cpu(*(uint16_t *)(src + 2));
-	top   = le16_to_cpu(*(uint16_t *)(src + 4));
+	left  = le16_to_cpu(*(int16_t *)(src + 2));
+	top   = le16_to_cpu(*(int16_t *)(src + 4));
 	w     = le16_to_cpu(*(uint16_t *)(src + 6));
 	h     = le16_to_cpu(*(uint16_t *)(src + 8));
 	/* 32bit unknown value */
