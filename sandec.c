@@ -116,7 +116,6 @@ struct sanrt {
 	uint32_t samplerate;	/* 4 audio samplerate in Hz		*/
 	uint16_t FRMEcnt;	/* 2 number of FRMEs in SAN		*/
 	uint16_t version;	/* 2 SAN version number			*/
-	uint8_t have_itable;	/* 1 do we have itable data		*/
 };
 
 /* internal context: static stuff. */
@@ -566,7 +565,6 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 		}
 		itbl += 256;
 	}
-	ctx->rt.have_itable = 1;
 }
 
 static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
