@@ -631,22 +631,13 @@ static void c48_4to8(uint8_t *dst, uint8_t *src, uint16_t w)
 	}
 }
 
-/* copy a line with cnt bytes from src to dst, due to MV values dest is
- * rarely 16/32bit aligned.  Leave it up to the compiler to optimize
- * this for the target, the cnt are known at compile time.
- */
-static inline void c48_cp(uint8_t *dst, uint8_t *src, uint8_t cnt)
-{
-	while (cnt--)
-		*dst++ = *src++;
-}
-
 /* process an 8x8 block */
 static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
 {
 	uint8_t opc, sb[16];
 	int16_t mvofs;
-	int i, j, k;
+	uint32_t ofs;
+	int i, j, k, l;
 
 	opc = *src++;
 	switch (opc) {
@@ -659,8 +650,9 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
 	case 0xFE:	/* 1x 8x8 copy from deltabuf, 16bit mv from src */
 		mvofs = (int16_t)le16_to_cpu(*(int16_t*)src); src += 2;
 		for (i = 0; i < 8; i++) {
-			int32_t ofs = w * i;
-			c48_cp(dst + ofs, db + ofs + mvofs, 8);
+			ofs = w * i;
+			for (k = 0; k < 8; k++)
+				*(dst + ofs + k) = *(db + ofs + k + mvofs);
 		}
 		break;
 	case 0xFD:	/* 2x2 -> 8x8 block scale */
@@ -678,11 +670,12 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
 	case 0xFC:	/* 4x copy 4x4 block, per-block c48_mv, index from source */
 		for (i = 0; i < 8; i += 4) {
 			for (k = 0; k < 8; k += 4) {
-				mvofs = c48_mv[*src][0] + (c48_mv[*src][1] * w);
-				src++;
+				opc = *src++;
+				mvofs = c48_mv[opc][0] + (c48_mv[opc][1] * w);
 				for (j = 0; j < 4; j++) {
-					int32_t ofs = (w * (j + i)) + k;
-					c48_cp(dst + ofs, db + ofs + mvofs, 4);
+					ofs = (w * (j + i)) + k;
+					for (l = 0; l < 4; l++)
+						*(dst + ofs + l) = *(db + ofs + l + mvofs);
 				}
 			}
 		}
@@ -692,8 +685,9 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
 			for (k = 0; k < 8; k += 4) {		/* 2 */
 				mvofs = le16_to_cpu(*(int16_t *)src); src += 2;
 				for (j = 0; j < 4; j++) {	/* 4 */
-					int32_t ofs = (w * (j + i)) + k;
-					c48_cp(dst + ofs, db + ofs + mvofs, 4);
+					ofs = (w * (j + i)) + k;
+					for (l = 0; l < 4; l++)
+						*(dst + ofs + l) = *(db + ofs + l + mvofs);
 				}
 			}
 		}
@@ -705,36 +699,41 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
 	case 0xF9:	/* 16x 2x2 copy from delta, per-block c48_mv */
 		for (i = 0; i < 8; i += 2) {				/* 4 */
 			for (j = 0; j < 8; j += 2) {			/* 4 */
-				int32_t ofs = (w * i) + j;
+				ofs = (w * i) + j;
 				mvofs = c48_mv[*src][0] + (c48_mv[*src][1] * w);
 				src++;
-				c48_cp(dst + ofs + 0, db + ofs + 0 + mvofs, 2);
-				c48_cp(dst + ofs + w, db + ofs + w + mvofs, 2);
+				for (l = 0; l < 2; l++) {
+					*(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
+					*(dst + ofs + l + w) = *(db + ofs + l + w + mvofs);
+				}
 			}
 		}
 		break;
 	case 0xF8:	/* 16x 2x2 blocks copy, mv from source */
 		for (i = 0; i < 8; i += 2) {				/* 4 */
 			for (j = 0; j < 8; j += 2) {			/* 4 */
-				int32_t ofs = w * i + j;
+				ofs = w * i + j;
 				mvofs = le16_to_cpu(*(int16_t *)src); src += 2;
-				c48_cp(dst + ofs + 0, db + ofs + 0 + mvofs, 2);
-				c48_cp(dst + ofs + w, db + ofs + w + mvofs, 2);
+				for (l = 0; l < 2; l++) {
+					*(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
+					*(dst + ofs + l + w) = *(db + ofs + l + w + mvofs);
+				}
 			}
 		}
 		break;
 	case 0xF7:	/* copy 8x8 block from src to dest */
 		for (i = 0; i < 8; i++) {
-			int32_t ofs = i * w;
-			c48_cp(dst + ofs, src, 8);
-			src += 8;
+			ofs = i * w;
+			for (l = 0; l < 8; l++)
+				dst[ofs + l] = *src++;
 		}
 		break;
 	default:	/* copy 8x8 block from prev, c48_mv */
 		mvofs = c48_mv[opc][0] + (c48_mv[opc][1]) * w;
 		for (i = 0; i < 8; i++) {
-			int32_t ofs = i * w;
-			c48_cp(dst + ofs, db + ofs + mvofs, 8);
+			ofs = i * w;
+			for (l = 0; l < 8; l++)
+				*(dst + ofs + l) = *(db + ofs + l + mvofs);
 		}
 		break;
 	}
