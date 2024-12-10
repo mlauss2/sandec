@@ -184,6 +184,117 @@ static const int8_t c48_mv[256][2] = {
 	{ -3, -21}, { -5, -21}, { -8, -21}, {-13, -21}, {-17, -21},
 };
 
+static const int8_t c37_mv[3][510] = {
+	{
+	0,   0,   1,   0,   2,   0,   3,   0,   5,   0,   8,   0,  13,   0,  21,
+	0,  -1,   0,  -2,   0,  -3,   0,  -5,   0,  -8,   0, -13,   0, -17,   0,
+	-21,   0,   0,   1,   1,   1,   2,   1,   3,   1,   5,   1,   8,   1,  13,
+	1,  21,   1,  -1,   1,  -2,   1,  -3,   1,  -5,   1,  -8,   1, -13,   1,
+	-17,   1, -21,   1,   0,   2,   1,   2,   2,   2,   3,   2,   5,   2,   8,
+	2,  13,   2,  21,   2,  -1,   2,  -2,   2,  -3,   2,  -5,   2,  -8,   2,
+	-13,   2, -17,   2, -21,   2,   0,   3,   1,   3,   2,   3,   3,   3,   5,
+	3,   8,   3,  13,   3,  21,   3,  -1,   3,  -2,   3,  -3,   3,  -5,   3,
+	-8,   3, -13,   3, -17,   3, -21,   3,   0,   5,   1,   5,   2,   5,   3,
+	5,   5,   5,   8,   5,  13,   5,  21,   5,  -1,   5,  -2,   5,  -3,   5,
+	-5,   5,  -8,   5, -13,   5, -17,   5, -21,   5,   0,   8,   1,   8,   2,
+	8,   3,   8,   5,   8,   8,   8,  13,   8,  21,   8,  -1,   8,  -2,   8,
+	-3,   8,  -5,   8,  -8,   8, -13,   8, -17,   8, -21,   8,   0,  13,   1,
+	13,   2,  13,   3,  13,   5,  13,   8,  13,  13,  13,  21,  13,  -1,  13,
+	-2,  13,  -3,  13,  -5,  13,  -8,  13, -13,  13, -17,  13, -21,  13,   0,
+	21,   1,  21,   2,  21,   3,  21,   5,  21,   8,  21,  13,  21,  21,  21,
+	-1,  21,  -2,  21,  -3,  21,  -5,  21,  -8,  21, -13,  21, -17,  21, -21,
+	21,   0,  -1,   1,  -1,   2,  -1,   3,  -1,   5,  -1,   8,  -1,  13,  -1,
+	21,  -1,  -1,  -1,  -2,  -1,  -3,  -1,  -5,  -1,  -8,  -1, -13,  -1, -17,
+	-1, -21,  -1,   0,  -2,   1,  -2,   2,  -2,   3,  -2,   5,  -2,   8,  -2,
+	13,  -2,  21,  -2,  -1,  -2,  -2,  -2,  -3,  -2,  -5,  -2,  -8,  -2, -13,
+	-2, -17,  -2, -21,  -2,   0,  -3,   1,  -3,   2,  -3,   3,  -3,   5,  -3,
+	8,  -3,  13,  -3,  21,  -3,  -1,  -3,  -2,  -3,  -3,  -3,  -5,  -3,  -8,
+	-3, -13,  -3, -17,  -3, -21,  -3,   0,  -5,   1,  -5,   2,  -5,   3,  -5,
+	5,  -5,   8,  -5,  13,  -5,  21,  -5,  -1,  -5,  -2,  -5,  -3,  -5,  -5,
+	-5,  -8,  -5, -13,  -5, -17,  -5, -21,  -5,   0,  -8,   1,  -8,   2,  -8,
+	3,  -8,   5,  -8,   8,  -8,  13,  -8,  21,  -8,  -1,  -8,  -2,  -8,  -3,
+	-8,  -5,  -8,  -8,  -8, -13,  -8, -17,  -8, -21,  -8,   0, -13,   1, -13,
+	2, -13,   3, -13,   5, -13,   8, -13,  13, -13,  21, -13,  -1, -13,  -2,
+	-13,  -3, -13,  -5, -13,  -8, -13, -13, -13, -17, -13, -21, -13,   0, -17,
+	1, -17,   2, -17,   3, -17,   5, -17,   8, -17,  13, -17,  21, -17,  -1,
+	-17,  -2, -17,  -3, -17,  -5, -17,  -8, -17, -13, -17, -17, -17, -21, -17,
+	0, -21,   1, -21,   2, -21,   3, -21,   5, -21,   8, -21,  13, -21,  21,
+	-21,  -1, -21,  -2, -21,  -3, -21,  -5, -21,  -8, -21, -13, -21, -17, -21
+	},
+	 {
+	0,   0,  -8, -29,   8, -29, -18, -25,  17, -25,   0, -23,  -6, -22,   6,
+	-22, -13, -19,  12, -19,   0, -18,  25, -18, -25, -17,  -5, -17,   5, -17,
+	-10, -15,  10, -15,   0, -14,  -4, -13,   4, -13,  19, -13, -19, -12,  -8,
+	-11,  -2, -11,   0, -11,   2, -11,   8, -11, -15, -10,  -4, -10,   4, -10,
+	15, -10,  -6,  -9,  -1,  -9,   1,  -9,   6,  -9, -29,  -8, -11,  -8,  -8,
+	-8,  -3,  -8,   3,  -8,   8,  -8,  11,  -8,  29,  -8,  -5,  -7,  -2,  -7,
+	0,  -7,   2,  -7,   5,  -7, -22,  -6,  -9,  -6,  -6,  -6,  -3,  -6,  -1,
+	-6,   1,  -6,   3,  -6,   6,  -6,   9,  -6,  22,  -6, -17,  -5,  -7,  -5,
+	-4,  -5,  -2,  -5,   0,  -5,   2,  -5,   4,  -5,   7,  -5,  17,  -5, -13,
+	-4, -10,  -4,  -5,  -4,  -3,  -4,  -1,  -4,   0,  -4,   1,  -4,   3,  -4,
+	5,  -4,  10,  -4,  13,  -4,  -8,  -3,  -6,  -3,  -4,  -3,  -3,  -3,  -2,
+	-3,  -1,  -3,   0,  -3,   1,  -3,   2,  -3,   4,  -3,   6,  -3,   8,  -3,
+	-11,  -2,  -7,  -2,  -5,  -2,  -3,  -2,  -2,  -2,  -1,  -2,   0,  -2,   1,
+	-2,   2,  -2,   3,  -2,   5,  -2,   7,  -2,  11,  -2,  -9,  -1,  -6,  -1,
+	-4,  -1,  -3,  -1,  -2,  -1,  -1,  -1,   0,  -1,   1,  -1,   2,  -1,   3,
+	-1,   4,  -1,   6,  -1,   9,  -1, -31,   0, -23,   0, -18,   0, -14,   0,
+	-11,   0,  -7,   0,  -5,   0,  -4,   0,  -3,   0,  -2,   0,  -1,   0,   0,
+	-31,   1,   0,   2,   0,   3,   0,   4,   0,   5,   0,   7,   0,  11,   0,
+	14,   0,  18,   0,  23,   0,  31,   0,  -9,   1,  -6,   1,  -4,   1,  -3,
+	1,  -2,   1,  -1,   1,   0,   1,   1,   1,   2,   1,   3,   1,   4,   1,
+	6,   1,   9,   1, -11,   2,  -7,   2,  -5,   2,  -3,   2,  -2,   2,  -1,
+	2,   0,   2,   1,   2,   2,   2,   3,   2,   5,   2,   7,   2,  11,   2,
+	-8,   3,  -6,   3,  -4,   3,  -2,   3,  -1,   3,   0,   3,   1,   3,   2,
+	3,   3,   3,   4,   3,   6,   3,   8,   3, -13,   4, -10,   4,  -5,   4,
+	-3,   4,  -1,   4,   0,   4,   1,   4,   3,   4,   5,   4,  10,   4,  13,
+	4, -17,   5,  -7,   5,  -4,   5,  -2,   5,   0,   5,   2,   5,   4,   5,
+	7,   5,  17,   5, -22,   6,  -9,   6,  -6,   6,  -3,   6,  -1,   6,   1,
+	6,   3,   6,   6,   6,   9,   6,  22,   6,  -5,   7,  -2,   7,   0,   7,
+	2,   7,   5,   7, -29,   8, -11,   8,  -8,   8,  -3,   8,   3,   8,   8,
+	8,  11,   8,  29,   8,  -6,   9,  -1,   9,   1,   9,   6,   9, -15,  10,
+	-4,  10,   4,  10,  15,  10,  -8,  11,  -2,  11,   0,  11,   2,  11,   8,
+	11,  19,  12, -19,  13,  -4,  13,   4,  13,   0,  14, -10,  15,  10,  15,
+	-5,  17,   5,  17,  25,  17, -25,  18,   0,  18, -12,  19,  13,  19,  -6,
+	22,   6,  22,   0,  23, -17,  25,  18,  25,  -8,  29,   8,  29,   0,  31
+	}, {
+	0,   0,  -6, -22,   6, -22, -13, -19,  12, -19,   0, -18,  -5, -17,   5,
+	-17, -10, -15,  10, -15,   0, -14,  -4, -13,   4, -13,  19, -13, -19, -12,
+	-8, -11,  -2, -11,   0, -11,   2, -11,   8, -11, -15, -10,  -4, -10,   4,
+	-10,  15, -10,  -6,  -9,  -1,  -9,   1,  -9,   6,  -9, -11,  -8,  -8,  -8,
+	-3,  -8,   0,  -8,   3,  -8,   8,  -8,  11,  -8,  -5,  -7,  -2,  -7,   0,
+	-7,   2,  -7,   5,  -7, -22,  -6,  -9,  -6,  -6,  -6,  -3,  -6,  -1,  -6,
+	1,  -6,   3,  -6,   6,  -6,   9,  -6,  22,  -6, -17,  -5,  -7,  -5,  -4,
+	-5,  -2,  -5,  -1,  -5,   0,  -5,   1,  -5,   2,  -5,   4,  -5,   7,  -5,
+	17,  -5, -13,  -4, -10,  -4,  -5,  -4,  -3,  -4,  -2,  -4,  -1,  -4,   0,
+	-4,   1,  -4,   2,  -4,   3,  -4,   5,  -4,  10,  -4,  13,  -4,  -8,  -3,
+	-6,  -3,  -4,  -3,  -3,  -3,  -2,  -3,  -1,  -3,   0,  -3,   1,  -3,   2,
+	-3,   3,  -3,   4,  -3,   6,  -3,   8,  -3, -11,  -2,  -7,  -2,  -5,  -2,
+	-4,  -2,  -3,  -2,  -2,  -2,  -1,  -2,   0,  -2,   1,  -2,   2,  -2,   3,
+	-2,   4,  -2,   5,  -2,   7,  -2,  11,  -2,  -9,  -1,  -6,  -1,  -5,  -1,
+	-4,  -1,  -3,  -1,  -2,  -1,  -1,  -1,   0,  -1,   1,  -1,   2,  -1,   3,
+	-1,   4,  -1,   5,  -1,   6,  -1,   9,  -1, -23,   0, -18,   0, -14,   0,
+	-11,   0,  -7,   0,  -5,   0,  -4,   0,  -3,   0,  -2,   0,  -1,   0,   0,
+	-23,   1,   0,   2,   0,   3,   0,   4,   0,   5,   0,   7,   0,  11,   0,
+	14,   0,  18,   0,  23,   0,  -9,   1,  -6,   1,  -5,   1,  -4,   1,  -3,
+	1,  -2,   1,  -1,   1,   0,   1,   1,   1,   2,   1,   3,   1,   4,   1,
+	5,   1,   6,   1,   9,   1, -11,   2,  -7,   2,  -5,   2,  -4,   2,  -3,
+	2,  -2,   2,  -1,   2,   0,   2,   1,   2,   2,   2,   3,   2,   4,   2,
+	5,   2,   7,   2,  11,   2,  -8,   3,  -6,   3,  -4,   3,  -3,   3,  -2,
+	3,  -1,   3,   0,   3,   1,   3,   2,   3,   3,   3,   4,   3,   6,   3,
+	8,   3, -13,   4, -10,   4,  -5,   4,  -3,   4,  -2,   4,  -1,   4,   0,
+	4,   1,   4,   2,   4,   3,   4,   5,   4,  10,   4,  13,   4, -17,   5,
+	-7,   5,  -4,   5,  -2,   5,  -1,   5,   0,   5,   1,   5,   2,   5,   4,
+	5,   7,   5,  17,   5, -22,   6,  -9,   6,  -6,   6,  -3,   6,  -1,   6,
+	1,   6,   3,   6,   6,   6,   9,   6,  22,   6,  -5,   7,  -2,   7,   0,
+	7,   2,   7,   5,   7, -11,   8,  -8,   8,  -3,   8,   0,   8,   3,   8,
+	8,   8,  11,   8,  -6,   9,  -1,   9,   1,   9,   6,   9, -15,  10,  -4,
+	10,   4,  10,  15,  10,  -8,  11,  -2,  11,   0,  11,   2,  11,   8,  11,
+	19,  12, -19,  13,  -4,  13,   4,  13,   0,  14, -10,  15,  10,  15,  -5,
+	17,   5,  17,   0,  18, -12,  19,  13,  19,  -6,  22,   6,  22,   0,  23
+	}
+};
+
+
 /******************************************************************************
  * SAN Codec47 Glyph setup, taken from ffmpeg
  * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob_plain/HEAD:/libavcodec/sanm.c
@@ -806,6 +917,118 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	return ret;
 }
 
+/******************************************************************************/
+
+static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, uint16_t h,
+			  uint8_t mvidx, const uint8_t f4, const uint8_t c4)
+{
+	uint8_t opc, c, copycnt;
+	int32_t ofs, mvofs;
+	int i, j, k, l;
+
+	copycnt = 0;
+	for (i = 0; i < h; i += 4) {
+		for (j = 0; j < w; j += 4) {
+
+			/* copy a 4x4 block from the previous frame from same spot */
+			if (copycnt > 0) {
+				for (k = 0; k < 4; k++) {
+					for (l = 0; l < 4; l++) {
+						ofs = j + (k * w) + l;
+						*(dst + ofs) = *(db + ofs);
+					}
+				}
+				copycnt--;
+				continue;
+			}
+
+			opc = *src++;
+			if (opc == 0xff) {
+				/* 4x4 block, per-pixel data from source */
+				for (k = 0; k < 4; k++) {
+					for (l = 0; l < 4; l++)
+						*(dst + j + (k * w) + l) = *src++;
+				}
+			} else if (f4 && (opc == 0xfe)) {
+				/* 4x4 block, per-line color from source */
+				for (k = 0; k < 4; k++) {
+					c = *src++;
+					for (l = 0; l < 4; l++)
+						*(dst + j + (k * w) + l) = c;
+				}
+			} else if (f4 && (opc == 0xfd)) {
+				/* 4x4 block, per block color from source */
+				c = *src++;
+				for (k = 0; k < 4; k++)
+					for (l = 0; l < 4; l++)
+						*(dst + j + (k * w) + l) = c;
+			} else if (c4 && (opc == 0)) {
+				/* copy 4x4 block from prev frame, cnt from src */
+				copycnt = 1 + *src++;
+				j -= 4;	/* curr. block needs to be handled too */
+			} else {
+				/* 4x4 block copy from prev with MV */
+				mvofs = c37_mv[mvidx][opc*2] + (c37_mv[mvidx][opc*2 + 1] * w);
+				for (k = 0; k < 4; k++) {
+					for (l = 0; l < 4; l++) {
+						ofs = k * w + j + l;
+						*(dst + ofs) = *(db + ofs + mvofs);
+					}
+				}
+			}
+		}
+		dst += w * 4;
+		db += w * 4;
+	}
+}
+
+static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   uint16_t top, uint16_t left)
+{
+	uint8_t comp, mvidx, flag, *dst;
+	uint32_t pktsize, decsize;
+	uint16_t seq;
+	int ret;
+
+	comp = src[0];
+	mvidx = src[1];
+	seq = le16_to_cpu(*(uint16_t *)(src + 2));
+	decsize = le32_to_cpu(ua32(src + 4));	/* size of the full frame */
+	pktsize = le32_to_cpu(ua32(src + 8));	/* size of this data packet */
+	flag =	src[12];
+
+	if (seq == 0 || comp == 0 || comp == 2) {
+		memset(ctx->rt.buf2, 0, decsize);
+	}
+
+	if ((comp == 1 || comp == 3 || comp == 4)
+	    && ((seq & 1) || !(flag & 1))) {
+		void *tmp = ctx->rt.buf0;
+		ctx->rt.buf0 = ctx->rt.buf2;
+		ctx->rt.buf2 = tmp;
+	}
+
+	src += 16;
+	ret = 0;
+	dst = ctx->rt.buf0 + (top * w) + left;
+	switch (comp) {
+	case 0: memcpy(dst, src, decsize); break;
+	case 2: codec47_comp5(src, dst, decsize); break;
+	case 3: /* fallthrough */
+	case 4: codec37_comp3(src, dst, ctx->rt.buf2 + (top * w) + left, w, h,
+			      mvidx, flag & 4, comp == 4); break;
+	default: ret = 17; break;
+	}
+
+	ctx->rt.lastseq = seq;
+	ctx->rt.rotate = 0;
+	ctx->rt.vbuf = ctx->rt.buf0;
+
+	return ret;
+}
+
+/******************************************************************************/
+
 static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		   int16_t top, int16_t left)
 {
@@ -839,10 +1062,12 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	ctx->rt.vbuf = ctx->rt.buf0;
 }
 
+/******************************************************************************/
+
 static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t bpp, unsigned align)
 {
 	uint16_t wb, hb;
-	uint32_t bs;
+	uint32_t bs, fbs;
 	uint8_t *b;
 
 	if (align > 1) {
@@ -856,25 +1081,34 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	}
 
 	/* don't support strides different from image width (yet) */
-	if (wb != w)
+	if (wb != w) {
 		return 50;
+	}
 
 	/* we require up to 3 buffers the size of the image.
 	 * a front buffer + 2 work buffers. work buffer 1 is also used to store
 	 * the frontbuffer on "STOR".
+	 *
+	 * Then we need a "guard area" before and after the buffers for motion
+	 * vectors that point outside the defined video area, esp. for codec37
+	 * and codec48.  32 lines (max of mvec tables) is enough to get rid of
+	 * all tiny artifacts.
 	 */
-	bs = wb * hb * bpp;
-	b = (uint8_t *)malloc(bs * 3);
+	bs = wb * hb * bpp;		/* block-aligned 8 bit sizes */
+	bs = (bs + 0xfff) & ~0xfff;	/* align to 4K */
+	fbs = bs * 3 + (wb * 32 * 4);	/* 3 buffers, 4 guard "bands" */
+	b = (uint8_t *)malloc(fbs);
 	if (!b)
 		return 51;
+	memset(b, 0, fbs);	/* clear everything including the guard bands */
 
 	if (rt->buf)
 		free(rt->buf);
 
 	rt->buf = b;
-	rt->buf0 = b;
-	rt->buf1 = rt->buf0 + bs;
-	rt->buf2 = rt->buf1 + bs;
+	rt->buf0 = b + (wb * 32);	/* leave a guard area for motion vectors */
+	rt->buf1 = rt->buf0 + (wb * 32) + bs;
+	rt->buf2 = rt->buf1 + (wb * 32) + bs;
 	rt->fbsize = w * h * bpp;	/* image size reported to caller */
 	rt->w = w;
 	rt->h = h;
@@ -896,7 +1130,23 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	h     = le16_to_cpu(*(uint16_t *)(src + 8));
 	/* 32bit unknown value */
 
-	align = (codec == 48) ? 8 : 2;
+	align = (codec == 37) ? 4 : 2;
+	align = (codec == 48) ? 8 : align;
+
+	/* ignore too small dimensions, happens with some Full Throttle videos */
+	if (w < align || h < align)
+		return 0;
+
+	/* codec37 videos are generally 320x200.  The Dig sq1.san has 640x480
+	 * in a few (black) frames though. Fix it up.
+	 */
+	if (codec == 37) {
+		if (w > 320)
+			w = 320;
+		if (h > 200)
+			h = 200;
+	}
+
 	ret = 0;
 	if ((rt->w < (left + w)) || (rt->h < (top + h))) {
 		ret = fobj_alloc_buffers(rt, _max(rt->w, left + w), _max(rt->h, top + h), 1, align);
@@ -907,6 +1157,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	switch (codec) {
 	case 1:
 	case 3: codec1(ctx, src + 14, w, h, top, left); break;
+	case 37:ret = codec37(ctx, src + 14, w, h, top, left); break;
 	case 47:ret = codec47(ctx, src + 14, w, h, top, left); break;
 	case 48:ret = codec48(ctx, src + 14, w, h, top, left); break;
 	default: ret = 10;
