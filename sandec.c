@@ -726,7 +726,7 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
 		for (i = 0; i < 8; i++) {
 			ofs = i * w;
 			for (l = 0; l < 8; l++)
-				dst[ofs + l] = *src++;
+				*(dst + ofs + l) = *src++;
 		}
 		break;
 	default:	/* copy 8x8 block from prev, c48_mv */
