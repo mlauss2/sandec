@@ -262,7 +262,7 @@ static const int8_t c47_glyph8_y[GLYPH_COORD_VECT_SIZE] = {
 	0, 0, 0, 0, 1, 3, 4, 6, 7, 7, 7, 7, 6, 4, 3, 1
 };
 
-static const int8_t c47_motion_vectors[256][2] = {
+static const int8_t c47_mv[256][2] = {
 	{   0,   0 }, {  -1, -43 }, {   6, -43 }, {  -9, -42 }, {  13, -41 },
 	{ -16, -40 }, {  19, -39 }, { -23, -36 }, {  26, -34 }, {  -2, -33 },
 	{   4, -33 }, { -29, -32 }, {  -9, -32 }, {  11, -31 }, { -16, -29 },
@@ -511,17 +511,17 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 			      uint8_t *p1, uint8_t *p2, uint16_t w,
 			      uint8_t *coltbl, uint16_t size)
 {
-	uint8_t code, col[2], c;
+	uint8_t opc, col[2], c;
 	uint16_t i, j;
 	int8_t *pglyph;
 
-	code = *src++;
-	if (code >= 0xF8) {
-		switch (code) {
+	opc = *src++;
+	if (opc >= 0xF8) {
+		switch (opc) {
 		case 0xff:
 			if (size == 2) {
-				dst[0] = *src++; dst[1] = *src++;
-				dst[w] = *src++; dst[w + 1] = *src++;
+				*(dst + 0 + 0) = *src++; *(dst + 0 + 1) = *src++;
+				*(dst + w + 0) = *src++; *(dst + w + 1) = *src++;
 			} else {
 				size >>= 1;
 				src = codec47_block(ctx, src, dst, p1, p2, w, coltbl, size);
@@ -537,34 +537,33 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 			c = *src++;
 			for (i = 0; i < size; i++)
 				for (j = 0; j < size; j++)
-					dst[(i * w) + j] = c;
+					*(dst + (i * w) + j) = c;
 			break;
 		case 0xfd:
-			code = *src++;
+			opc = *src++;
 			col[0] = *src++;
 			col[1] = *src++;
-			pglyph = (size == 8) ? ctx->c47_glyph8x8[code] : ctx->c47_glyph4x4[code];
+			pglyph = (size == 8) ? ctx->c47_glyph8x8[opc] : ctx->c47_glyph4x4[opc];
 			for (i = 0; i < size; i++)
 				for (j = 0; j < size; j++)
-					dst[(i * w) + j] = col[!*pglyph++];
+					*(dst + (i * w) + j) = col[!*pglyph++];
 			break;
 		case 0xfc:
 			for (i = 0; i < size; i++)
 				for (j = 0; j < size; j++)
-					dst[(i * w) + j] = p1[(i * w) + j];
+					*(dst + (i * w) + j) = *(p1 + (i * w) + j);
 			break;
 		default:
-			c = coltbl[code & 7];
+			c = coltbl[opc & 7];
 			for (i = 0; i < size; i++)
 				for (j = 0; j < size; j++)
-					dst[(i * w) + j] = c;
+					*(dst + (i * w) + j) = c;
 		}
 	} else {
-		const int8_t mvx = c47_motion_vectors[code][0];
-		const int8_t mvy = c47_motion_vectors[code][1];
+		const int32_t mvoff = c47_mv[opc][0] + (c47_mv[opc][1] * w);
 		for (i = 0; i < size; i++)
 			for (j = 0; j < size; j++)
-				dst[(i * w) + j] = p2[((mvy + i) * w) + mvx + j];
+				*(dst + (i * w) + j) = *(p2 + (i * w) + j + mvoff);
 	}
 	return src;
 }
@@ -992,7 +991,7 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 				col = *src++; dlen--;
 				if (col)
 					for (j = 0; j < rlen; j++)
-						dst[j] = col;
+						*(dst + j) = col;
 				dst += rlen;
 			} else {
 				for (j = 0; j < rlen; j++) {
@@ -1035,7 +1034,7 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	 * a front buffer + 2 work buffers. work buffer 1 is also used to store
 	 * the frontbuffer on "STOR".
 	 *
-	 * Then we need a "guard area" before and after the buffers for motion
+	 * Then we need a "guard band" before and after the buffers for motion
 	 * vectors that point outside the defined video area, esp. for codec37
 	 * and codec48.  32 lines (max of mvec tables) is enough to get rid of
 	 * all tiny artifacts.
@@ -1052,7 +1051,7 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 		free(rt->buf);
 
 	rt->buf = b;
-	rt->buf0 = b + (wb * 32);	/* leave a guard area for motion vectors */
+	rt->buf0 = b + (wb * 32);	/* leave a guard band for motion vectors */
 	rt->buf1 = rt->buf0 + (wb * 32) + bs;
 	rt->buf2 = rt->buf1 + (wb * 32) + bs;
 	rt->fbsize = w * h * bpp;	/* image size reported to caller */
