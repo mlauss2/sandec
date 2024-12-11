@@ -931,16 +931,20 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		   uint16_t top, uint16_t left)
 {
 	uint8_t comp, mvidx, flag, *dst;
-	uint32_t pktsize, decsize;
+	const uint32_t decsize = w * h;
 	uint16_t seq;
 	int ret;
 
 	comp = src[0];
 	mvidx = src[1];
+	if (mvidx > 2)
+		return 18;
 	seq = le16_to_cpu(*(uint16_t *)(src + 2));
-	decsize = le32_to_cpu(ua32(src + 4));	/* size of the full frame */
-	pktsize = le32_to_cpu(ua32(src + 8));	/* size of this data packet */
-	flag =	src[12];
+	/* decoded size at 4-7, packet size at 8-11, we ignore both here
+	 * to work around the few 640x480 black frames in The Digs sq1.san
+	 * and just use w * h instead, which works for all codec37 vids.
+	 */
+	flag = src[12];
 
 	if (seq == 0 || comp == 0 || comp == 2) {
 		memset(ctx->rt.buf2, 0, decsize);
@@ -962,7 +966,7 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	case 3: /* fallthrough */
 	case 4: codec37_comp3(src, dst, ctx->rt.buf2 + (top * w) + left, w, h,
 			      mvidx, flag & 4, comp == 4); break;
-	default: ret = 17; break;
+	default: ret = 19; break;
 	}
 
 	ctx->rt.lastseq = seq;
