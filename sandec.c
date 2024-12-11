@@ -879,9 +879,9 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 			if (copycnt > 0) {
 c37_blk:
 				for (k = 0; k < 4; k++) {
+					ofs = j + (k * w);
 					for (l = 0; l < 4; l++) {
-						ofs = j + (k * w) + l;
-						*(dst + ofs) = *(db + ofs);
+						*(dst + ofs + l) = *(db + ofs + l);
 					}
 				}
 				copycnt--;
@@ -892,22 +892,26 @@ c37_blk:
 			if (opc == 0xff) {
 				/* 4x4 block, per-pixel data from source */
 				for (k = 0; k < 4; k++) {
+					ofs = j + (k * w);
 					for (l = 0; l < 4; l++)
-						*(dst + j + (k * w) + l) = *src++;
+						*(dst + ofs + l) = *src++;
 				}
 			} else if (f4 && (opc == 0xfe)) {
 				/* 4x4 block, per-line color from source */
 				for (k = 0; k < 4; k++) {
 					c = *src++;
+					ofs = j + (k * w);
 					for (l = 0; l < 4; l++)
-						*(dst + j + (k * w) + l) = c;
+						*(dst + ofs + l) = c;
 				}
 			} else if (f4 && (opc == 0xfd)) {
 				/* 4x4 block, per block color from source */
 				c = *src++;
-				for (k = 0; k < 4; k++)
+				for (k = 0; k < 4; k++) {
+					ofs = j + (k * w);
 					for (l = 0; l < 4; l++)
-						*(dst + j + (k * w) + l) = c;
+						*(dst + ofs + l) = c;
+				}
 			} else if (c4 && (opc == 0)) {
 				/* copy 4x4 block from prev frame, cnt from src */
 				copycnt = 1 + *src++;
@@ -916,10 +920,9 @@ c37_blk:
 				/* 4x4 block copy from prev with MV */
 				mvofs = c37_mv[mvidx][opc*2] + (c37_mv[mvidx][opc*2 + 1] * w);
 				for (k = 0; k < 4; k++) {
-					for (l = 0; l < 4; l++) {
-						ofs = k * w + j + l;
-						*(dst + ofs) = *(db + ofs + mvofs);
-					}
+					ofs = j + (k * w);
+					for (l = 0; l < 4; l++)
+						*(dst + ofs + l) = *(db + ofs + l + mvofs);
 				}
 			}
 		}
