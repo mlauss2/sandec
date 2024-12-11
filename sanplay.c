@@ -291,7 +291,8 @@ int main(int a, char **argv)
 				if (ret == SANDEC_OK) {
 					if (speedmode < 2) {
 						ret = render_frame(&sdl);
-						SDL_Delay(waittick - (SDL_GetTicks64() - t1));
+						if (speedmode == 0)
+							SDL_Delay(waittick - (SDL_GetTicks64() - t1));
 					} else
 						ret = 0;
 				} else {
