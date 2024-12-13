@@ -569,10 +569,9 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 }
 
 static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
-			  uint16_t w, uint16_t h, int16_t left, int16_t top,
-			  uint8_t *coltbl)
+			  uint16_t w, uint16_t h, uint8_t *coltbl)
 {
-	uint8_t *b1 = ctx->rt.buf1 + left + (top * w), *b2 = ctx->rt.buf2 + left + (top * w);
+	uint8_t *b1 = ctx->rt.buf1, *b2 = ctx->rt.buf2;
 	unsigned int i, j;
 
 	for (j = 0; j < h; j += 8) {
@@ -623,8 +622,7 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 	}
 }
 
-static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
-		   int16_t top, int16_t left)
+static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 {
 	uint8_t *insrc = src, *dst, comp, newrot, flag;
 	uint32_t decsize;
@@ -639,8 +637,8 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 
 	if (seq == 0) {
 		ctx->rt.lastseq = -1;
-		memset(ctx->rt.buf1 + (top * w), src[12], decsize);
-		memset(ctx->rt.buf2 + (top * w), src[13], decsize);
+		memset(ctx->rt.buf1, src[12], decsize);
+		memset(ctx->rt.buf2, src[13], decsize);
 	}
 	src += 26;
 	if (flag & 1) {
@@ -649,12 +647,12 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	}
 
 	ret = 0;
-	dst = ctx->rt.buf0 + left + (top * w);
+	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0:	memcpy(dst, src, w * h); break;
 	case 1:	codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h); break;
 	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
-			codec47_comp2(ctx, src, dst, w, h, left, top, insrc + 8);
+			codec47_comp2(ctx, src, dst, w, h, insrc + 8);
 		}
 		break;
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;
@@ -811,8 +809,7 @@ static void codec48_comp3(uint8_t *src, uint8_t *dst, uint8_t *db,
 	}
 }
 
-static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
-		   int16_t top, int16_t left)
+static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 {
 	uint8_t comp, flag, *dst;
 	uint32_t pktsize, decsize;
@@ -1100,6 +1097,13 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			h = 200;
 	}
 
+	/* disable left/top for codec47/48 videos.  Except for SotE, none use
+	 * it, and SotE uses it as a hack to get "widescreen" aspect, i.e. it's
+	 * just a black bar of 60 pixels heigth at the top.
+	 */
+	if (codec == 47 || codec == 48)
+		left = top = 0;
+
 	ret = 0;
 	if ((rt->w < (left + w)) || (rt->h < (top + h))) {
 		ret = fobj_alloc_buffers(rt, _max(rt->w, left + w), _max(rt->h, top + h), 1, align);
@@ -1111,8 +1115,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	case 1:
 	case 3: codec1(ctx, src + 14, w, h, top, left); break;
 	case 37:ret = codec37(ctx, src + 14, w, h, top, left); break;
-	case 47:ret = codec47(ctx, src + 14, w, h, top, left); break;
-	case 48:ret = codec48(ctx, src + 14, w, h, top, left); break;
+	case 47:ret = codec47(ctx, src + 14, w, h); break;
+	case 48:ret = codec48(ctx, src + 14, w, h); break;
 	default: ret = 10;
 	}
 
