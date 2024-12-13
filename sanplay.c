@@ -23,13 +23,17 @@ struct sdlpriv {
 	uint32_t abufptr;
 	unsigned char *abuf;
 
-	uint16_t w;
-	uint16_t h;
+	uint16_t pxw;
+	uint16_t pxh;
+	uint16_t winw;
+	uint16_t winh;
+
 	uint32_t vbufsize;
 	unsigned char *vbuf;
-	uint32_t *pal;
 	uint16_t subid;
 	int err;
+	int fullscreen;
+	int nextmult;
 };
 
 /* this can be called multiple times per "sandec_decode_next_frame()",
@@ -63,155 +67,140 @@ static void queue_video(void *avctx, unsigned char *vdata, uint32_t size,
 		       uint16_t w, uint16_t h, uint32_t *imgpal, uint16_t subid)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
+	SDL_Palette *pal;
+	SDL_Surface *sur;
+	SDL_Texture *tex;
+	int ret, nw, nh;
+
 	if (!p || p->err)
 		return;
 
-	/* we borrow the buffer and palette. these pointers are valid until
-	 * the next invocation of san_decode_next_frame().
-	 */
-	p->vbuf = vdata;
+	if (!p->win) {
+		ret = SDL_CreateWindowAndRenderer(w, h, SDL_WINDOW_RESIZABLE, &p->win, &p->ren);
+		if (ret) {
+			p->win = NULL;
+			p->ren = NULL;
+			p->err = 1100;
+			return;
+		}
+		SDL_SetWindowTitle(p->win, "SAN/ANIM Player");
+		p->winw = w;
+		p->winh = h;
+	}
+
+	if (p->winw < w || p->winh < h) {
+		SDL_SetWindowSize(p->win, w, h);
+		p->winw = w;
+		p->winh = h;
+	}
+
+	if (p->nextmult) {
+		nw = w * p->nextmult;
+		nh = h * p->nextmult;
+		p->nextmult = 0;
+		if ((p->winw != nw) || (p->winh != nh)) {
+			SDL_SetWindowSize(p->win, nw, nh);
+			p->winw = nw;
+			p->winh = nh;
+		}
+	}
+
+	sur = SDL_CreateRGBSurfaceWithFormatFrom(vdata, w, h, 8, w, SDL_PIXELFORMAT_INDEX8);
+	if (!sur) {
+		p->err = 1101;
+		return;
+	}
+
+	pal = SDL_AllocPalette(256);
+	if (!pal) {
+		SDL_FreeSurface(sur);
+		p->err = 1102;
+		return;
+	}
+	memcpy(pal->colors, imgpal, 256 * sizeof(uint32_t));
+	ret = SDL_SetSurfacePalette(sur, pal);
+	if (ret) {
+		SDL_FreeSurface(sur);
+		p->err = 1103;
+		return;
+	}
+
+	tex = SDL_CreateTextureFromSurface(p->ren, sur);
+	if (!tex) {
+		p->err = 1104;
+		return;
+	}
+	ret = SDL_RenderCopy(p->ren, tex, NULL, NULL);
+	if (ret) {
+		p->err = 1003;
+		return;
+	}
+	SDL_DestroyTexture(tex);
+	SDL_FreeSurface(sur);
 	p->vbufsize = size;
-	p->pal = imgpal;
-	p->w = w;
-	p->h = h;
+	p->pxw = w;
+	p->pxh = h;
 	p->subid = subid;
+	p->err = 0;
 }
 
 static int render_frame(struct sdlpriv *p)
 {
-	SDL_Surface *sur;
-	SDL_Texture *tex;
-	SDL_Palette *pal;
-	SDL_Rect sr;
-	int ret;
-
 	if (p->err)
 		return p->err;
 
-	sr.x = sr.y = 0;
-	sr.w = p->w;
-	sr.h = p->h;
-
-	sur = SDL_CreateRGBSurfaceWithFormatFrom(p->vbuf, sr.w, sr.h, 8, sr.w, SDL_PIXELFORMAT_INDEX8);
-	if (!sur) {
-		printf("ERR: %s\n", SDL_GetError());
-		return 1001;
-	}
-
-	pal = SDL_AllocPalette(256);
-	if (!pal)
-		return 1005;
-	memcpy(pal->colors, p->pal, 256 * sizeof(SDL_Color));
-	ret = SDL_SetSurfacePalette(sur, pal);
-	if (ret) {
-		SDL_FreeSurface(sur);
-		return 1002;
-	}
-	tex = SDL_CreateTextureFromSurface(p->ren, sur);
-	if (!tex) {
-		SDL_FreeSurface(sur);
-		return 1003;
-	}
-
-	ret = SDL_RenderCopy(p->ren, tex, &sr, &sr);
-	if (ret) {
-		return 1004;
-	}
 	SDL_RenderPresent(p->ren);
 	SDL_QueueAudio(p->aud, p->abuf, p->abufptr);
 	p->abufptr = 0;
 
-	SDL_DestroyTexture(tex);
-	SDL_FreeSurface(sur);
-
 	return 0;
 }
 
-static int init_sdl_vid(struct sdlpriv *p)
+static void exit_sdl(struct sdlpriv *p)
 {
-	int ret = SDL_Init(SDL_INIT_TIMER | SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_EVENTS);
-	if (ret)
-		return 81;
-
-	SDL_SetHint(SDL_HINT_APP_NAME, "SAN Player");
-	SDL_Window *win = SDL_CreateWindow("SAN Player",
-					   SDL_WINDOWPOS_CENTERED,
-					   SDL_WINDOWPOS_CENTERED,
-					   640, 480, SDL_WINDOW_RESIZABLE);
-	if (!win)
-		return 82;
-
-	p->win = win;
-
-	SDL_Renderer *ren = SDL_CreateRenderer(win, -1, 0);
-	if (!ren) {
-		SDL_DestroyWindow(win);
-		return 83;
-	}
-	p->ren = ren;
-
-	return 0;
-}
-
-static void exit_sdl_vid(struct sdlpriv *p)
-{
-	SDL_DestroyRenderer(p->ren);
-	SDL_DestroyWindow(p->win);
-	free(p->abuf);
+	if (p->aud)
+		SDL_CloseAudioDevice(p->aud);
+	if (p->ren)
+		SDL_DestroyRenderer(p->ren);
+	if (p->win)
+		SDL_DestroyWindow(p->win);
+	if (p->abuf)
+		free(p->abuf);
 	SDL_Quit();
 }
 
-static int init_sdl_aud(struct sdlpriv *p)
+static int init_sdl(struct sdlpriv *p)
 {
 	SDL_AudioSpec specin, specout;
 	SDL_AudioDeviceID ad;
+	int ret;
 
+	memset(p, 0, sizeof(struct sdlpriv));
+
+	ret = SDL_Init(SDL_INIT_TIMER | SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_EVENTS);
+	if (ret)
+		return 1081;
+
+	SDL_SetHint(SDL_HINT_APP_NAME, "SAN/ANIM Player");
 	specin.freq = 22050;
 	specin.format = AUDIO_S16;
 	specin.channels = 2;
 	specin.userdata = p;
 	specin.callback = NULL;
 	specin.samples = 4096 / 2 / 2;
+
 	ad = SDL_OpenAudioDevice(NULL, 0, &specin, &specout, 0);
 	if (!ad)
-		return 1;
+		goto err;
 
 	p->aud = ad;
 	SDL_PauseAudioDevice(ad, 0);
-	return 0;
-}
-
-static void exit_sdl_aud(struct sdlpriv *p)
-{
-	SDL_CloseAudioDevice(p->aud);
-}
-
-static int init_sdl(struct sdlpriv *p)
-{
-	int ret;
-
-	memset(p, 0, sizeof(struct sdlpriv));
-	ret = init_sdl_vid(p);
-	if (ret)
-		goto err0;
-	ret = init_sdl_aud(p);
-	if (ret)
-		goto err1;
 
 	return 0;
 
-err1:
-	exit_sdl_vid(p);
-err0:
-	SDL_Quit();
+err:
+	exit_sdl(p);
 	return ret;
-}
-
-static void exit_sdl(struct sdlpriv *p)
-{
-	exit_sdl_aud(p);
-	exit_sdl_vid(p);
-	SDL_Quit();
 }
 
 static int sio_read(void *ctx, void *dst, uint32_t size)
@@ -227,8 +216,8 @@ int main(int a, char **argv)
 	struct sanio sio;
 	void *sanctx;
 	SDL_Event e;
-	int fr, h, ret, speedmode, waittick;
-	uint64_t t1;
+	int fr, h, ret, speedmode, waittick, dtick, fc;
+	uint64_t t1, t2, ren, dec;
 
 	if (a < 2) {
 		printf("arg missing\n");
@@ -267,9 +256,9 @@ int main(int a, char **argv)
 	}
 
 	fr = sandec_get_framerate(sanctx);
-	printf("SAN ver %u fps %u sr %u FRMEs %u\n", sandec_get_version(sanctx),
-	       fr, sandec_get_samplerate(sanctx),
-	       sandec_get_framecount(sanctx));
+	fc = sandec_get_framecount(sanctx);
+	printf("SAN ANIMv%u fps %u sr %u FRMEs %u\n", sandec_get_version(sanctx),
+	       fr, sandec_get_samplerate(sanctx), fc);
 
 	running = 1;
 	paused = 0;
@@ -277,26 +266,64 @@ int main(int a, char **argv)
 	
 	if (!fr)
 		fr = 2;
-	waittick = 1000 / fr;
+	dtick = waittick = 1000 / fr;
 	while (running) {
 		while (0 != SDL_PollEvent(&e) && running) {
 			if (e.type == SDL_QUIT)
 				running = 0;
+			else if (e.type == SDL_KEYDOWN) {
+					SDL_KeyboardEvent *ke = (SDL_KeyboardEvent *)&e;
+					if (ke->state != SDL_PRESSED || ke->repeat != 0)
+						break;
+
+					if (ke->keysym.scancode == SDL_SCANCODE_SPACE && speedmode < 1) {
+						paused ^= 1;
+						SDL_PauseAudioDevice(sdl.aud, paused);
+					} else if (ke->keysym.scancode == SDL_SCANCODE_Q) {
+						running = 0;
+					} else if (ke->keysym.scancode == SDL_SCANCODE_F) {
+						sdl.fullscreen ^= 1;
+					} else if ((ke->keysym.scancode >= SDL_SCANCODE_1) &&
+					    (ke->keysym.scancode <= SDL_SCANCODE_6)) {
+						sdl.nextmult = ke->keysym.scancode - SDL_SCANCODE_1 + 1;
+					}
+			}
 		}
 
 		if (!paused && running) {
 			if (!parserdone) {
 				t1 = SDL_GetTicks64();
 				ret = sandec_decode_next_frame(sanctx);
+				t2 = SDL_GetTicks64();
+				dtick -= dec = (t2 - t1);
+
 				if (ret == SANDEC_OK) {
 					if (speedmode < 2) {
+						t1 = SDL_GetTicks64();
 						ret = render_frame(&sdl);
-						if (speedmode == 0)
-							SDL_Delay(waittick - (SDL_GetTicks64() - t1));
+						if (ret)
+							goto err;
+						t2 = SDL_GetTicks64();
+						dtick -= ren = (t2 - t1);
+
+						t1 = SDL_GetTicks64();
+						printf("\r                           ");
+						printf("\r%u/%u  %lu ms/%lu ms %d", sandec_get_currframe(sanctx), fc, ren, dec, ret);
+						printf(" %us/%us ", sandec_get_currframe(sanctx) / fr, fc / fr);
+						fflush(stdout);
+						t2 = SDL_GetTicks64();
+						dtick -= (t2 - t1);
+
+						if (speedmode == 0) {
+							if (dtick > 0) {
+								SDL_Delay(dtick);
+							}
+							dtick = waittick;
+						}
 					} else
 						ret = 0;
 				} else {
-					printf("ret %d at %d\n", ret, sandec_get_currframe(sanctx));
+err:
 					if (ret == SANDEC_DONE)
 						parserdone = 1;
 					else
@@ -314,7 +341,7 @@ int main(int a, char **argv)
 		}
 	}
 
-	printf("sanloop exited with code %d, played %d FRMEs\n", ret, sandec_get_currframe(sanctx));
+	printf("\n%u/%u  %d\n", sandec_get_currframe(sanctx), fc, ret);
 
 	sandec_exit(&sanctx);
 	if (speedmode < 2)
