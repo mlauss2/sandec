@@ -34,4 +34,10 @@ Use:
  - sanplay /path/to/throttle/resource/video/introd_8.san
  - sanplay /path/to/dig/dig/video/pigout.san
 
-20241211
+Keyboard controls:
+ - space  pause/unpause
+ - q  to quit
+ - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
+
+20241213
+
