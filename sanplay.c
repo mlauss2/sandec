@@ -190,8 +190,10 @@ static int init_sdl(struct sdlpriv *p)
 	specin.samples = 4096 / 2 / 2;
 
 	ad = SDL_OpenAudioDevice(NULL, 0, &specin, &specout, 0);
-	if (!ad)
+	if (!ad) {
+		ret = 1082;
 		goto err;
+	}
 
 	p->aud = ad;
 	SDL_PauseAudioDevice(ad, 0);
