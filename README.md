@@ -1,25 +1,34 @@
-Simple SDL2-based decoder/player for LucasArts Outlaws "SAN" movies.
-(and Curse of Monkey Island, Shadows of the Empire, Mysteries of the Sith,
- The Dig and some of Full Throttle)
+Single-file A/V decoder library for LucasArts Outlaws game "SAN" movie files,
+with a simple SDL2-based player application to demonstrate library use.
+
+Can also play game movies from Curse of Monkey Island, Shadows of the Empire,
+Mysteries of the Sith, The Dig and some of Full Throttle.
+Will expand with new features as I see fit.
 
 What works:
 - Linux/Unix.
-  - Windows untested: decoder builds, player does not due to unistd.h
-
+  - Windows untested, but should build.
 - Can successfully parse all .SAN and .NUT files found on Outlaws CDs/Game dir
   - can also handle all SAN files from Curse of Monkey Island, although some frames are missing text, which is most noticeable in the intro file.
-  - Shadows of the Empire videos are now supported as well (codec47)
-  - Mysteries of the Sith videos are also supported (codec48).
-  - Some/All videos of Full Throttle / The Dig are also playable (codec37)
-- Video/Audio decoding works for all codec47/codec48 videos
-  - no audio for codec37 videos yet (Full Throttle/The Dig).
+  - Shadows of the Empire videos are now supported as well
+  - Mysteries of the Sith videos are also supported
+  - Some/All videos of Full Throttle / The Dig are also playable
+- Video decoding works for all SMUSH codec1/codec37/codec47/codec48 videos
+- Audio decoding works for all SMUSH codec47/codec48 videos
+  - the subchunk-less 22kHz/16bit/stereo IACT variant in use since COMI.
 - good enough A/V sync in player
+- player keyboard controls:
+ - space  pause/unpause
+ - q  to quit
+ - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
 What does not yet work:
-- pause / fullscreen
+- fullscreen toggle
 - Audio in The Dig, Full Throttle
+  - IACT with iMUSE subchunks
+  - PSAD/SAUD with multiple streams requiring software mixing.
 
 Build:
 - Have SDL2
@@ -34,10 +43,5 @@ Use:
  - sanplay /path/to/throttle/resource/video/introd_8.san
  - sanplay /path/to/dig/dig/video/pigout.san
 
-Keyboard controls:
- - space  pause/unpause
- - q  to quit
- - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
-
-20241213
+20241214
 
