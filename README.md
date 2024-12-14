@@ -29,6 +29,7 @@ What does not yet work:
 - Audio in The Dig, Full Throttle
   - IACT with iMUSE subchunks
   - PSAD/SAUD with multiple streams requiring software mixing.
+- Some Full Throttle videos are ANIMv1 which are not yet supported.
 
 Build:
 - Have SDL2
