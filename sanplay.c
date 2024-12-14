@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <time.h>
-#include <unistd.h>
 #include "sandec.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_video.h>
@@ -207,8 +206,8 @@ err:
 
 static int sio_read(void *ctx, void *dst, uint32_t size)
 {
-	int hdl = *(int *)ctx;
-	return read(hdl, dst, size) == size;
+	FILE *hdl = *(FILE **)ctx;
+	return fread(dst, 1, size, hdl) == size;
 }
 
 int main(int a, char **argv)
@@ -218,7 +217,8 @@ int main(int a, char **argv)
 	struct sanio sio;
 	void *sanctx;
 	SDL_Event e;
-	int fr, h, ret, speedmode, waittick, dtick, fc;
+	FILE *h;
+	int fr, ret, speedmode, waittick, dtick, fc;
 	uint64_t t1, t2, ren, dec;
 
 	if (a < 2) {
@@ -228,7 +228,7 @@ int main(int a, char **argv)
 
 	speedmode = (a == 3) ? strtol(argv[2], NULL, 10) : 0;
 
-	h = open(argv[1], O_RDONLY);
+	h = fopen(argv[1], "r");
 	if (!h) {
 		printf("cannot open\n");
 		return 2;
@@ -349,6 +349,6 @@ err:
 	if (speedmode < 2)
 		exit_sdl(&sdl);
 out:
-	close(h);
+	fclose(h);
 	return ret;
 }
