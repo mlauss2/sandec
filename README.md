@@ -18,9 +18,9 @@ What works:
   - the subchunk-less 22kHz/16bit/stereo IACT variant in use since COMI.
 - good enough A/V sync in player
 - player keyboard controls:
- - space  pause/unpause
- - q  to quit
- - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
+  - space  pause/unpause
+  - q  to quit
+  - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
@@ -35,13 +35,13 @@ Build:
 - run "make"
 
 Use:
-- call
- - sanplay /path/to/Outlaws/OP_CR.SAN
- - sanplay /path/to/SOTE/L00INTRO.SAN
- - sanplay /path/to/COMI/OPENING.SAN
- - sanplay /path/to/JKM/Resource/VIDEO/FINALE.SAN
- - sanplay /path/to/throttle/resource/video/introd_8.san
- - sanplay /path/to/dig/dig/video/pigout.san
+- invoke with SAN file name:
+  - sanplay /path/to/Outlaws/OP_CR.SAN
+  - sanplay /path/to/SOTE/L00INTRO.SAN
+  - sanplay /path/to/COMI/OPENING.SAN
+  - sanplay /path/to/JKM/Resource/VIDEO/FINALE.SAN
+  - sanplay /path/to/throttle/resource/video/introd_8.san
+  - sanplay /path/to/dig/dig/video/pigout.san
 
 20241214
 
