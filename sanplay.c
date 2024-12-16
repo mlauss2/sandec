@@ -5,9 +5,6 @@
  */
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <fcntl.h>
-#include <time.h>
 #include "sandec.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_video.h>
@@ -17,10 +14,6 @@ struct sdlpriv {
 	SDL_Renderer *ren;
 	SDL_Window *win;
 	SDL_AudioDeviceID aud;
-
-	uint32_t abufsize;
-	uint32_t abufptr;
-	unsigned char *abuf;
 
 	uint16_t pxw;
 	uint16_t pxh;
@@ -43,22 +36,7 @@ static void queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 	if (!p || p->err)
 		return;
 
-	while ((p->abufptr + size) > p->abufsize) {
-		uint32_t newsize = p->abufsize + 16384;
-		p->abuf = realloc(p->abuf, newsize);
-		if (!p->abuf) {
-			p->err = 2;
-			return;
-		}
-		p->abufsize = newsize;
-	}
-	memcpy(p->abuf + p->abufptr, adata, size);
-	p->abufptr += size;
-
-	/* alternatively, the buffer could also just be queued to SDL immediately,
-	 * as SDL does the same thing the code above tries to do.
 	SDL_QueueAudio(p->aud, adata, size);
-	 */
 }
 
 /* this is called once per "sandec_decode_next_frame()" */
@@ -149,8 +127,6 @@ static int render_frame(struct sdlpriv *p)
 		return p->err;
 
 	SDL_RenderPresent(p->ren);
-	SDL_QueueAudio(p->aud, p->abuf, p->abufptr);
-	p->abufptr = 0;
 
 	return 0;
 }
@@ -163,8 +139,6 @@ static void exit_sdl(struct sdlpriv *p)
 		SDL_DestroyRenderer(p->ren);
 	if (p->win)
 		SDL_DestroyWindow(p->win);
-	if (p->abuf)
-		free(p->abuf);
 	SDL_Quit();
 }
 
