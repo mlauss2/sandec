@@ -98,8 +98,10 @@ struct sanrt {
 	uint8_t *buf1;		/* 8 c47 delta buffer 1			*/
 	uint8_t *buf2;		/* 8 c47 delta buffer 2			*/
 	uint8_t *abuf;		/* 8 audio output buffer		*/
-	uint16_t w;		/* 2 image width/pitch			*/
-	uint16_t h;		/* 2 image height			*/
+	uint16_t bufw;		/* 2 alloc'ed buffer width/pitch	*/
+	uint16_t bufh;		/* 2 alloc'ed buffer height		*/
+	uint16_t frmw;		/* 2 current frame width		*/
+	uint16_t frmh;		/* 2 current frame height		*/
 	int16_t  lastseq;	/* 2 c47 last sequence id		*/
 	uint16_t rotate;	/* 2 c47 buffer rotation code		*/
 	uint16_t subid;		/* 2 subtitle message number		*/
@@ -948,7 +950,7 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		   uint16_t top, uint16_t left)
 {
 	uint8_t comp, mvidx, flag, *dst;
-	const uint32_t decsize = w * h;
+	uint32_t decsize;
 	uint16_t seq;
 	int ret;
 
@@ -957,10 +959,7 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	if (mvidx > 2)
 		return 18;
 	seq = le16_to_cpu(*(uint16_t *)(src + 2));
-	/* decoded size at 4-7, packet size at 8-11, we ignore both here
-	 * to work around the few 640x480 black frames in The Digs sq1.san
-	 * and just use w * h instead, which works for all codec37 vids.
-	 */
+	decsize = le32_to_cpu(ua32(src + 4));
 	flag = src[12];
 
 	if (seq == 0 || comp == 0 || comp == 2) {
@@ -1074,8 +1073,8 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	rt->buf1 = rt->buf0 + (wb * 32) + bs;
 	rt->buf2 = rt->buf1 + (wb * 32) + bs;
 	rt->fbsize = w * h * bpp;	/* image size reported to caller */
-	rt->w = w;
-	rt->h = h;
+	rt->bufw = w;			/* buffer (aligned) width */
+	rt->bufh = h;
 
 	return 0;
 }
@@ -1104,16 +1103,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	if (w < align || h < align)
 		return 0;
 
-	/* codec37 videos are generally 320x200.  The Dig sq1.san has 640x480
-	 * in a few (black) frames though. Fix it up.
-	 */
-	if (codec == 37) {
-		if (w > 320)
-			w = 320;
-		if (h > 200)
-			h = 200;
-	}
-
 	/* disable left/top for codec47/48 videos.  Except for SotE, none use
 	 * it, and SotE uses it as a hack to get "widescreen" aspect, i.e. it's
 	 * just a black bar of 60 pixels heigth at the top.
@@ -1122,11 +1111,15 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		left = top = 0;
 
 	ret = 0;
-	if ((rt->w < (left + w)) || (rt->h < (top + h))) {
-		ret = fobj_alloc_buffers(rt, _max(rt->w, left + w), _max(rt->h, top + h), 1, align);
+	if ((rt->bufw < (left + w)) || (rt->bufh < (top + h))) {
+		ret = fobj_alloc_buffers(rt, _max(rt->bufw, left + w),
+					 _max(rt->bufh, top + h), 1, align);
 	}
 	if (ret != 0)
 		return ret;
+
+	rt->frmw = w;
+	rt->frmh = h;
 
 	switch (codec) {
 	case 1:
@@ -1323,7 +1316,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 				memcpy(rt->buf1, rt->buf0, rt->fbsize);
 
 			ctx->io->queue_video(ctx->io->avctx, rt->buf0, rt->fbsize,
-					     rt->w, rt->h, rt->palette, rt->subid);
+					     rt->frmw, rt->frmh, rt->palette, rt->subid);
 		}
 
 		if (rt->rotate) {
