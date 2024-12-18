@@ -1443,7 +1443,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 			ret = allocfrme(ctx, maxframe);
 		}
 	} else {
-		rt->framerate = 12;		/* ANIMv1 default */
+		rt->framerate = 10;		/* ANIMv1 default */
 		rt->samplerate = 11025;		/* ANIMv1 default */
 		rt->frmebufsz = 0;
 	}
