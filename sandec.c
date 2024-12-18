@@ -116,6 +116,7 @@ struct sanrt {
 	uint32_t samplerate;	/* 4 audio samplerate in Hz		*/
 	uint16_t FRMEcnt;	/* 2 number of FRMEs in SAN		*/
 	uint16_t version;	/* 2 SAN version number			*/
+	uint8_t  have_frame:1;	/* 1 we have a valid video frame	*/
 };
 
 /* internal context: static stuff. */
@@ -1137,6 +1138,9 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 
 	param = param;
+	if (ret == 0)
+		ctx->rt.have_frame = 1;
+
 	return ret;
 }
 
@@ -1261,7 +1265,10 @@ static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static void handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize);
+	if (ctx->rt.buf0) {
+		memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize);
+		ctx->rt.have_frame = 1;
+	}
 }
 
 static int handle_FRME(struct sanctx *ctx, uint32_t size)
@@ -1311,12 +1318,13 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 	/* OK case: all usable bytes of the FRME read, no errors */
 	if (ret == 0) {
-		/* STOR */
-		if (rt->to_store)
-			memcpy(rt->buf1, rt->buf0, rt->fbsize);
+		if (ctx->rt.have_frame) {
+			if (rt->to_store)	/* STOR */
+				memcpy(rt->buf1, rt->buf0, rt->fbsize);
 
-		ctx->io->queue_video(ctx->io->avctx, rt->buf0, rt->fbsize,
-				     rt->w, rt->h, rt->palette, rt->subid);
+			ctx->io->queue_video(ctx->io->avctx, rt->buf0, rt->fbsize,
+					     rt->w, rt->h, rt->palette, rt->subid);
+		}
 
 		if (rt->rotate) {
 			uint8_t *tmp;
@@ -1334,6 +1342,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		rt->currframe++;
 		rt->rotate = 0;
 		rt->subid = 0;
+		rt->have_frame = 0;
 	}
 
 	return ret;
