@@ -98,7 +98,6 @@ struct sanrt {
 	uint8_t *buf1;		/* 8 c47 delta buffer 1			*/
 	uint8_t *buf2;		/* 8 c47 delta buffer 2			*/
 	uint8_t *abuf;		/* 8 audio output buffer		*/
-	uint8_t *vbuf;		/* 8 video output buffer (ptr only)	*/
 	uint16_t w;		/* 2 image width/pitch			*/
 	uint16_t h;		/* 2 image height			*/
 	int16_t  lastseq;	/* 2 c47 last sequence id		*/
@@ -681,7 +680,6 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 
 	ctx->rt.rotate = (seq == ctx->rt.lastseq + 1) ? newrot : 0;
 	ctx->rt.lastseq = seq;
-	ctx->rt.vbuf = ctx->rt.buf0;
 
 	return ret;
 }
@@ -872,7 +870,6 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 
 	ctx->rt.lastseq = seq;
 	ctx->rt.rotate = 1;		/* swap 0 and 2 */
-	ctx->rt.vbuf = ctx->rt.buf0;
 
 	return ret;
 }
@@ -990,7 +987,6 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 
 	ctx->rt.lastseq = seq;
 	ctx->rt.rotate = 0;
-	ctx->rt.vbuf = ctx->rt.buf0;
 
 	return ret;
 }
@@ -1027,7 +1023,6 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 			}
 		}
 	}
-	ctx->rt.vbuf = ctx->rt.buf0;
 }
 
 /******************************************************************************/
@@ -1320,7 +1315,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		if (rt->to_store)
 			memcpy(rt->buf1, rt->buf0, rt->fbsize);
 
-		ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
+		ctx->io->queue_video(ctx->io->avctx, rt->buf0, rt->fbsize,
 				     rt->w, rt->h, rt->palette, rt->subid);
 
 		if (rt->rotate) {
