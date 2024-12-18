@@ -92,6 +92,7 @@ static inline uint32_t ua32(uint8_t *p)
 
 /* internal context: per-file */
 struct sanrt {
+	uint32_t frmebufsz;	/* 4 size of buffer below		*/
 	uint8_t *fcache;	/* 8 one cached FRME object		*/
 	uint8_t *buf0;		/* 8 current front buffer		*/
 	uint8_t *buf1;		/* 8 c47 delta buffer 1			*/
@@ -440,6 +441,23 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 
 
 /******************************************************************************/
+
+/* allocate memory for a full FRME */
+static int allocfrme(struct sanctx *ctx, uint32_t sz)
+{
+	sz = (sz + 31) & ~31;
+	if (sz > ctx->rt.frmebufsz) {
+		if (ctx->rt.fcache)
+			free(ctx->rt.fcache);
+		ctx->rt.fcache = (uint8_t *)malloc(sz);
+		if (!ctx->rt.fcache) {
+			ctx->rt.frmebufsz = 0;
+			return 1;
+		}
+		ctx->rt.frmebufsz = sz;
+	}
+	return 0;
+}
 
 static inline int read_source(struct sanctx *ctx, void *dst, uint32_t sz)
 {
@@ -1069,11 +1087,14 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
-	uint16_t codec, w, h, align;
+	uint8_t codec, param;
+	uint16_t w, h, align;
 	int16_t left, top;
 	int ret;
 
-	codec = le16_to_cpu(*(uint16_t *)(src + 0));
+	codec = src[0];
+	param = src[1];
+
 	left  = le16_to_cpu(*(int16_t *)(src + 2));
 	top   = le16_to_cpu(*(int16_t *)(src + 4));
 	w     = le16_to_cpu(*(uint16_t *)(src + 6));
@@ -1120,6 +1141,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	default: ret = 10;
 	}
 
+	param = param;
 	return ret;
 }
 
@@ -1156,10 +1178,10 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			}
 			*pal++ = 0xff << 24 | t2[2] << 16 | t2[1] << 8 | t2[0];
 		}
-	/* cmd2: read deltapal values */
-	} else if (cmd == 2) {
+	/* cmd0/2: read deltapal values/+new palette */
+	} else if (cmd == 0 || cmd == 2) {
 		memcpy(ctx->rt.deltapal, src, 768 * 2);
-		if (size > (768 * 2 + 4))
+		if (size > (768 * 2 + 4))	/* cmd 2 */
 			read_palette(ctx, src + (768 * 2));
 	} else {
 		return 13;		/*  unknown XPAL cmd */
@@ -1250,10 +1272,15 @@ static void handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 static int handle_FRME(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
-	uint8_t *src = rt->fcache;
 	uint32_t cid, csz;
+	uint8_t *src;
 	int ret;
 
+	ret = allocfrme(ctx, size);
+	if (ret)
+		return ret;
+
+	src = rt->fcache;
 	if (read_source(ctx, src, size))
 		return 10;
 
@@ -1334,10 +1361,6 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 
 	rt->version = le16_to_cpu(*(uint16_t *)(ahbuf + 0));
 	rt->FRMEcnt = le16_to_cpu(*(uint16_t *)(ahbuf + 2));
-	if (rt->version != 2) {
-		ret = 7;
-		goto out;
-	}
 
 	/* allocate memory for static work buffers */
 	xbuf = malloc(SZ_ALL);
@@ -1354,21 +1377,22 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 
 	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
 
-	rt->framerate =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
-	maxframe =       le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
-	rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
+	if (rt->version > 1) {
+		rt->framerate =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
+		maxframe =       le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
+		rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
 
-	/* "maxframe" indicates the maximum size of one FRME object
-	 * including chunk ID and chunk size in the stream (usually the first)
-	 * plus 1 byte.
-	 */
-	if ((maxframe > 9) && (maxframe < 4 * 1024 * 1024)) {
-		maxframe -= 9;
-		if (maxframe & 1)
-			maxframe += 1;	/* make it even */
-		rt->fcache = (uint8_t *)malloc(maxframe);
-		if (!rt->fcache)
-			ret = 9;
+		/* "maxframe" indicates the maximum size of one FRME object
+		 * including chunk ID and chunk size in the stream (usually the first)
+		 * plus 1 byte.
+		 */
+		if ((maxframe > 9) && (maxframe < 4 * 1024 * 1024)) {
+			ret = allocfrme(ctx, maxframe);
+		}
+	} else {
+		rt->framerate = 12;		/* ANIMv1 default */
+		rt->samplerate = 11025;		/* ANIMv1 default */
+		rt->frmebufsz = 0;
 	}
 
 out:
