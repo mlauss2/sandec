@@ -879,6 +879,60 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 
 /******************************************************************************/
 
+static void codec37_comp1(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w,
+			  uint16_t h, uint8_t mvidx)
+{
+	uint8_t opc, run, skip;
+	int32_t mvofs, ofs;
+	int i, j, k, l, len;
+
+	run = 0;
+	len = -1;
+	opc = 0;
+	for (i = 0; i < h; i += 4) {
+		for (j = 0; j < w; j += 4) {
+			if (len < 0) {
+				len = (*src) >> 1;
+				run = !!((*src++) & 1);
+				skip = 0;
+			} else {
+				skip = run;
+			}
+
+			if (!skip) {
+				opc = *src++;
+				if (opc == 0xff) {
+					len--;
+					for (k = 0; k < 4; k++) {
+						for (l = 0; l < 4; l++) {
+							ofs = j + (k * w) + l;
+							if (len < 0) {
+								len = (*src) >> 1;
+								run = !!((*src++) & 1);
+								if (run)
+									opc = *src++;
+							}
+							*(dst + ofs) = run ? opc : *src++;
+							len--;
+						}
+					}
+					continue;
+				}
+			}
+			/* 4x4 block copy from prev with MV */
+			mvofs = c37_mv[mvidx][opc*2] + (c37_mv[mvidx][opc*2 + 1] * w);
+			for (k = 0; k < 4; k++) {
+				ofs = j + (k * w);
+				for (l = 0; l < 4; l++)
+					*(dst + ofs + l) = *(db + ofs + l + mvofs);
+			}
+			len -= 1;
+		}
+		dst += w * 4;
+		db += w * 4;
+	}
+}
+
 static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, uint16_t h,
 			  uint8_t mvidx, const uint8_t f4, const uint8_t c4)
 {
@@ -978,6 +1032,8 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	dst = ctx->rt.buf0 + (top * w) + left;
 	switch (comp) {
 	case 0: memcpy(dst, src, decsize); break;
+	case 1: codec37_comp1(src, dst, ctx->rt.buf2 + (top * w) + left, w, h,
+			      mvidx); break;
 	case 2: codec47_comp5(src, dst, decsize); break;
 	case 3: /* fallthrough */
 	case 4: codec37_comp3(src, dst, ctx->rt.buf2 + (top * w) + left, w, h,
