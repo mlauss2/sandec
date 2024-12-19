@@ -466,6 +466,23 @@ static inline int read_source(struct sanctx *ctx, void *dst, uint32_t sz)
 	return !(ctx->io->ioread(ctx->io->ioctx, dst, sz));
 }
 
+/* swap the 3 buffers according to the codec */
+static void swap_bufs(struct sanctx *ctx, uint8_t rotcode)
+{
+	struct sanrt *rt = &ctx->rt;
+	if (rotcode) {
+		uint8_t *tmp;
+		if (rotcode == 2) {
+			tmp = rt->buf1;
+			rt->buf1 = rt->buf2;
+			rt->buf2 = tmp;
+		}
+		tmp = rt->buf2;
+		rt->buf2 = rt->buf0;
+		rt->buf0 = tmp;
+	}
+}
+
 static void read_palette(struct sanctx *ctx, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
@@ -904,15 +921,15 @@ static void codec37_comp1(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w,
 				if (opc == 0xff) {
 					len--;
 					for (k = 0; k < 4; k++) {
+						ofs = j + (k * w);
 						for (l = 0; l < 4; l++) {
-							ofs = j + (k * w) + l;
 							if (len < 0) {
 								len = (*src) >> 1;
 								run = !!((*src++) & 1);
 								if (run)
 									opc = *src++;
 							}
-							*(dst + ofs) = run ? opc : *src++;
+							*(dst + ofs + l) = run ? opc : *src++;
 							len--;
 						}
 					}
@@ -1003,7 +1020,7 @@ c37_blk:
 static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		   uint16_t top, uint16_t left)
 {
-	uint8_t comp, mvidx, flag, *dst;
+	uint8_t comp, mvidx, flag, *dst, *db;
 	uint32_t decsize;
 	uint16_t seq;
 	int ret;
@@ -1022,22 +1039,20 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 
 	if ((comp == 1 || comp == 3 || comp == 4)
 	    && ((seq & 1) || !(flag & 1))) {
-		void *tmp = ctx->rt.buf0;
-		ctx->rt.buf0 = ctx->rt.buf2;
-		ctx->rt.buf2 = tmp;
+		swap_bufs(ctx, 1);
 	}
 
 	src += 16;
 	ret = 0;
 	dst = ctx->rt.buf0 + (top * w) + left;
+	db = ctx->rt.buf2 + (top * w) + left;
+
 	switch (comp) {
 	case 0: memcpy(dst, src, decsize); break;
-	case 1: codec37_comp1(src, dst, ctx->rt.buf2 + (top * w) + left, w, h,
-			      mvidx); break;
+	case 1: codec37_comp1(src, dst, db, w, h, mvidx); break;
 	case 2: codec47_comp5(src, dst, decsize); break;
 	case 3: /* fallthrough */
-	case 4: codec37_comp3(src, dst, ctx->rt.buf2 + (top * w) + left, w, h,
-			      mvidx, flag & 4, comp == 4); break;
+	case 4: codec37_comp3(src, dst, db, w, h, mvidx, flag & 4, comp == 4); break;
 	default: ret = 19; break;
 	}
 
@@ -1375,18 +1390,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 					     rt->frmw, rt->frmh, rt->palette, rt->subid);
 		}
 
-		if (rt->rotate) {
-			uint8_t *tmp;
-			if (rt->rotate == 2) {
-				tmp = rt->buf1;
-				rt->buf1 = rt->buf2;
-				rt->buf2 = tmp;
-			}
-			tmp = rt->buf2;
-			rt->buf2 = rt->buf0;
-			rt->buf0 = tmp;
-		}
-
+		swap_bufs(ctx, rt->rotate);
 		rt->to_store = 0;
 		rt->currframe++;
 		rt->rotate = 0;
