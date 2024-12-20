@@ -97,6 +97,7 @@ struct sanrt {
 	uint8_t *buf0;		/* 8 current front buffer		*/
 	uint8_t *buf1;		/* 8 c47 delta buffer 1			*/
 	uint8_t *buf2;		/* 8 c47 delta buffer 2			*/
+	uint8_t *vbuf;		/* 8 final image buffer passed to caller*/
 	uint8_t *abuf;		/* 8 audio output buffer		*/
 	uint16_t bufw;		/* 2 alloc'ed buffer width/pitch	*/
 	uint16_t bufh;		/* 2 alloc'ed buffer height		*/
@@ -1153,26 +1154,36 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
+	uint16_t w, h, wr, hr, align, param2;
 	uint8_t codec, param;
-	uint16_t w, h, align;
 	int16_t left, top;
 	int ret;
 
 	codec = src[0];
 	param = src[1];
 
-	left  = le16_to_cpu(*(int16_t *)(src + 2));
-	top   = le16_to_cpu(*(int16_t *)(src + 4));
-	w     = le16_to_cpu(*(uint16_t *)(src + 6));
-	h     = le16_to_cpu(*(uint16_t *)(src + 8));
-	/* 32bit unknown value */
+	left   = le16_to_cpu(*(int16_t *)(src + 2));
+	top    = le16_to_cpu(*(int16_t *)(src + 4));
+	w = wr = le16_to_cpu(*(uint16_t *)(src + 6));
+	h = hr = le16_to_cpu(*(uint16_t *)(src + 8));
+	param2 = le16_to_cpu(*(uint16_t *)(src + 12));
 
 	align = (codec == 37) ? 4 : 2;
 	align = (codec == 48) ? 8 : align;
 
-	/* ignore too small dimensions, happens with some Full Throttle videos */
-	if (w < align || h < align)
+	/* ignore too small dimensions in first frames, happens with some
+	 * Full Throttle videos
+	 */
+	if (!rt->fbsize && (w < align || h < align))
 		return 0;
+
+	/* there are some odd-sized frames in RA1, but all seem to work on
+	 * a 320x200 buffer.  Pass 320x200 to the buffer allocator.
+	 */
+	if (rt->version < 2 && (w < 320 || h < 200)) {
+		wr = 320;
+		hr = 200;
+	}
 
 	/* disable left/top for codec47/48 videos.  Except for SotE, none use
 	 * it, and SotE uses it as a hack to get "widescreen" aspect, i.e. it's
@@ -1182,15 +1193,15 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		left = top = 0;
 
 	ret = 0;
-	if ((rt->bufw < (left + w)) || (rt->bufh < (top + h))) {
-		ret = fobj_alloc_buffers(rt, _max(rt->bufw, left + w),
-					 _max(rt->bufh, top + h), 1, align);
+	if ((rt->bufw < (left + wr)) || (rt->bufh < (top + hr))) {
+		ret = fobj_alloc_buffers(rt, _max(rt->bufw, left + wr),
+					 _max(rt->bufh, top + hr), 1, align);
 	}
 	if (ret != 0)
 		return ret;
 
-	rt->frmw = w;
-	rt->frmh = h;
+	/* default image buffer is buf0 */
+	rt->vbuf = rt->buf0;
 
 	switch (codec) {
 	case 1:
@@ -1201,9 +1212,34 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	default: ret = 10;
 	}
 
-	param = param;
-	if (ret == 0)
+	if (ret == 0) {
 		ctx->rt.have_frame = 1;
+
+		/* trust the dimensions in the v2 videos; for older assume 320x200 as
+		 * the final dimensions.
+		 * FIXME: May need to be revisited for RA/RA2.
+		 */
+		if (rt->version > 1) {
+			rt->frmw = w;
+			rt->frmh = h;
+		} else {
+			rt->frmw = 320;
+			rt->frmh = 200;
+
+			/* that few stupid Full Throttle videos which are slightly
+			 * larger but still have the 320x200 visible area.
+			 * Concatenate the visible image area to 320x200.  Don't
+			 * touch buf0 since MV depends on it.
+			 */
+			if (w > 320 && w < 400 && h > 200 && h < 250) {
+				int i, j;
+				for (i = 0; i < 200; i++)
+					for (j = 0; j < 320; j++)
+						*(rt->buf1 + (i * 320) + j) = *(rt->buf0 + (i * w) + j);
+				rt->vbuf = rt->buf1;
+			}
+		}
+	}
 
 	return ret;
 }
@@ -1386,7 +1422,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 			if (rt->to_store)	/* STOR */
 				memcpy(rt->buf1, rt->buf0, rt->fbsize);
 
-			ctx->io->queue_video(ctx->io->avctx, rt->buf0, rt->fbsize,
+			ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
 					     rt->frmw, rt->frmh, rt->palette, rt->subid);
 		}
 
