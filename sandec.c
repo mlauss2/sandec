@@ -16,6 +16,7 @@
  */
 
 #include <memory.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include "sandec.h"
 
@@ -44,6 +45,12 @@ static inline uint32_t ua32(uint8_t *p)
 	return p[0] | p[1] << 8 | p[2] << 16 | p[3] << 24;
 }
 
+/* read an unaligned 16bit value from memory */
+static inline uint16_t ua16(uint8_t *p)
+{
+	return p[0] | p[1] << 8;
+}
+
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 
 #define be32_to_cpu(x)  (x)
@@ -56,6 +63,12 @@ static inline uint32_t ua32(uint8_t *p)
 static inline uint32_t ua32(uint8_t *p)
 {
 	return p[3] | p[2] << 8 | p[1] << 16 | p[0] << 24;
+}
+
+/* read an unaligned 16bit value from memory */
+static inline uint16_t ua16(uint8_t *p)
+{
+	return p[1] | p[0] << 8;
 }
 
 #else
@@ -130,6 +143,7 @@ struct sanctx {
 	/* codec47 static data */
 	int8_t c47_glyph4x4[NGLYPHS][16];
 	int8_t c47_glyph8x8[NGLYPHS][64];
+	uint8_t c4g[2][256][16];
 };
 
 /* Codec37/Codec48 motion vectors */
@@ -439,6 +453,74 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 			}
 		}
 	}
+}
+
+static void c4_make_glyphs(struct sanctx *ctx, uint8_t mode)
+{
+	int i, j, idx;
+	uint8_t *dst;
+	uint16_t v1, v2, v3, v4, v6;
+
+	for (i = 1; i < 16; i += 2) {
+		v1 = i + mode;
+		for (j = 0; j < 16; j++) {
+			idx = ((i/2)*16) + j;
+			dst = &(ctx->c4g[0][idx][0]);
+			v2 = j + mode;
+			v6 = mode + ((i + j) >> 1);
+			if ((v6 == v1) || (v6 == v2)) {
+				dst[ 0] = v2; dst[ 1] = v1; dst[ 2] = v2; dst[ 3] = v1;
+				dst[ 4] = v1; dst[ 5] = v2; dst[ 6] = v1; dst[ 7] = v1;
+				dst[ 8] = v2; dst[ 9] = v1; dst[10] = v2; dst[11] = v1;
+				dst[12] = v2; dst[13] = v2; dst[14] = v1; dst[15] = v2;
+			} else {
+				v3 = (v6 + v1) >> 1;
+				v4 = (v6 + v2) >> 1;
+				dst[ 0] = v6; dst[ 1] = v6; dst[ 2] = v3; dst[ 3] = v1;
+				dst[ 4] = v6; dst[ 5] = v6; dst[ 6] = v3; dst[ 7] = v1;
+				dst[ 8] = v4; dst[ 9] = v4; dst[10] = v6; dst[11] = v3;
+				dst[12] = v2; dst[13] = v2; dst[14] = v4; dst[15] = v6;
+			}
+		}
+	}
+	for (i = 0; i < 16; i += 2) {
+		v1 = i + mode;
+		for (j = 0; j < 16; j++) {
+			idx = 128 + ((i/2)*16) + j;
+			dst = &(ctx->c4g[0][idx][0]);
+			v2 = j + mode;
+			v6 = mode + ((i + j) >> 1);
+			if ((v6 == v1) || (v6 == v2)) {
+				dst[ 0] = v1; dst[ 1] = v1; dst[ 2] = v2; dst[ 3] = v1;
+				dst[ 4] = v1; dst[ 5] = v1; dst[ 6] = v1; dst[ 7] = v2;
+				dst[ 8] = v2; dst[ 9] = v1; dst[10] = v2; dst[11] = v2;
+				dst[12] = v1; dst[13] = v2; dst[14] = v1; dst[15] = v2;
+			} else {
+				v3 = (v6 + v1) >> 1;
+				v4 = (v6 + v2) >> 1;
+				dst[ 0] = v1; dst[ 1] = v1; dst[ 2] = v3; dst[ 3] = v2;
+				dst[ 4] = v1; dst[ 5] = v1; dst[ 6] = v3; dst[ 7] = v2;
+				dst[ 8] = v3; dst[ 9] = v3; dst[10] = v2; dst[11] = v4;
+				dst[12] = v2; dst[13] = v2; dst[14] = v4; dst[15] = v2;
+			}
+		}
+	}
+}
+
+static uint8_t *c4_add_glyphs(struct sanctx *ctx, uint8_t *src, uint16_t cnt)
+{
+	uint8_t c, *g;
+	int i, j;
+
+	for (i = 0; i < cnt; i++) {
+		g = &(ctx->c4g[1][i][0]);
+		for (j = 0; j < 16; j += 2) {
+			c = *src++;
+			g[j] = c >> 4;
+			g[j+1] = c & 0xf;
+		}
+	}
+	return src;
 }
 
 
@@ -1064,14 +1146,189 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 
 /******************************************************************************/
 
+static void codec23(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		    int16_t top, int16_t left, uint16_t size, uint8_t param,
+		    uint16_t param2)
+{
+	uint8_t lut[256], l2, j, c, *dst = ctx->rt.buf0, p2 = param2;
+	uint16_t len, i;
+	int32_t pxoff;
+	int skip, xx;
+
+	/* i hope gcc known I want a wrapping subtraction */
+	param = (param >= 0x30) ? param - 0x30 : 255 - (0x30 - param);
+
+	if (ctx->rt.version < 2) {
+		for (j = 0; j < 255; j++)
+			lut[j] = j + param;
+	} else if (param2 != 256) {
+		for (j = 0; j < 255; j++)
+			lut[j] = j + p2;
+	} else {
+		for (j = 0; j < 255; j++)
+			lut[j] = *src++;
+	}
+
+	for (i = 0; i < h; i++) {
+		pxoff = ((top + i) * w) + left;
+		len = le16_to_cpu(*(uint16_t *)src); src += 2;
+		skip = 1;
+		xx = 0;
+		while (len && xx <= w) {
+			l2 = *src++;
+			if (!skip) {
+				for (j = 0; j < l2; j++) {
+					if (pxoff >= 0 && pxoff <= (w * h)) {
+						c = *(dst + pxoff);
+						*(dst + pxoff) = lut[c];
+					}
+					pxoff += 1;
+					xx += 1;
+				}
+			} else {
+				pxoff += l2;
+				xx += l2;
+			}
+			skip ^= 1;
+		}
+	}
+}
+
+static void codec21(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		    int16_t top, int16_t left, uint16_t size, uint8_t param)
+{
+	int i, y, len, skip;
+	uint8_t c, *dst, *srcn = src;
+	uint16_t ls, offs;
+	int32_t dstoff;
+
+	dst = ctx->rt.buf0;
+	for (y = 0; y < h; y++) {
+		if (size < 2)
+			break;
+		dstoff = left + ((top + y) * w);
+		src = srcn;
+		ls = cpu_to_le16(ua16(src));
+		src += 2;
+		size -= 2;
+		if (ls > size)
+			break;
+		srcn = src + ls;
+		len = 0;
+		skip = 1;
+		while (size > 0 && ls > 0 && len <= w) {
+			offs = cpu_to_le16(ua16(src));
+			src += 2;
+			size -= 2;
+			ls -= 2;
+
+			if (skip) {
+				for (i = 0; i < offs; i++) {
+					if ((dstoff >= 0) && (dstoff < (w * h)))
+						*(dst + dstoff) = 0;
+					dstoff++;
+					len++;
+				}
+			} else {
+				offs += 1;
+				for (i = 0; i < offs; i++) {
+					c = *src++;
+					size--;
+					ls--;
+					if ((dstoff >= 0) && (dstoff < (w * h)))
+						*(dst + dstoff) = c;
+					dstoff++;
+					len++;
+				}
+			}
+			skip ^= 1;
+		}
+	}
+}
+
+static void codec4(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left, uint32_t size, uint8_t param,
+		   uint16_t param2)
+{
+	uint8_t mask, bits, idx, c, *gs, *dst = ctx->rt.buf0;
+	int32_t dstoff, dstoff2;
+	int i, j, k, l, bit;
+
+	c4_make_glyphs(ctx, param);
+	if (param2 > 0)
+		src = c4_add_glyphs(ctx, src, param2);
+
+	for (j = 0; j < w; j += 4) {
+		mask = bits = 0;
+		for (i = 0; i < h; i += 4) {
+			dstoff = ((top + i) * w) + j;	/* curr. block offset */
+			if (param2 > 0) {
+				if (bits == 0) {
+					mask = *src++;
+					bits = 8;
+				}
+				bit = !!(mask & 0x80);
+				mask <<= 1;
+				bits -= 1;
+			} else {
+				bit = 0;
+			}
+
+			idx = *src++;
+			if (!bit && idx == 0x80)
+				continue;
+			gs = &(ctx->c4g[bit][idx][0]);
+			/* do this block: copy the colors from the glyph,
+			 * but only if the write destination is inside the
+			 * buffer
+			 */
+			for (k = 0; k < 4; k++) {
+				for (l = 0; l < 4; l++) {
+					dstoff2 = dstoff + (k * w) + l;
+					c = *gs++;
+					if (dstoff2 >= 0)
+						*(dst + dstoff) = c;
+				}
+			}
+		}
+	}
+}
+
+static void codec2(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left, uint32_t size)
+{
+	uint8_t *dst = ctx->rt.buf0;
+	int16_t xpos, ypos, xoff;
+	int32_t pxoff;
+	int8_t yoff;
+	uint8_t c;
+	int i;
+
+	xpos = left;
+	ypos = top;
+	for (i = 0; i < size / 4; i++) {
+		xoff = le16_to_cpu(ua16(src));
+		src += 2;
+		yoff = *src++;
+		c = *src++;
+		xpos += xoff;
+		ypos += yoff;
+		pxoff = (ypos * w) + xpos;
+		if (pxoff >= 0 && pxoff < (w * h))
+			*(dst + pxoff) = c;
+	}
+}
+
 static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
-		   int16_t top, int16_t left)
+		   int16_t top, int16_t left, uint8_t transp)
 {
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
+	int32_t dstoff;
 	int i, j;
 
-	dst = ctx->rt.buf0 + (top * w) + left;
+	dst = ctx->rt.buf0;
+	dstoff = (top * w) + left;
 	for (i = 0; i < h; i++) {
 		dlen = le16_to_cpu(*(uint16_t *)src); src += 2;
 		while (dlen > 0) {
@@ -1079,16 +1336,19 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 			rlen = (code >> 1) + 1;
 			if (code & 1) {
 				col = *src++; dlen--;
-				if (col)
-					for (j = 0; j < rlen; j++)
-						*(dst + j) = col;
-				dst += rlen;
+				if (!transp || col) {
+					for (j = 0; j < rlen; j++) {
+						if (dstoff >= 0)
+							*(dst + dstoff) = col;
+						dstoff++;
+					}
+				}
 			} else {
 				for (j = 0; j < rlen; j++) {
 					col = *src++;
-					if (col)
-						*dst = col;
-					dst++;
+					if ((!transp || col) && (dstoff >= 0))
+						*(dst + dstoff) = col;
+					dstoff++;
 				}
 				dlen -= rlen;
 			}
@@ -1154,7 +1414,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
 	uint8_t codec, param;
-	uint16_t w, h, align;
+	uint16_t w, h, align, param2;
 	int16_t left, top;
 	int ret;
 
@@ -1165,13 +1425,16 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	top   = le16_to_cpu(*(int16_t *)(src + 4));
 	w     = le16_to_cpu(*(uint16_t *)(src + 6));
 	h     = le16_to_cpu(*(uint16_t *)(src + 8));
-	/* 32bit unknown value */
+	param2 = le16_to_cpu(*(uint16_t *)(src + 12));
+
+	printf("\nFOBJ c %d p1 %d p2 %d   %ux%u @ %d/%d  dsize %d\n", codec, param, param2, w, h, left, top, size-14);
+
 
 	align = (codec == 37) ? 4 : 2;
 	align = (codec == 48) ? 8 : align;
 
 	/* ignore too small dimensions, happens with some Full Throttle videos */
-	if (w < align || h < align)
+	if (!rt->fbsize && (w < align || h < align))
 		return 0;
 
 	/* disable left/top for codec47/48 videos.  Except for SotE, none use
@@ -1189,12 +1452,21 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	if (ret != 0)
 		return ret;
 
-	rt->frmw = w;
-	rt->frmh = h;
+	if (codec <= 37) {
+		rt->frmw = 320;
+		rt->frmh = 200;
+	} else {
+		rt->frmw = w;
+		rt->frmh = h;
+	}
 
 	switch (codec) {
 	case 1:
-	case 3: codec1(ctx, src + 14, w, h, top, left); break;
+	case 3: codec1(ctx, src + 14, w, h, top, left, (codec == 1) ^ (rt->version != 1)); break;
+	case 2: codec2(ctx, src + 14, w, h, top, left, size - 14); break;
+	case 4: codec4(ctx, src + 14, w, h, top, left, size - 14, param, param2); break;
+	case 21:codec21(ctx, src + 14, w, h, top, left, size - 14, param); break;
+	case 23:codec23(ctx, src + 14, w, h, top, left, size - 14, param, param2); break;
 	case 37:ret = codec37(ctx, src + 14, w, h, top, left); break;
 	case 47:ret = codec47(ctx, src + 14, w, h); break;
 	case 48:ret = codec48(ctx, src + 14, w, h); break;
