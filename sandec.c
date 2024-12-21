@@ -38,6 +38,12 @@
 #define be16_to_cpu(x) bswap_16(x)
 #define cpu_to_le16(x) (x)
 
+/* read an unaligned 16bit value from memory */
+static inline uint16_t ua16(uint8_t *p)
+{
+	return p[0] | p[1] << 8;
+}
+
 /* read an unaligned 32bit value from memory */
 static inline uint32_t ua32(uint8_t *p)
 {
@@ -51,6 +57,12 @@ static inline uint32_t ua32(uint8_t *p)
 #define le32_to_cpu(x)  bswap_32(x)
 #define le16_to_cpu(x)  bswap_16(x)
 #define cpu_to_le16(x)  bswap_16(x)
+
+/* read an unaligned 16bit value from memory */
+static inline uint16_t ua16(uint8_t *p)
+{
+	return p[1] | p[0] << 8;
+}
 
 /* read an unaligned 32bit value from memory */
 static inline uint32_t ua32(uint8_t *p)
@@ -1076,7 +1088,7 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 
 	for (i = 0; i < h; i++) {
 		dst = ctx->rt.buf0 + ((top + i) * ctx->rt.pitch) + left;
-		dlen = le16_to_cpu(*(uint16_t *)src); src += 2;
+		dlen = le16_to_cpu(ua16(src)); src += 2;
 		while (dlen > 0) {
 			code = *src++; dlen--;
 			rlen = (code >> 1) + 1;
