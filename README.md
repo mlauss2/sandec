@@ -12,7 +12,8 @@ What works:
   - can also handle all SAN files from Curse of Monkey Island, although some frames are missing text, which is most noticeable in the intro file.
   - Shadows of the Empire videos are now supported as well
   - Mysteries of the Sith videos are also supported
-  - Some/All videos of Full Throttle / The Dig are also playable
+  - Most/All videos of Full Throttle / The Dig are also playable
+    - some artifacts still in some FT videos
 - Video decoding works for all SMUSH codec1/codec37/codec47/codec48 videos
 - Audio decoding works for all SMUSH codec47/codec48 videos
   - the subchunk-less 22kHz/16bit/stereo IACT variant in use since COMI.
@@ -44,5 +45,5 @@ Use:
   - sanplay /path/to/throttle/resource/video/introd_8.san
   - sanplay /path/to/dig/dig/video/pigout.san
 
-20241214
+20241221
 

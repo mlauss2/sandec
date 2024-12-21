@@ -99,6 +99,7 @@ struct sanrt {
 	uint8_t *buf2;		/* 8 c47 delta buffer 2			*/
 	uint8_t *vbuf;		/* 8 final image buffer passed to caller*/
 	uint8_t *abuf;		/* 8 audio output buffer		*/
+	uint16_t pitch;		/* 2 image pitch			*/
 	uint16_t bufw;		/* 2 alloc'ed buffer width/pitch	*/
 	uint16_t bufh;		/* 2 alloc'ed buffer height		*/
 	uint16_t frmw;		/* 2 current frame width		*/
@@ -1034,7 +1035,7 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	decsize = le32_to_cpu(ua32(src + 4));
 	flag = src[12];
 
-	if (seq == 0 || comp == 0 || comp == 2) {
+	if (comp == 0 || comp == 2) {
 		memset(ctx->rt.buf2, 0, decsize);
 	}
 
@@ -1057,6 +1058,7 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	default: ret = 19; break;
 	}
 
+	ctx->rt.vbuf = ctx->rt.buf0;
 	ctx->rt.lastseq = seq;
 	ctx->rt.rotate = 0;
 
@@ -1072,8 +1074,8 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	uint16_t rlen, dlen;
 	int i, j;
 
-	dst = ctx->rt.buf0 + (top * w) + left;
 	for (i = 0; i < h; i++) {
+		dst = ctx->rt.buf0 + ((top + i) * ctx->rt.pitch) + left;
 		dlen = le16_to_cpu(*(uint16_t *)src); src += 2;
 		while (dlen > 0) {
 			code = *src++; dlen--;
@@ -1179,18 +1181,27 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	/* there are some odd-sized frames in RA1, but all seem to work on
 	 * a 320x200 buffer.  Pass 320x200 to the buffer allocator.
+	 * Need also to set a separate pitch since most of the codec1-33 videos
+	 * work on parts of the image and have their dimensions and origin set
+	 * to that part.
 	 */
-	if (rt->version < 2 && (w < 320 || h < 200)) {
+	if (rt->version < 2 && (w < 320 || h < 200) && (top == 0) && left == 0) {
 		wr = 320;
 		hr = 200;
+		rt->pitch = 320;
 	}
 
 	/* disable left/top for codec47/48 videos.  Except for SotE, none use
 	 * it, and SotE uses it as a hack to get "widescreen" aspect, i.e. it's
 	 * just a black bar of 60 pixels heigth at the top.
 	 */
-	if (codec == 47 || codec == 48)
+	if (codec == 47 || codec == 48) {
+		rt->pitch = w;
 		left = top = 0;
+	}
+
+	if (rt->pitch == 0 && w >= 300)
+		rt->pitch = w;
 
 	ret = 0;
 	if ((rt->bufw < (left + wr)) || (rt->bufh < (top + hr))) {
@@ -1220,8 +1231,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		 * FIXME: May need to be revisited for RA/RA2.
 		 */
 		if (rt->version > 1) {
-			rt->frmw = w;
-			rt->frmh = h;
+			rt->frmw = _max(rt->frmw, w);
+			rt->frmh = _max(rt->frmh, h);
 		} else {
 			rt->frmw = 320;
 			rt->frmh = 200;
@@ -1365,8 +1376,36 @@ static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static void handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
+	int32_t xoff, yoff, rx, ry;
+	uint8_t *db, *dst;
+	int i, j;
+
+	if (size != 12) {
+		xoff = *(int16_t *)(src + 2);
+		yoff = *(int16_t *)(src + 4);
+	} else {
+		xoff = be32_to_cpu(ua32(src + 4));
+		yoff = be32_to_cpu(ua32(src + 8));
+	}
+
 	if (ctx->rt.buf0) {
-		memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize);
+		if (xoff == 0 && yoff == 0)
+			memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize);
+		else {
+			db = ctx->rt.buf1;
+			dst = ctx->rt.buf0;
+			for (i = 0; i < ctx->rt.bufh; i++) {
+				ry = (yoff + i) * ctx->rt.pitch;
+				if (ry < 0 || ry > ctx->rt.bufh)
+					continue;
+				for (j = 0; j < ctx->rt.bufw; j++) {
+					rx = xoff + j;
+					if (rx < 0 || rx > ctx->rt.bufw)
+						continue;
+					*(dst + ry + rx) = *(db + i * ctx->rt.pitch + j);
+				}
+			}
+		}
 		ctx->rt.have_frame = 1;
 	}
 }
