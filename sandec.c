@@ -709,7 +709,7 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 	case 3:	memcpy(ctx->rt.buf0, ctx->rt.buf2, ctx->rt.fbsize); break;
 	case 4:	memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize); break;
 	case 5:	codec47_comp5(src, dst, decsize); break;
-	default: ret = 16;
+	default: break;
 	}
 
 	if (seq == ctx->rt.lastseq + 1)
@@ -755,7 +755,7 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
 		c48_4to8(dst, sb, w);
 		break;
 	case 0xFE:	/* 1x 8x8 copy from deltabuf, 16bit mv from src */
-		mvofs = (int16_t)le16_to_cpu(*(int16_t*)src); src += 2;
+		mvofs = (int16_t)le16_to_cpu(ua16(src)); src += 2;
 		for (i = 0; i < 8; i++) {
 			ofs = w * i;
 			for (k = 0; k < 8; k++)
@@ -790,7 +790,7 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
 	case 0xFB: 	/* Copy 4x 4x4 blocks, per-block mv from source */
 		for (i = 0; i < 8; i += 4) {			/* 2 */
 			for (k = 0; k < 8; k += 4) {		/* 2 */
-				mvofs = le16_to_cpu(*(int16_t *)src); src += 2;
+				mvofs = le16_to_cpu(ua16(src)); src += 2;
 				for (j = 0; j < 4; j++) {	/* 4 */
 					ofs = (w * (j + i)) + k;
 					for (l = 0; l < 4; l++)
@@ -820,7 +820,7 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w)
 		for (i = 0; i < 8; i += 2) {				/* 4 */
 			for (j = 0; j < 8; j += 2) {			/* 4 */
 				ofs = w * i + j;
-				mvofs = le16_to_cpu(*(int16_t *)src); src += 2;
+				mvofs = le16_to_cpu(ua16(src)); src += 2;
 				for (l = 0; l < 2; l++) {
 					*(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
 					*(dst + ofs + l + w) = *(db + ofs + l + w + mvofs);
@@ -901,7 +901,7 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 	case 2: codec47_comp5(src, dst, decsize); break;
 	case 3: codec48_comp3(src, dst, ctx->rt.buf2, ctx->rt.c47ipoltbl, w, h); break;
 	case 5: codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h); break;
-	default: ret = 17; break;
+	default: break;
 	}
 
 	ctx->rt.lastseq = seq;
@@ -1078,7 +1078,7 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	case 2: codec47_comp5(src, dst, decsize); break;
 	case 3: /* fallthrough */
 	case 4: codec37_comp3(src, dst, db, w, h, mvidx, flag & 4, comp == 4); break;
-	default: ret = 19; break;
+	default: break;
 	}
 
 	/* copy the final image to buf0 in case another codec needs to operate
