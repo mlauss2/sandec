@@ -3,10 +3,10 @@
  *  SMUSH Video codecs 1/47/48 with 8-bit palletized 640x480 video,
  *  IACT scaled audio in 22,05kHz 16bit Stereo Little-endian format.
  *
- * Written in 2024 by Manuel Lauss <manuel.lauss@gmail.com>
+ * Written in 2024-2025 by Manuel Lauss <manuel.lauss@gmail.com>
  *
- * Codec algorithms (Video, Audio, Palette) liberally taken from FFmpeg and
- * ScummVM:
+ * Codec algorithms (Video, Audio, Palette) liberally taken from FFmpeg,
+ * ScummVM, and by looking at the various game EXEs with Ghidra.
  * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob/HEAD:/libavcodec/sanm.c
  * https://github.com/scummvm/scummvm/blob/master/engines/scumm/smush/smush_player.cpp
  * https://github.com/clone2727/smushplay/blob/master/codec47.cpp
@@ -109,6 +109,7 @@ struct sanrt {
 	uint8_t *buf0;		/* 8 current front buffer		*/
 	uint8_t *buf1;		/* 8 c47 delta buffer 1			*/
 	uint8_t *buf2;		/* 8 c47 delta buffer 2			*/
+	uint8_t *buf3;		/* 8 STOR buffer			*/
 	uint8_t *vbuf;		/* 8 final image buffer passed to caller*/
 	uint8_t *abuf;		/* 8 audio output buffer		*/
 	uint16_t pitch;		/* 2 image pitch			*/
@@ -117,7 +118,6 @@ struct sanrt {
 	uint16_t frmw;		/* 2 current frame width		*/
 	uint16_t frmh;		/* 2 current frame height		*/
 	int16_t  lastseq;	/* 2 c47 last sequence id		*/
-	uint16_t rotate;	/* 2 c47 buffer rotation code		*/
 	uint16_t subid;		/* 2 subtitle message number		*/
 	uint16_t to_store;	/* 2 STOR encountered			*/
 	uint16_t currframe;	/* 2 current frame index		*/
@@ -480,23 +480,6 @@ static inline int read_source(struct sanctx *ctx, void *dst, uint32_t sz)
 	return !(ctx->io->ioread(ctx->io->ioctx, dst, sz));
 }
 
-/* swap the 3 buffers according to the codec */
-static void swap_bufs(struct sanctx *ctx, uint8_t rotcode)
-{
-	struct sanrt *rt = &ctx->rt;
-	if (rotcode) {
-		uint8_t *tmp;
-		if (rotcode == 2) {
-			tmp = rt->buf1;
-			rt->buf1 = rt->buf2;
-			rt->buf2 = tmp;
-		}
-		tmp = rt->buf2;
-		rt->buf2 = rt->buf0;
-		rt->buf0 = tmp;
-	}
-}
-
 static void read_palette(struct sanctx *ctx, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
@@ -510,6 +493,23 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 		t[2] = *src++;
 		*pal++ = 0xff << 24 | t[2] << 16 | t[1] << 8 | t[0];
 		i++;
+	}
+}
+
+/* swap the 3 buffers according to the codec */
+static void c47_swap_bufs(struct sanctx *ctx, uint8_t rotcode)
+{
+	struct sanrt *rt = &ctx->rt;
+	if (rotcode) {
+		uint8_t *tmp;
+		if (rotcode == 2) {
+			tmp = rt->buf1;
+			rt->buf1 = rt->buf2;
+			rt->buf2 = tmp;
+		}
+		tmp = rt->buf2;
+		rt->buf2 = rt->buf0;
+		rt->buf0 = tmp;
 	}
 }
 
@@ -712,7 +712,9 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 	default: ret = 16;
 	}
 
-	ctx->rt.rotate = (seq == ctx->rt.lastseq + 1) ? newrot : 0;
+	if (seq == ctx->rt.lastseq + 1)
+		c47_swap_bufs(ctx, newrot);
+
 	ctx->rt.lastseq = seq;
 
 	return ret;
@@ -903,7 +905,8 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 	}
 
 	ctx->rt.lastseq = seq;
-	ctx->rt.rotate = 1;		/* swap 0 and 2 */
+	ctx->rt.vbuf = ctx->rt.buf0;	/* decoded image in buf0 */
+	c47_swap_bufs(ctx, 1);	/* swap 0 and 2 */
 
 	return ret;
 }
@@ -1051,14 +1054,22 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		memset(ctx->rt.buf2, 0, decsize);
 	}
 
+	/* Codec37's  buffers are private, no other codec must touch them.
+	 * Therefore we operate on buf1/buf2 rather than buf0/buf2, since
+	 * buf0 is also touched by default by other codecs, and this results
+	 * in unexpected image issues.
+	 * Unlike c47, buffers need to be pre-rotated.
+	 */
 	if ((comp == 1 || comp == 3 || comp == 4)
 	    && ((seq & 1) || !(flag & 1))) {
-		swap_bufs(ctx, 1);
+		void *tmp = ctx->rt.buf1;
+		ctx->rt.buf1 = ctx->rt.buf2;
+		ctx->rt.buf2 = tmp;
 	}
 
 	src += 16;
 	ret = 0;
-	dst = ctx->rt.buf0 + (top * w) + left;
+	dst = ctx->rt.buf1 + (top * w) + left;
 	db = ctx->rt.buf2 + (top * w) + left;
 
 	switch (comp) {
@@ -1070,9 +1081,12 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	default: ret = 19; break;
 	}
 
-	ctx->rt.vbuf = ctx->rt.buf0;
+	/* copy the final image to buf0 in case another codec needs to operate
+	 * on it.
+	 */
+	memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize);
+	ctx->rt.vbuf = ctx->rt.buf1;
 	ctx->rt.lastseq = seq;
-	ctx->rt.rotate = 0;
 
 	return ret;
 }
@@ -1135,7 +1149,7 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	}
 
 	/* we require up to 3 buffers the size of the image.
-	 * a front buffer + 2 work buffers. work buffer 1 is also used to store
+	 * a front buffer + 2 work buffers, finally and a buffer used to store
 	 * the frontbuffer on "STOR".
 	 *
 	 * Then we need a "guard band" before and after the buffers for motion
@@ -1145,7 +1159,7 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	 */
 	bs = wb * hb * bpp;		/* block-aligned 8 bit sizes */
 	bs = (bs + 0xfff) & ~0xfff;	/* align to 4K */
-	fbs = bs * 3 + (wb * 32 * 4);	/* 3 buffers, 4 guard "bands" */
+	fbs = bs * 4 + (wb * 32 * 4);	/* 4 buffers, 4 guard "bands" */
 	b = (uint8_t *)malloc(fbs);
 	if (!b)
 		return 51;
@@ -1158,6 +1172,7 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	rt->buf0 = b + (wb * 32);	/* leave a guard band for motion vectors */
 	rt->buf1 = rt->buf0 + (wb * 32) + bs;
 	rt->buf2 = rt->buf1 + (wb * 32) + bs;
+	rt->buf3 = rt->buf2 + (wb * 32) + bs;
 	rt->fbsize = w * h * bpp;	/* image size reported to caller */
 	rt->bufw = w;			/* buffer (aligned) width */
 	rt->bufh = h;
@@ -1251,15 +1266,15 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 			/* that few stupid Full Throttle videos which are slightly
 			 * larger but still have the 320x200 visible area.
-			 * Concatenate the visible image area to 320x200.  Don't
-			 * touch buf0 since MV depends on it.
+			 * Concatenate the visible image area to 320x200 in the
+			 * STOR buffer.
 			 */
 			if (w > 320 && w < 400 && h > 200 && h < 250) {
 				int i, j;
 				for (i = 0; i < 200; i++)
 					for (j = 0; j < 320; j++)
-						*(rt->buf1 + (i * 320) + j) = *(rt->buf0 + (i * w) + j);
-				rt->vbuf = rt->buf1;
+						*(rt->buf3 + (i * 320) + j) = *(rt->vbuf + (i * w) + j);
+				rt->vbuf = rt->buf3;
 			}
 		}
 	}
@@ -1402,9 +1417,9 @@ static void handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	if (ctx->rt.buf0) {
 		if (xoff == 0 && yoff == 0)
-			memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize);
+			memcpy(ctx->rt.buf0, ctx->rt.buf3, ctx->rt.fbsize);
 		else {
-			db = ctx->rt.buf1;
+			db = ctx->rt.buf3;
 			dst = ctx->rt.buf0;
 			for (i = 0; i < ctx->rt.bufh; i++) {
 				ry = (yoff + i) * ctx->rt.pitch;
@@ -1471,16 +1486,14 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	if (ret == 0) {
 		if (ctx->rt.have_frame) {
 			if (rt->to_store)	/* STOR */
-				memcpy(rt->buf1, rt->buf0, rt->fbsize);
+				memcpy(rt->buf3, rt->vbuf, rt->fbsize);
 
 			ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
 					     rt->frmw, rt->frmh, rt->palette, rt->subid);
 		}
 
-		swap_bufs(ctx, rt->rotate);
 		rt->to_store = 0;
 		rt->currframe++;
-		rt->rotate = 0;
 		rt->subid = 0;
 		rt->have_frame = 0;
 	}
