@@ -1326,21 +1326,11 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	return 0;
 }
 
-static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
+static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	uint16_t count, len, *p = (uint16_t *)src;
-	uint8_t v1, v2, v3, *src2, *ib;
+	uint8_t v1, v2, v3, *src2, *ib = ctx->rt.iactbuf;
+	uint16_t count, len;
 	int16_t *dst;
-
-	/* this code only works when these parameters are met: */
-	if (le16_to_cpu(p[0]) != 8  ||
-	    le16_to_cpu(p[1]) != 46 ||
-	    le16_to_cpu(p[3]) != 0)
-		return;		/* not an IACT scaled audio track */
-
-	src += 18;	/* skip header */
-	size -= 18;
-	ib = ctx->rt.iactbuf;
 
 	/* algorithm taken from ScummVM/engines/scumm/smush/smush_player.cpp */
 	while (size > 0) {
@@ -1381,6 +1371,18 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			*(ib + ctx->rt.iactpos) = *src++;
 			ctx->rt.iactpos++;
 			size--;
+		}
+	}
+}
+
+static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
+{
+	uint16_t *p = (uint16_t *)src;
+
+	if (p[0] == 8 && p[1] == 46) {
+		if (p[3] == 0) {
+			/* subchunkless scaled IACT audio codec47/48 videos */
+			iact_audio_scaled(ctx, size - 18, src + 18);
 		}
 	}
 }
