@@ -294,6 +294,9 @@ int main(int a, char **argv)
 
 				t1 = SDL_GetTicks64();
 				ret = sandec_decode_next_frame(sanctx);
+				t2 = SDL_GetTicks64();
+				dec = (t2 - t1);
+
 err:
 				if (ret == SANDEC_DONE) {
 					parserdone = 1;
@@ -301,9 +304,6 @@ err:
 				} else if (ret != 0) {
 					running = 0;
 				}
-
-				t2 = SDL_GetTicks64();
-				dec = (t2 - t1);
 
 				if (running && speedmode < 2) {
 					t1 = SDL_GetTicks64();
