@@ -21,6 +21,7 @@ struct sdlpriv {
 	uint16_t winh;
 
 	uint32_t vbufsize;
+	uint32_t frame_duration;
 	unsigned char *vbuf;
 	uint16_t subid;
 	int err;
@@ -41,7 +42,8 @@ static void queue_audio(void *avctx, unsigned char *adata, uint32_t size)
 
 /* this is called once per "sandec_decode_next_frame()" */
 static void queue_video(void *avctx, unsigned char *vdata, uint32_t size,
-		       uint16_t w, uint16_t h, uint32_t *imgpal, uint16_t subid)
+			uint16_t w, uint16_t h, uint32_t *imgpal, uint16_t subid,
+			uint32_t frame_duration_us)
 {
 	struct sdlpriv *p = (struct sdlpriv *)avctx;
 	SDL_Palette *pal;
@@ -119,6 +121,7 @@ static void queue_video(void *avctx, unsigned char *vdata, uint32_t size,
 	p->pxh = h;
 	p->subid = subid;
 	p->err = 0;
+	p->frame_duration = frame_duration_us;
 }
 
 static int render_frame(struct sdlpriv *p)
@@ -186,17 +189,17 @@ static int sio_read(void *ctx, void *dst, uint32_t size)
 
 int main(int a, char **argv)
 {
-	int running, paused, parserdone;
+	int ret, speedmode, dtick, fc, running, paused, parserdone;
+	uint64_t t1, t2, ren, dec;
 	struct sdlpriv sdl;
 	struct sanio sio;
 	void *sanctx;
 	SDL_Event e;
 	FILE *h;
-	int fr, ret, speedmode, waittick, dtick, fc;
-	uint64_t t1, t2, ren, dec;
 
 	if (a < 2) {
-		printf("arg missing\n");
+		printf("usage: %s <file.san/.anm> [speedmode]\n speedmode ", argv[0]);
+		printf("1: ignore frametime, 2 don't render audio/video\n");
 		return 1;
 	}
 
@@ -204,7 +207,7 @@ int main(int a, char **argv)
 
 	h = fopen(argv[1], "r");
 	if (!h) {
-		printf("cannot open\n");
+		printf("cannot open file %s\n", argv[1]);
 		return 2;
 	}
 
@@ -231,19 +234,17 @@ int main(int a, char **argv)
 		goto out;
 	}
 
-	fr = sandec_get_framerate(sanctx);
 	fc = sandec_get_framecount(sanctx);
-	printf("SAN ANIMv%u fps %u sr %u FRMEs %u\n", sandec_get_version(sanctx),
-	       fr, sandec_get_samplerate(sanctx), fc);
 
 	running = 1;
 	paused = 0;
 	parserdone = 0;
-	
-	if (!fr)
-		fr = 2;
-	dtick = waittick = 1000 / fr;
-	while (running) {
+	dtick = 0;
+	ren = 0;
+	dec = 0;
+
+	ret = sandec_decode_next_frame(sanctx);
+	while (running && ret == 0) {
 		while (0 != SDL_PollEvent(&e) && running) {
 			if (e.type == SDL_QUIT)
 				running = 0;
@@ -266,52 +267,53 @@ int main(int a, char **argv)
 			}
 		}
 
-		if (!paused && running) {
-			if (!parserdone) {
-				t1 = SDL_GetTicks64();
-				ret = sandec_decode_next_frame(sanctx);
-				t2 = SDL_GetTicks64();
-				dtick -= dec = (t2 - t1);
+		if (!paused) {
 
-				if (ret == SANDEC_OK) {
-					if (speedmode < 2) {
-						t1 = SDL_GetTicks64();
-						ret = render_frame(&sdl);
-						if (ret)
-							goto err;
-						t2 = SDL_GetTicks64();
-						dtick -= ren = (t2 - t1);
-
-						t1 = SDL_GetTicks64();
-						printf("\r                           ");
-						printf("\r%u/%u  %lu ms/%lu ms %d", sandec_get_currframe(sanctx), fc, ren, dec, ret);
-						printf(" %us/%us ", sandec_get_currframe(sanctx) / fr, fc / fr);
-						fflush(stdout);
-						t2 = SDL_GetTicks64();
-						dtick -= (t2 - t1);
-
-						if (speedmode == 0) {
-							if (dtick > 0) {
-								SDL_Delay(dtick);
-							}
-							dtick = waittick;
-						}
-					} else
-						ret = 0;
-				} else {
-err:
-					if (ret == SANDEC_DONE)
-						parserdone = 1;
-					else
-						running = 0;
-				}
-			}
 			if (parserdone) {
 				if (speedmode) {
 					SDL_ClearQueuedAudio(sdl.aud);
 					running = 0;
 				} else if (0 == SDL_GetQueuedAudioSize(sdl.aud)) {
 					running = 0;
+				} else {
+					continue;
+				}
+			}
+
+			if (running) {
+				if (speedmode < 2) {
+					t1 = SDL_GetTicks64();
+					ret = render_frame(&sdl);
+				 if (ret)
+						goto err;
+					t2 = SDL_GetTicks64();
+					ren = (t2 - t1);
+				} else {
+					ren = 0;
+				}
+
+				t1 = SDL_GetTicks64();
+				ret = sandec_decode_next_frame(sanctx);
+err:
+				if (ret == SANDEC_DONE) {
+					parserdone = 1;
+					ret = 0;
+				} else if (ret != 0) {
+					running = 0;
+				}
+
+				t2 = SDL_GetTicks64();
+				dec = (t2 - t1);
+
+				if (running && speedmode < 2) {
+					t1 = SDL_GetTicks64();
+					printf("\r                           ");
+					printf("\r%u/%u  %lu ms/%lu ms %d", sandec_get_currframe(sanctx), fc, ren, dec, ret);
+					fflush(stdout);
+					t2 = SDL_GetTicks64();
+					dtick = (sdl.frame_duration / 1000) - ren - dec - (t2 - t1);
+					if (speedmode < 1 && dtick > 0)
+						SDL_Delay(dtick);
 				}
 			}
 		}

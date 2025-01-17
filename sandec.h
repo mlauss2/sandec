@@ -24,13 +24,16 @@
  *  file should be displayed for subtitles. If it is zero, do not show any.
  *
  * void my_queue_videoframe(void *avctx, char *vbuf, uint32_t bufsize,
- *                        (uint16_t w, uint16_t h, uint32_t* pal, uint16_t subid)
+ *                          uint16_t w, uint16_t h, uint32_t* pal,
+ *                          uint16_t subid, uint16_t, uint32_t frame_duration_us)
  * {
  *  avctx: context data from struct sanio
  *  vbuf, bufsize: image data and size of buffer
  *  w, h: width/height in pixels of image
  *  pal: 256 * 4 byte buffer with palette data in ARGB format
  *  subid: index of the subtitle to display, or zero.
+ *  frame_duration_us: how long to display the frame, in microsecods.  The frame
+ *   duration _may_ vary during playback!
  * }
  *
  *
@@ -92,7 +95,8 @@
 struct sanio {
 	int(*ioread)(void *ioctx, void *dst, uint32_t size);
 	void(*queue_video)(void *avctx, unsigned char *vdata, uint32_t size,
-			  uint16_t w, uint16_t h, uint32_t *pal, uint16_t subid);
+			  uint16_t w, uint16_t h, uint32_t *pal, uint16_t subid,
+			  uint32_t frame_duration_us);
 	void(*queue_audio)(void *avctx, unsigned char *adata, uint32_t size);
 	void *ioctx;
 	void *avctx;
@@ -113,18 +117,11 @@ int sandec_decode_next_frame(void *sanctx);
 /* destroy all context. call this as last step. */
 void sandec_exit(void **sanctx);
 
-/* these return valid values after sandec_open() return SANDEC_OK */
-/* get frames per sec value */
-int sandec_get_framerate(void *sanctx);
-
 /* get the expected number of frames to render */
 int sandec_get_framecount(void *sanctx);
 
 /* get the current rendered frame number */
 int sandec_get_currframe(void *sanctx);
-
-/* get audio samplerate */
-int sandec_get_samplerate(void *sanctx);
 
 /* get ANIM version */
 int sandec_get_version(void *sanctx);

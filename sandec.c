@@ -128,7 +128,7 @@ struct sanrt {
 	uint32_t *palette;	/* 8 256x ABGR				*/
 	uint8_t  *buf;		/* 8 fb baseptr				*/
 	uint32_t fbsize;	/* 4 size of the framebuffers		*/
-	uint32_t framerate;	/* 4 fps				*/
+	uint32_t framedur;	/* 4 standard frame duration		*/
 	uint32_t samplerate;	/* 4 audio samplerate in Hz		*/
 	uint16_t FRMEcnt;	/* 2 number of FRMEs in SAN		*/
 	uint16_t version;	/* 2 SAN version number			*/
@@ -1491,7 +1491,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 				memcpy(rt->buf3, rt->vbuf, rt->fbsize);
 
 			ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
-					     rt->frmw, rt->frmh, rt->palette, rt->subid);
+					     rt->frmw, rt->frmh, rt->palette,
+					     rt->subid, rt->framedur);
 		}
 
 		rt->to_store = 0;
@@ -1537,7 +1538,8 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
 
 	if (rt->version > 1) {
-		rt->framerate =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
+		rt->framedur  =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
+		rt->framedur = 1000000 / rt->framedur;
 		maxframe =       le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
 		rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
 
@@ -1549,7 +1551,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 			ret = allocfrme(ctx, maxframe);
 		}
 	} else {
-		rt->framerate = 10;		/* ANIMv1 default */
+		rt->framedur = 1000000 / 10;	/* ANIMv1 default */
 		rt->samplerate = 11025;		/* ANIMv1 default */
 		rt->frmebufsz = 0;
 	}
@@ -1681,18 +1683,6 @@ void sandec_exit(void **sanctx)
 	sandec_free_memories(ctx);
 	free(ctx);
 	*sanctx = NULL;
-}
-
-int sandec_get_framerate(void *sanctx)
-{
-	struct sanctx *ctx = (struct sanctx *)sanctx;
-	return ctx ? ctx->rt.framerate : 0;
-}
-
-int sandec_get_samplerate(void *sanctx)
-{
-	struct sanctx *ctx = (struct sanctx *)sanctx;
-	return ctx ? ctx->rt.samplerate : 0;
 }
 
 int sandec_get_framecount(void *sanctx)
