@@ -123,7 +123,4 @@ int sandec_get_framecount(void *sanctx);
 /* get the current rendered frame number */
 int sandec_get_currframe(void *sanctx);
 
-/* get ANIM version */
-int sandec_get_version(void *sanctx);
-
 #endif

@@ -1691,12 +1691,6 @@ int sandec_get_framecount(void *sanctx)
 	return ctx ? ctx->rt.FRMEcnt : 0;
 }
 
-int sandec_get_version(void *sanctx)
-{
-	struct sanctx *ctx = (struct sanctx *)sanctx;
-	return ctx ? ctx->rt.version : 0;
-}
-
 int sandec_get_currframe(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
