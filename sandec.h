@@ -92,6 +92,11 @@
 #define SANDEC_DONE	-1
 /* all other positive values indicate where the error occured */
 
+
+/* flags */
+/* do frame interpolation if possible */
+#define SANDEC_FLAG_DO_FRAME_INTERPOLATION	(1 << 0)
+
 struct sanio {
 	int(*ioread)(void *ioctx, void *dst, uint32_t size);
 	void(*queue_video)(void *avctx, unsigned char *vdata, uint32_t size,
@@ -100,6 +105,7 @@ struct sanio {
 	void(*queue_audio)(void *avctx, unsigned char *adata, uint32_t size);
 	void *ioctx;
 	void *avctx;
+	uint32_t flags;
 };
 
 /* init SAN context. Call this as step 1. */

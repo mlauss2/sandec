@@ -17,6 +17,7 @@ Will expand with new features as I see fit.
   - Full Throttle
   - The Dig
 - Video decoding works for all SMUSH codec1/codec37/codec47/codec48 videos
+  - frame interpolation for codec47/48 videos (default off).
 - Audio decoding works for all SMUSH codec47/codec48 videos
   - the subchunk-less 22kHz/16bit/stereo IACT variant in use since COMI.
 - good enough A/V sync in player
@@ -24,6 +25,7 @@ Will expand with new features as I see fit.
   - space  pause/unpause
   - q  to quit
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
+  - i  to toggle frame interpolation on codec47/48 on/off
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
@@ -46,4 +48,4 @@ Will expand with new features as I see fit.
   - sanplay /path/to/throttle/resource/video/introd_8.san
   - sanplay /path/to/dig/dig/video/pigout.san
 
-20250108
+20250125

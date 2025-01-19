@@ -263,6 +263,8 @@ int main(int a, char **argv)
 					} else if ((ke->keysym.scancode >= SDL_SCANCODE_1) &&
 					    (ke->keysym.scancode <= SDL_SCANCODE_6)) {
 						sdl.nextmult = ke->keysym.scancode - SDL_SCANCODE_1 + 1;
+					} else if (ke->keysym.scancode == SDL_SCANCODE_I) {
+						sio.flags ^= SANDEC_FLAG_DO_FRAME_INTERPOLATION;
 					}
 			}
 		}
@@ -308,7 +310,7 @@ err:
 				if (running && speedmode < 2) {
 					t1 = SDL_GetTicks64();
 					printf("\r                           ");
-					printf("\r%u/%u  %lu ms/%lu ms %d", sandec_get_currframe(sanctx), fc, ren, dec, ret);
+					printf("\r%u/%u  %lu ms/%lu ms I:%d R:%d", sandec_get_currframe(sanctx), fc, ren, dec, !!(sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION), ret);
 					fflush(stdout);
 					t2 = SDL_GetTicks64();
 					dtick = (sdl.frame_duration / 1000) - ren - dec - (t2 - t1);

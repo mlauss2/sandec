@@ -1517,7 +1517,9 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 			/* if possible, interpolate a frame using the itable,
 			 * and queue that plus the decoded one.
 			 */
-			if (rt->have_itable && rt->can_ipol) {
+			if (ctx->io->flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION
+			    && rt->have_itable
+			    && rt->can_ipol) {
 				interpolate_frame(rt->buf5, rt->buf4, rt->vbuf,
 						  rt->c47ipoltbl, rt->bufw, rt->bufh);
 				rt->have_ipframe = 1;
