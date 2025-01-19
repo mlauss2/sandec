@@ -110,6 +110,8 @@ struct sanrt {
 	uint8_t *buf1;		/* 8 c47 delta buffer 1			*/
 	uint8_t *buf2;		/* 8 c47 delta buffer 2			*/
 	uint8_t *buf3;		/* 8 STOR buffer			*/
+	uint8_t *buf4;		/* 8 last full frame for interpolation  */
+	uint8_t *buf5;		/* 8 interpolated frame                 */
 	uint8_t *vbuf;		/* 8 final image buffer passed to caller*/
 	uint8_t *abuf;		/* 8 audio output buffer		*/
 	uint16_t pitch;		/* 2 image pitch			*/
@@ -133,6 +135,9 @@ struct sanrt {
 	uint16_t FRMEcnt;	/* 2 number of FRMEs in SAN		*/
 	uint16_t version;	/* 2 SAN version number			*/
 	uint8_t  have_frame:1;	/* 1 we have a valid video frame	*/
+	uint8_t  have_itable:1;	/* 1 have c47/48 interpolation table    */
+	uint8_t  can_ipol:1;	/* 1 do an interpolation                */
+	uint8_t  have_ipframe:1;/* 1 we have an interpolated frame      */
 };
 
 /* internal context: static stuff. */
@@ -496,6 +501,19 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 	}
 }
 
+static void interpolate_frame(uint8_t *dst, const uint8_t *sr1, const uint8_t *srs,
+			      const uint8_t *itbl, const uint16_t w, const uint16_t h)
+{
+	int i, j, k;
+
+	for (i = 0; i < h; i++) {
+		for (j = 0; j < w; j++) {
+			k = (*sr1++) << 8 | (*srs++);
+			*dst++ = itbl[k];
+		}
+	}
+}
+
 /* swap the 3 buffers according to the codec */
 static void c47_swap_bufs(struct sanctx *ctx, uint8_t rotcode)
 {
@@ -671,6 +689,7 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 		}
 		itbl += 256;
 	}
+	ctx->rt.have_itable = 1;
 }
 
 static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
@@ -716,6 +735,8 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 		c47_swap_bufs(ctx, newrot);
 
 	ctx->rt.lastseq = seq;
+	if (seq > 1)
+		ctx->rt.can_ipol = 1;
 
 	return ret;
 }
@@ -904,8 +925,9 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 	default: break;
 	}
 
+	if (seq > 1)
+		ctx->rt.can_ipol = 1;
 	ctx->rt.lastseq = seq;
-	ctx->rt.vbuf = ctx->rt.buf0;	/* decoded image in buf0 */
 	c47_swap_bufs(ctx, 1);	/* swap 0 and 2 */
 
 	return ret;
@@ -1085,7 +1107,6 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	 * on it.
 	 */
 	memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize);
-	ctx->rt.vbuf = ctx->rt.buf1;
 	ctx->rt.lastseq = seq;
 
 	return ret;
@@ -1149,8 +1170,9 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	}
 
 	/* we require up to 3 buffers the size of the image.
-	 * a front buffer + 2 work buffers, finally and a buffer used to store
-	 * the frontbuffer on "STOR".
+	 * a front buffer + 2 work buffers,  a buffer used to store
+	 * the frontbuffer on "STOR" and an 2 intermediate buffers for
+	 * interpolated frames (c47/c48 videos only).
 	 *
 	 * Then we need a "guard band" before and after the buffers for motion
 	 * vectors that point outside the defined video area, esp. for codec37
@@ -1159,7 +1181,7 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	 */
 	bs = wb * hb * bpp;		/* block-aligned 8 bit sizes */
 	bs = (bs + 0xfff) & ~0xfff;	/* align to 4K */
-	fbs = bs * 4 + (wb * 32 * 4);	/* 4 buffers, 4 guard "bands" */
+	fbs = bs * 6 + (wb * 32 * 4);	/* 4 buffers, 4 guard "bands" */
 	b = (uint8_t *)malloc(fbs);
 	if (!b)
 		return 51;
@@ -1173,6 +1195,8 @@ static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t 
 	rt->buf1 = rt->buf0 + (wb * 32) + bs;
 	rt->buf2 = rt->buf1 + (wb * 32) + bs;
 	rt->buf3 = rt->buf2 + (wb * 32) + bs;
+	rt->buf4 = rt->buf3 + bs;
+	rt->buf5 = rt->buf4 + bs;
 	rt->fbsize = w * h * bpp;	/* image size reported to caller */
 	rt->bufw = w;			/* buffer (aligned) width */
 	rt->bufh = h;
@@ -1490,9 +1514,26 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 			if (rt->to_store)	/* STOR */
 				memcpy(rt->buf3, rt->vbuf, rt->fbsize);
 
-			ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
+			/* if possible, interpolate a frame using the itable,
+			 * and queue that plus the decoded one.
+			 */
+			if (rt->have_itable && rt->can_ipol) {
+				interpolate_frame(rt->buf5, rt->buf4, rt->vbuf,
+						  rt->c47ipoltbl, rt->bufw, rt->bufh);
+				rt->have_ipframe = 1;
+				rt->can_ipol = 0;
+				memcpy(rt->buf4, rt->vbuf, rt->fbsize);
+				ctx->io->queue_video(ctx->io->avctx, rt->buf5, rt->fbsize,
+					     rt->frmw, rt->frmh, rt->palette,
+					     rt->subid, rt->framedur / 2);
+			} else {
+				ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
 					     rt->frmw, rt->frmh, rt->palette,
 					     rt->subid, rt->framedur);
+				/* save frame as possible interpolation source */
+				if (rt->have_itable)
+					memcpy(rt->buf4, rt->vbuf, rt->fbsize);
+			}
 		}
 
 		rt->to_store = 0;
@@ -1592,6 +1633,16 @@ int sandec_decode_next_frame(void *sanctx)
 	/* in case of previous error, don't continue, just return it again */
 	if (ctx->errdone)
 		return ctx->errdone;
+
+	/* interpolated frame: was queued first, now queue the decoded one */
+	if (ctx->rt.have_ipframe) {
+		struct sanrt *rt = &ctx->rt;
+		rt->have_ipframe = 0;
+		ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
+				     rt->frmw, rt->frmh, rt->palette,
+				     rt->subid, rt->framedur / 2);
+		return SANDEC_OK;
+	}
 
 	ret = read_source(ctx, c, 8);
 	if (ret) {
