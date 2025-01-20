@@ -482,7 +482,7 @@ static int allocfrme(struct sanctx *ctx, uint32_t sz)
 
 static inline int read_source(struct sanctx *ctx, void *dst, uint32_t sz)
 {
-	return !(ctx->io->ioread(ctx->io->ioctx, dst, sz));
+	return !(ctx->io->ioread(ctx->io->userctx, dst, sz));
 }
 
 static void read_palette(struct sanctx *ctx, uint8_t *src)
@@ -1381,7 +1381,7 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 						*dst++ = cpu_to_le16((int8_t)v3) << ((count & 1) ? v1 : v2);
 					}
 				} while (--count);
-				ctx->io->queue_audio(ctx->io->avctx, ctx->rt.abuf, SZ_AUDIOOUT);
+				ctx->io->queue_audio(ctx->io->userctx, ctx->rt.abuf, SZ_AUDIOOUT);
 				size -= len;
 				src += len;
 				ctx->rt.iactpos = 0;
@@ -1525,11 +1525,11 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 				rt->have_ipframe = 1;
 				rt->can_ipol = 0;
 				memcpy(rt->buf4, rt->vbuf, rt->fbsize);
-				ctx->io->queue_video(ctx->io->avctx, rt->buf5, rt->fbsize,
+				ctx->io->queue_video(ctx->io->userctx, rt->buf5, rt->fbsize,
 					     rt->frmw, rt->frmh, rt->palette,
 					     rt->subid, rt->framedur / 2);
 			} else {
-				ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
+				ctx->io->queue_video(ctx->io->userctx, rt->vbuf, rt->fbsize,
 					     rt->frmw, rt->frmh, rt->palette,
 					     rt->subid, rt->framedur);
 				/* save frame as possible interpolation source */
@@ -1640,7 +1640,7 @@ int sandec_decode_next_frame(void *sanctx)
 	if (ctx->rt.have_ipframe) {
 		struct sanrt *rt = &ctx->rt;
 		rt->have_ipframe = 0;
-		ctx->io->queue_video(ctx->io->avctx, rt->vbuf, rt->fbsize,
+		ctx->io->queue_video(ctx->io->userctx, rt->vbuf, rt->fbsize,
 				     rt->frmw, rt->frmh, rt->palette,
 				     rt->subid, rt->framedur / 2);
 		return SANDEC_OK;

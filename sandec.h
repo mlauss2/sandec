@@ -10,9 +10,9 @@
  *  with new data, so the callback needs to either queue the data immediately,
  *  or append it to a buffer for later consumption.
  *
- * void my_queue_audio(void *avctx, char *abuf, uint32_t bufsize)
+ * void my_queue_audio(void *userctx, char *abuf, uint32_t bufsize)
  * {
- *  avctx:  context data from struct sanio
+ *  userctx:  context data from struct sanio
  *  abuf, bufsize: audio data buffer and size in bytes of data in buffer.
  * }
  *
@@ -23,11 +23,11 @@
  * the subid parameter indicates which message id from the Outlaws LOCAL.MSG
  *  file should be displayed for subtitles. If it is zero, do not show any.
  *
- * void my_queue_videoframe(void *avctx, char *vbuf, uint32_t bufsize,
+ * void my_queue_videoframe(void *userctx, char *vbuf, uint32_t bufsize,
  *                          uint16_t w, uint16_t h, uint32_t* pal,
  *                          uint16_t subid, uint16_t, uint32_t frame_duration_us)
  * {
- *  avctx: context data from struct sanio
+ *  userctx: context data from struct sanio
  *  vbuf, bufsize: image data and size of buffer
  *  w, h: width/height in pixels of image
  *  pal: 256 * 4 byte buffer with palette data in ARGB format
@@ -41,9 +41,9 @@
  * Return 1 if the requested amount of data was put in the buffer,
  *  otherwise or on error return 0.
  *
- * int my_data_read(void *ioctx, char *destbuf, int amount)
+ * int my_data_read(void *userctx, char *destbuf, int amount)
  * {    // return 1 if all data was read, 0 on errors or not enough data.
- *	return (read(ioctx, destbuf, amount) == amount);
+ *	return (read(userctx->fhandle, destbuf, amount) == amount);
  * }
  *
  *
@@ -58,9 +58,9 @@
  *
  * int fd = open("/path/to/OP_CR.SAN", O_RDONLY);
  * if (fd < 0) { // error file not found };
- * myio.ioctx = &fd;
+ * myavctx.fhandle = fd;
  * myio.ioread = my_data_read;
- * myio.avctx = my_avctx;
+ * myio.userctx = my_avctx;
  * myio.queue_audio = my_queue_audio;
  * myio.queue_video = my_queue_video;
  *
@@ -98,13 +98,12 @@
 #define SANDEC_FLAG_DO_FRAME_INTERPOLATION	(1 << 0)
 
 struct sanio {
-	int(*ioread)(void *ioctx, void *dst, uint32_t size);
-	void(*queue_video)(void *avctx, unsigned char *vdata, uint32_t size,
+	int(*ioread)(void *userctx, void *dst, uint32_t size);
+	void(*queue_video)(void *userctx, unsigned char *vdata, uint32_t size,
 			  uint16_t w, uint16_t h, uint32_t *pal, uint16_t subid,
 			  uint32_t frame_duration_us);
-	void(*queue_audio)(void *avctx, unsigned char *adata, uint32_t size);
-	void *ioctx;
-	void *avctx;
+	void(*queue_audio)(void *userctx, unsigned char *adata, uint32_t size);
+	void *userctx;
 	uint32_t flags;
 };
 
