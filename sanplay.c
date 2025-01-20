@@ -227,6 +227,7 @@ int main(int a, char **argv)
 	sio.avctx = (speedmode < 2) ? &sdl : NULL;
 	sio.queue_audio = queue_audio;
 	sio.queue_video = queue_video;
+	sio.flags = SANDEC_FLAG_DO_FRAME_INTERPOLATION;
 
 	ret = sandec_open(sanctx, &sio);
 	if (ret) {
