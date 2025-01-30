@@ -2,7 +2,7 @@ Single-file A/V decoder library for LucasArts Outlaws game "SAN"/SMUSH movie fil
 with a simple SDL2-based player application to demonstrate library use.
 
 Can also play game movies from Curse of Monkey Island, Shadows of the Empire,
-Mysteries of the Sith, The Dig and some of Full Throttle.
+Mysteries of the Sith, The Dig and Full Throttle.
 Will expand with new features as I see fit.
 
 # What works:
@@ -18,8 +18,9 @@ Will expand with new features as I see fit.
   - The Dig
 - Video decoding works for all SMUSH codec1/codec37/codec47/codec48 videos
   - frame interpolation for codec47/48 videos (default off).
-- Audio decoding works for all SMUSH codec47/codec48 videos
-  - the subchunk-less 22kHz/16bit/stereo IACT variant in use since COMI.
+- Audio decoding
+  - OK for COMI/Outlaws/MotS/SotE
+  - alright for Full Throttle and The Dig
 - good enough A/V sync in player
 - player keyboard controls:
   - space  pause/unpause
@@ -31,9 +32,6 @@ Will expand with new features as I see fit.
 
 # What does **not** yet work:
 - fullscreen toggle
-- Audio in The Dig, Full Throttle
-  - IACT with iMUSE subchunks
-  - PSAD/SAUD with multiple streams requiring software mixing.
 
 # Build:
 - Have SDL2
@@ -48,4 +46,5 @@ Will expand with new features as I see fit.
   - sanplay /path/to/throttle/resource/video/introd_8.san
   - sanplay /path/to/dig/dig/video/pigout.san
 
-20250125
+20250130
+
