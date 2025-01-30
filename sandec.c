@@ -1991,8 +1991,8 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	if (!atrk)
 		return;
 
-	rate = 11025;
-	atrk->flags = AUD_SRC8BIT | AUD_1CH | AUD_RATE11KHZ;
+	rate = 22050;
+	atrk->flags = AUD_SRC8BIT | AUD_1CH;
 	while (xsize > 7) {
 		cid = le32_to_cpu(ua32(src + 0));
 		csz = be32_to_cpu(ua32(src + 4));
@@ -2005,8 +2005,9 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 
 			if (rate == 22050 || rate == 22222)
 				atrk->flags &= ~AUD_RATE11KHZ;
-			else if (rate != 11025)
-				return;
+			else if (rate == 11025)
+				atrk->flags |= AUD_RATE11KHZ;
+
 		} else if (cid == SDAT) {
 			atrk->flags |= AUD_ALLOCATED;
 			ctx->rt.acttrks++;
