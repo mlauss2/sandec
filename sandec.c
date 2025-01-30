@@ -86,7 +86,7 @@ static inline uint32_t ua32(uint8_t *p)
 #define SZ_DELTAPAL	(768 * 2)
 #define SZ_C47IPTBL	(256 * 256)
 #define SZ_AUDIOOUT	(4096)
-#define SZ_AUDTMPBUF1	(65536)
+#define SZ_AUDTMPBUF1	(262144)
 #define SZ_ALL (SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL + SZ_AUDIOOUT + \
 		SZ_AUDTMPBUF1)
 
@@ -106,6 +106,10 @@ static inline uint32_t ua32(uint8_t *p)
 #define MAP_	0x2050414d
 #define FRMT	0x544d5246
 #define DATA	0x41544144
+#define PSAD	0x44415350
+#define SAUD	0x44554153
+#define STRK	0x4B525453
+#define SDAT	0x54414453
 
 
 /* codec47 glyhps */
@@ -176,6 +180,7 @@ struct sanrt {
 	uint16_t atrkmap[8];	/* 2 san-trkid to slot map		*/
 	uint8_t  acttrks;	/* 1 active audio tracks in this frame	*/
 	uint8_t *atmpbuf1;	/* 8 audio buffer 1			*/
+	uint8_t psadhdr;	/* 1 psad type 1 = old 2 new		*/
 };
 
 /* internal context: static stuff. */
@@ -1607,7 +1612,7 @@ static void _mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes)
 	}
 }
 
-static struct sanatrk *aud_find_trk(struct sanctx *ctx, uint16_t trkid)
+static struct sanatrk *aud_find_trk(struct sanctx *ctx, uint16_t trkid, int fail)
 {
 	struct sanrt *rt = &ctx->rt;
 	struct sanatrk *atrk;
@@ -1621,7 +1626,7 @@ static struct sanatrk *aud_find_trk(struct sanctx *ctx, uint16_t trkid)
 		if ((newid < 0) && (0 == (atrk->flags & AUD_ALLOCATED)))
 			newid = i;
 	}
-	if (newid > -1) {
+	if ((newid > -1) && (!fail)) {
 		atrk = &(rt->sanatrk[newid]);
 		atrk->rdptr = 0;
 		atrk->wrptr = 0;
@@ -1660,7 +1665,7 @@ static void iact_buffer_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	else if ((uid >= 300) && (uid <= 363))
 		trkid += 600;
 
-	atrk = aud_find_trk(ctx, trkid);
+	atrk = aud_find_trk(ctx, trkid, 0);
 	if (!atrk)
 		return;
 
@@ -1834,10 +1839,13 @@ _aud_mix_again:
 	 * queue the track buffer directly; otherwise we append to the dest
 	 * buffer.
 	 */
+	if (minlen1 == -1)
+		return;
 	if (mixable == 1) {
 		atrk1 = _aud_get_mixable(rt);
 		if (!atrk1)
 			return;
+
 		if (step == 0) {
 			aptr = atrk1->data + atrk1->rdptr;
 			dstlen += atrk1->datacnt;
@@ -1972,6 +1980,99 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
+static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
+			uint32_t saudsize, uint32_t tid)
+{
+	uint32_t cid, csz, xsize = _min(size, saudsize);
+	uint16_t rate;
+	struct sanatrk *atrk;
+
+	atrk = aud_find_trk(ctx, tid, 0);
+	if (!atrk)
+		return;
+
+	rate = 11025;
+	atrk->flags = AUD_SRC8BIT | AUD_1CH | AUD_RATE11KHZ;
+	while (xsize > 7) {
+		cid = le32_to_cpu(ua32(src + 0));
+		csz = be32_to_cpu(ua32(src + 4));
+		src += 8;
+		xsize -= 8;
+		size -= 8;
+		if (cid == STRK) {
+			if (csz >= 14)
+				rate = be16_to_cpu(*(uint16_t *)(src + 12));
+
+			if (rate == 22050 || rate == 22222)
+				atrk->flags &= ~AUD_RATE11KHZ;
+			else if (rate != 11025)
+				return;
+		} else if (cid == SDAT) {
+			atrk->flags |= AUD_ALLOCATED;
+			ctx->rt.acttrks++;
+			break;
+		}
+		src += csz;
+		xsize -= csz;
+		size -= csz;
+	}
+	if (size > 0)
+		aud_read_pcmsrc(ctx, atrk, size, src);
+}
+
+static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
+{
+	uint32_t t1, csz, tid, idx, fcnt, flag, vol, pan;
+	struct sanrt *rt = &ctx->rt;
+	struct sanatrk *atrk;
+
+	/* scummvm says there are 2 type of psad headers, the old one has
+	 * all zeroes at data offset 4
+	 */
+	if (rt->psadhdr < 1) {
+		t1 = ua32(src + 4);
+		rt->psadhdr = (t1 == 0) ? 1 : 2;
+	}
+
+	if (rt->psadhdr == 1) {
+		tid = be32_to_cpu(ua32(src + 0));
+		idx = be32_to_cpu(ua32(src + 4));
+		fcnt = be32_to_cpu(ua32(src + 8));
+		vol = 127;
+		pan = 0;
+		flag = 0;
+		src += 12;
+		size -= 12;
+	} else {
+		tid = le16_to_cpu(*(uint16_t*)(src + 0));
+		idx = le16_to_cpu(*(uint16_t*)(src + 2));
+		fcnt = le16_to_cpu(*(uint16_t*)(src + 4));
+		flag = le16_to_cpu(*(uint16_t*)(src + 6));
+		vol = src[8];
+		pan = src[9];
+		src += 10;
+		size -= 10;
+	}
+
+	if (idx == 0) {
+		t1 = le32_to_cpu(ua32(src + 0));
+		csz = be32_to_cpu(ua32(src + 4));
+		if (t1 == SAUD) {
+			handle_SAUD(ctx, size - 8, src + 8, csz, tid);
+		}
+	} else {
+		/* handle_SAUD should have allocated it */
+		atrk = aud_find_trk(ctx, tid, 1);
+		if (!atrk)
+			return;
+
+		if ((fcnt - idx) < 3)
+			atrk->flags |= AUD_SRCDONE;
+
+		aud_read_pcmsrc(ctx, atrk, size, src);
+	}
+}
+
 /* subtitles: index of message in the Outlaws LOCAL.MSG file, 10000 - 12001.
  * As long as subid is set to non-zero, the subtitle needs to be overlaid
  * over the image.  The chunk also provides hints about where to place
@@ -2059,6 +2160,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case STOR: handle_STOR(ctx, csz, src); break;
 		case FTCH: handle_FTCH(ctx, csz, src); break;
 		case XPAL: ret = handle_XPAL(ctx, csz, src); break;
+		case PSAD: handle_PSAD(ctx, csz, src); break;
 		default:   ret = 0;     /* unknown chunk, ignore */
 		}
 		/* all objects in the SAN stream are padded so their length
