@@ -27,6 +27,7 @@ Will expand with new features as I see fit.
   - q  to quit
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
   - i  to toggle frame interpolation on codec47/48 on/off
+  - s  to cycle between SDL2 texture smoothing (off/linear/best).
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
@@ -46,5 +47,5 @@ Will expand with new features as I see fit.
   - sanplay /path/to/throttle/resource/video/introd_8.san
   - sanplay /path/to/dig/dig/video/pigout.san
 
-20250130
+20250131
 

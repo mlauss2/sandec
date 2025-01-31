@@ -29,6 +29,7 @@ struct playpriv {
 	int fullscreen;
 	int nextmult;
 	int sm;
+	int texsmooth;
 };
 
 /* this can be called multiple times per "sandec_decode_next_frame()",
@@ -158,6 +159,8 @@ static int init_sdl(struct playpriv *p)
 		return 1081;
 
 	SDL_SetHint(SDL_HINT_APP_NAME, "SAN/ANIM Player");
+	p->texsmooth = 2;
+	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
 	specin.freq = 22050;
 	specin.format = AUDIO_S16;
 	specin.channels = 2;
@@ -270,6 +273,16 @@ int main(int a, char **argv)
 						pp.nextmult = ke->keysym.scancode - SDL_SCANCODE_1 + 1;
 					} else if (ke->keysym.scancode == SDL_SCANCODE_I) {
 						sio.flags ^= SANDEC_FLAG_DO_FRAME_INTERPOLATION;
+					} else if (ke->keysym.scancode == SDL_SCANCODE_S) {
+						pp.texsmooth += 1;
+						if (pp.texsmooth >= 3)
+							pp.texsmooth = 0;
+						if (pp.texsmooth == 0)
+							SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+						else if (pp.texsmooth == 1)
+							SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+						else
+							SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
 					}
 			}
 		}
