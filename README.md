@@ -21,6 +21,7 @@ Will expand with new features as I see fit.
 - Audio decoding
   - OK for COMI/Outlaws/MotS/SotE
   - alright for Full Throttle and The Dig
+    - it's far from perfect, lots of hiccups, upsampling is terrible.
 - good enough A/V sync in player
 - player keyboard controls:
   - space  pause/unpause

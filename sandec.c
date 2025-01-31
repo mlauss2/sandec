@@ -116,14 +116,13 @@ static inline uint32_t ua32(uint8_t *p)
 #define GLYPH_COORD_VECT_SIZE 16
 #define NGLYPHS 256
 
-#define AUD_ALLOCATED		(1 << 0)
+#define AUD_INUSE		(1 << 0)
 #define AUD_SRC8BIT		(1 << 1)
 #define AUD_SRC12BIT		(1 << 2)
 #define AUD_1CH			(1 << 3)
 #define AUD_RATE11KHZ		(1 << 4)
-#define AUD_DATAVALID		(1 << 5)
-#define AUD_SRCDONE		(1 << 6)
-#define AUD_MIXED		(1 << 7)
+#define AUD_SRCDONE		(1 << 5)
+#define AUD_MIXED		(1 << 6)
 
 /* audio track. 256k buffer is enough for The Dig sq1.san */
 #define ATRK_MAXWP	((1 << 18) - 26)
@@ -1441,7 +1440,7 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
-static inline void _atrk_put_sample(struct sanatrk *atrk, int16_t samp)
+static void atrk_put_sample(struct sanatrk *atrk, int16_t samp)
 {
 	int16_t *dst;
 
@@ -1454,29 +1453,50 @@ static inline void _atrk_put_sample(struct sanatrk *atrk, int16_t samp)
 	atrk->datacnt += 2;
 }
 
+/* read PCM source data, and convert it to 16bit/stereo/22kHz samplerate
+ * if necessary, to match the format of the IACT tracks of codec47/48 videos.
+ * FIXME: the "upsampling" is just doubling the samples, so super crude; best
+ * to interpolate between last generated and newly generated sample.
+ */
 static void aud_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
 			    uint32_t size, uint8_t *src)
 {
-	int16_t s1, s2;
+	uint32_t space, toend;
+	int16_t s1, s2, *dst;
 	uint8_t v[3];
-	int f, i;
+	int f, i, fast;
 
-	/* buffer audio */
 	f = atrk->flags;
-	if (!f & AUD_ALLOCATED)
+	if (!f & AUD_INUSE)
 		return;
+
+	/* calculate expected space requirements to determine if the wrptr
+	 * may wrap around, or the fast path can be used.
+	 */
+	space = size;
+	if (f & AUD_SRC12BIT)
+		space = (size + atrk->pdcnt) / 3 * 4;
+	else if (f & AUD_SRC8BIT)
+		space = size * 2;
+
+	if (f & AUD_1CH)
+		space *= 2;
+	if (f & AUD_RATE11KHZ)
+		space *= 2;
+
+	toend = ATRK_MAXWP - atrk->wrptr;
+	fast = space <= toend;
+	dst = (int16_t *)(atrk->data + atrk->wrptr);
 
 	if (0 == (f & (AUD_SRC12BIT | AUD_SRC8BIT | AUD_RATE11KHZ | AUD_1CH))) {
 		/* optimal case: 22kHz/16bit/2ch source */
-		int p1 = ATRK_MAXWP - atrk->wrptr;
 		/* handle wraparound of wrptr */
-		if (size > p1) {
-			memcpy(atrk->data + atrk->wrptr, src, p1);
-			memcpy(atrk->data, src + p1, size - p1);
+		if (size > toend) {
+			memcpy(atrk->data + atrk->wrptr, src, toend);
+			memcpy(atrk->data, src + toend, size - toend);
 		} else {
 			memcpy(atrk->data + atrk->wrptr, src, size);
 		}
-		atrk->flags |= AUD_DATAVALID;
 		atrk->datacnt += size;
 		size = 0;
 	} else if (f & AUD_SRC12BIT) {
@@ -1494,22 +1514,46 @@ static void aud_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
 			s1 = ((((v[1] & 0x0f) << 8) | v[0]) << 4) - 0x8000;
 			s2 = ((((v[1] & 0xf0) << 4) | v[2]) << 4) - 0x8000;
 			if (f & AUD_1CH) {
-				_atrk_put_sample(atrk, s1);
-				_atrk_put_sample(atrk, s1);
-				_atrk_put_sample(atrk, s2);
-				_atrk_put_sample(atrk, s2);
+				if (fast) {
+					*dst++ = s1;
+					*dst++ = s1;
+					*dst++ = s2;
+					*dst++ = s2;
+				} else {
+					atrk_put_sample(atrk, s1);
+					atrk_put_sample(atrk, s1);
+					atrk_put_sample(atrk, s2);
+					atrk_put_sample(atrk, s2);
+				}
 				if (f & AUD_RATE11KHZ) {
-					_atrk_put_sample(atrk, s1);
-					_atrk_put_sample(atrk, s1);
-					_atrk_put_sample(atrk, s2);
-					_atrk_put_sample(atrk, s2);
+					if (fast) {
+						*dst++ = s1;
+						*dst++ = s1;
+						*dst++ = s2;
+						*dst++ = s2;
+					} else {
+						atrk_put_sample(atrk, s1);
+						atrk_put_sample(atrk, s1);
+						atrk_put_sample(atrk, s2);
+						atrk_put_sample(atrk, s2);
+					}
 				}
 			} else {
-				_atrk_put_sample(atrk, s1);
-				_atrk_put_sample(atrk, s2);
+				if (fast) {
+					*dst++ = s1;
+					*dst++ = s2;
+				} else {
+					atrk_put_sample(atrk, s1);
+					atrk_put_sample(atrk, s2);
+				}
 				if (f & AUD_RATE11KHZ) {
-					_atrk_put_sample(atrk, s1);
-					_atrk_put_sample(atrk, s2);
+					if (fast) {
+						*dst++ = s1;
+						*dst++ = s2;
+					} else {
+						atrk_put_sample(atrk, s1);
+						atrk_put_sample(atrk, s2);
+					}
 				}
 			}
 		}
@@ -1521,16 +1565,32 @@ static void aud_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
 			size--;
 
 			if (f & AUD_1CH) {
-				_atrk_put_sample(atrk, s1); /* L */
-				_atrk_put_sample(atrk, s1);	/* R */
+				if (fast) {
+					*dst++ = s1;
+					*dst++ = s1;
+				} else {
+					atrk_put_sample(atrk, s1); /* L */
+					atrk_put_sample(atrk, s1);	/* R */
+				}
 				if (f & AUD_RATE11KHZ) {
-					_atrk_put_sample(atrk, s1);
-					_atrk_put_sample(atrk, s1);
+					if (fast) {
+						*dst++ = s1;
+						*dst++ = s1;
+					} else {
+						atrk_put_sample(atrk, s1);
+						atrk_put_sample(atrk, s1);
+					}
 				}
 			} else {
-				_atrk_put_sample(atrk, s1);
+				if (fast)
+					*dst++ = s1;
+				else
+					atrk_put_sample(atrk, s1);
 				if (f & AUD_RATE11KHZ) {
-					_atrk_put_sample(atrk, s1);
+					if (fast)
+						*dst++ = s1;
+					else
+						atrk_put_sample(atrk, s1);
 				}
 			}
 
@@ -1553,21 +1613,41 @@ static void aud_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
 				/* zero new data, bail */
 				return;
 			}
-			_atrk_put_sample(atrk, s1);	/* L */
-			_atrk_put_sample(atrk, s1);	/* R */
+			if (fast) {
+				*dst++ = s1;
+				*dst++ = s1;
+			} else {
+				atrk_put_sample(atrk, s1);	/* L */
+				atrk_put_sample(atrk, s1);	/* R */
+			}
 			if (f & AUD_RATE11KHZ) {
-				_atrk_put_sample(atrk, s1);
-				_atrk_put_sample(atrk, s1);
+				if (fast) {
+					*dst++ = s1;
+					*dst++ = s1;
+				} else {
+					atrk_put_sample(atrk, s1);
+					atrk_put_sample(atrk, s1);
+				}
 			}
 		}
 
 		while (size > 1) {
 			s1 = *(int16_t *)src;
-			_atrk_put_sample(atrk, s1);	/* L */
-			_atrk_put_sample(atrk, s1);	/* R */
+			if (fast) {
+				*dst++ = s1;
+				*dst++ = s1;
+			} else {
+				atrk_put_sample(atrk, s1);	/* L */
+				atrk_put_sample(atrk, s1);	/* R */
+			}
 			if (f & AUD_RATE11KHZ) {
-				_atrk_put_sample(atrk, s1);
-				_atrk_put_sample(atrk, s1);
+				if (fast) {
+					*dst++ = s1;
+					*dst++ = s1;
+				} else {
+					atrk_put_sample(atrk, s1);
+					atrk_put_sample(atrk, s1);
+				}
 			}
 			src += 2;
 			size -= 2;
@@ -1581,22 +1661,26 @@ static void aud_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
 	for (i = 0; i < size; i++)
 		atrk->pd[i] = *src++;
 
-	atrk->flags |= AUD_DATAVALID;	/* data in buffer is valid */
+	/* update track pointers, slowpath does that in atrk_put_sample() */
+	if (fast) {
+		atrk->wrptr += space;
+		if (atrk->wrptr >= ATRK_MAXWP)
+			atrk->wrptr -= ATRK_MAXWP;
+		atrk->datacnt += space;
+	}
 }
 
-static void _mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes)
+static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes)
 {
 	int16_t *src1 = (int16_t *)s1;
 	int16_t *src2 = (int16_t *)s2;
 	int16_t *dst = (int16_t *)ds1;
-	int16_t ms;
 	int d1, d2, d3;
 
 	while (bytes > 1) {
-		d1 = *src1++;
-		d2 = *src2++;
-		d1 += 32768;
-		d2 += 32768;
+		d1 = (*src1++) + 32768;	/* s16 sample to u16 */
+		d2 = (*src2++) + 32768;
+		bytes -= 2;
 
 		if (d1 < 32768 && d2 < 32768) {
 			d3 = (d1 * d2) / 32768;
@@ -1604,10 +1688,7 @@ static void _mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes)
 			d3 = (2 * (d1 + d2)) - ((d1 * d2) / 32768) - 65536;
 		}
 
-		ms = d3 - 32768;
-		*dst++ = ms;	/* write mixed sample */
-
-		bytes -= 2;
+		*dst++ = (d3 - 32768);	/* mixed u16 back to s16 and write */
 	}
 }
 
@@ -1620,9 +1701,9 @@ static struct sanatrk *aud_find_trk(struct sanctx *ctx, uint16_t trkid, int fail
 	newid = -1;
 	for (i = 0; i < ATRK_NUM; i++) {
 		atrk = &(rt->sanatrk[i]);
-		if ((atrk->flags & AUD_ALLOCATED) && (trkid == atrk->trkid))
+		if ((atrk->flags & AUD_INUSE) && (trkid == atrk->trkid))
 			return atrk;
-		if ((newid < 0) && (0 == (atrk->flags & AUD_ALLOCATED)))
+		if ((newid < 0) && (0 == (atrk->flags & AUD_INUSE)))
 			newid = i;
 	}
 	if ((newid > -1) && (!fail)) {
@@ -1671,7 +1752,7 @@ static void iact_buffer_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	/*
 	 * read header of new track. NOTE: subchunks aren't 16bit aligned!
 	 */
-	if (0 == (atrk->flags & AUD_ALLOCATED)) {
+	if (0 == (atrk->flags & AUD_INUSE)) {
 		if (size < 24)
 			return;
 		cid = le32_to_cpu(ua32(src + 0));
@@ -1724,18 +1805,18 @@ static void iact_buffer_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		if (cid != DATA)
 			return;
 
-		atrk->flags |= AUD_ALLOCATED;	/* valid track */
+		atrk->flags |= AUD_INUSE;	/* active track */
 		ctx->rt.acttrks++;
 	}
 
 	if (done)
-		atrk->flags |= AUD_SRCDONE;	/* clear track after mixing */
+		atrk->flags |= AUD_SRCDONE;	/* free track after mixing */
 
 	aud_read_pcmsrc(ctx, atrk, size, src);
 }
 
 /* count all active tracks: tracks which are still allocated */
-static int _aud_count_active(struct sanrt *rt)
+static int aud_count_active(struct sanrt *rt)
 {
 	struct sanatrk *atrk;
 	int i, active;
@@ -1743,37 +1824,37 @@ static int _aud_count_active(struct sanrt *rt)
 	active = 0;
 	for (i = 0; i < ATRK_NUM; i++) {
 		atrk = &(rt->sanatrk[i]);
-		if (AUD_ALLOCATED == (atrk->flags & (AUD_ALLOCATED)))
+		if (AUD_INUSE == (atrk->flags & (AUD_INUSE)))
 			active++;
 	}
 	return active;
 }
 
 /* count all mixable tracks, with shortest buffer size returned too */
-static int _aud_count_mixable(struct sanrt *rt, uint32_t *minlen)
+static int aud_count_mixable(struct sanrt *rt, uint32_t *minlen)
 {
 	struct sanatrk *atrk;
 	int i, mixable;
 	uint32_t ml;
 
-	ml = 0xffffffff;
+	ml = ~0;
 	mixable = 0;
 	for (i = 0; i < ATRK_NUM; i++) {
 		atrk = &(rt->sanatrk[i]);
-		if ((AUD_ALLOCATED == (atrk->flags & (AUD_ALLOCATED | AUD_MIXED)))
+		if ((AUD_INUSE == (atrk->flags & (AUD_INUSE | AUD_MIXED)))
 		    && (atrk->datacnt > 1)) {
 			mixable++;
 			if (ml > atrk->datacnt)
 				ml = atrk->datacnt;
 		}
 	}
-	if (minlen)
-		*minlen = ml;
+
+	*minlen = ml;
 	return mixable;
 }
 
 /* clear the AUD_MIXED flag from all tracks */
-static void _aud_reset_mixable(struct sanrt *rt)
+static void aud_reset_mixable(struct sanrt *rt)
 {
 	int i;
 
@@ -1782,20 +1863,20 @@ static void _aud_reset_mixable(struct sanrt *rt)
 }
 
 /* get the FIRST mixable track. */
-static struct sanatrk *_aud_get_mixable(struct sanrt *rt)
+static struct sanatrk *aud_get_mixable(struct sanrt *rt)
 {
 	struct sanatrk *atrk;
 	int i;
 	for (i = 0; i < ATRK_NUM; i++) {
 		atrk = &(rt->sanatrk[i]);
-		if ((AUD_ALLOCATED == (atrk->flags & (AUD_ALLOCATED | AUD_MIXED)))
+		if ((AUD_INUSE == (atrk->flags & (AUD_INUSE | AUD_MIXED)))
 			&& (atrk->datacnt > 1))
 			return atrk;
 	}
 	return NULL;
 }
 
-static void _aud_atrk_consume(struct sanrt *rt, struct sanatrk *atrk, uint32_t bytes)
+static void aud_atrk_consume(struct sanrt *rt, struct sanatrk *atrk, uint32_t bytes)
 {
 	atrk->datacnt -= bytes;
 	atrk->rdptr += bytes;
@@ -1811,13 +1892,24 @@ static void _aud_atrk_consume(struct sanrt *rt, struct sanatrk *atrk, uint32_t b
 		}
 	} else {
 		/* move rest to front of buffer to avoid wraparound */
-		/* XXXXXXX FIXME fix the ring buffer instead, this is EXPENSIVE */
-		memmove(atrk->data, atrk->data + atrk->rdptr, atrk->datacnt);
-		atrk->rdptr = 0;
-		atrk->wrptr = atrk->datacnt;
+		/* FIXME FIXME fix the ring buffer instead, this is EXPENSIVE */
+		if (atrk->rdptr >= atrk->datacnt) {
+			memcpy(atrk->data, atrk->data + atrk->rdptr, atrk->datacnt);
+			atrk->rdptr = 0;
+			atrk->wrptr = atrk->datacnt;
+		}
 	}
 }
 
+/* mix all of the tracks which have data available together:
+ * (1) find all ready tracks with data
+ * (2) find out which one hast the _least_ available (minlen)
+ * (3) of all tracks with data, take minlen bytes and mix them into the dest buffer
+ * (4) have any of these tracks finished (i.e. no more data incoming)
+ *	yes -> go back to (1)
+ *	no -> we're done, queue audio buffer, wait for next frame with more
+ *		track data.
+ */
 static void aud_mix_tracks(struct sanctx *ctx)
 {
 	struct sanrt *rt = &ctx->rt;
@@ -1832,43 +1924,42 @@ static void aud_mix_tracks(struct sanctx *ctx)
 
 _aud_mix_again:
 	dstptr = rt->atmpbuf1 + dstlen;
-	mixable = _aud_count_mixable(rt, &minlen1);
-	active1 = _aud_count_active(rt);
+	mixable = aud_count_mixable(rt, &minlen1);
+	active1 = aud_count_active(rt);
+
 	/* only one mixable track found.  If we haven't mixed before, we can
 	 * queue the track buffer directly; otherwise we append to the dest
 	 * buffer.
 	 */
-	if (minlen1 == -1)
-		return;
-	if (mixable == 1) {
-		atrk1 = _aud_get_mixable(rt);
+	if ((mixable == 1) && (minlen1 != ~0)){
+		atrk1 = aud_get_mixable(rt);
 		if (!atrk1)
 			return;
 
 		if (step == 0) {
 			aptr = atrk1->data + atrk1->rdptr;
 			dstlen += atrk1->datacnt;
-			_aud_atrk_consume(rt, atrk1, atrk1->datacnt);
+			aud_atrk_consume(rt, atrk1, atrk1->datacnt);
 		} else {
 			toend1 = ATRK_MAXWP - atrk1->rdptr;
 			if (toend1 <= minlen1) {
 				memcpy(dstptr, atrk1->data + atrk1->rdptr, minlen1);
-				_aud_atrk_consume(rt, atrk1, minlen1);
+				aud_atrk_consume(rt, atrk1, minlen1);
 			} else {
 				todo = minlen1;
 				memcpy(dstptr, atrk1->data + atrk1->rdptr, toend1);
-				_aud_atrk_consume(rt, atrk1, toend1);
+				aud_atrk_consume(rt, atrk1, toend1);
 				todo -= toend1;
 				memcpy(dstptr + toend1, atrk1->data + atrk1->rdptr, todo);
-				_aud_atrk_consume(rt, atrk1, todo);
+				aud_atrk_consume(rt, atrk1, todo);
 			}
 			dstlen += minlen1;
 		}
-	} else if (mixable != 0) {
+	} else if ((mixable != 0) && (minlen1 != ~0)) {
 		/* step 0: mix the first 2 tracks together */
-		atrk1 = _aud_get_mixable(rt);
+		atrk1 = aud_get_mixable(rt);
 		atrk1->flags |= AUD_MIXED;
-		atrk2 = _aud_get_mixable(rt);
+		atrk2 = aud_get_mixable(rt);
 		atrk2->flags |= AUD_MIXED;
 
 		src1 = atrk1->data + atrk1->rdptr;
@@ -1877,17 +1968,17 @@ _aud_mix_again:
 		toend2 = ATRK_MAXWP - atrk2->rdptr;
 		if (minlen1 <= toend1 && minlen1 <= toend2) {
 			/* best case: both tracks don't wrap around */
-			_mixs16(dstptr, src1, src2, minlen1);
-			_aud_atrk_consume(rt, atrk1, minlen1);
-			_aud_atrk_consume(rt, atrk2, minlen1);
+			aud_mixs16(dstptr, src1, src2, minlen1);
+			aud_atrk_consume(rt, atrk1, minlen1);
+			aud_atrk_consume(rt, atrk2, minlen1);
 		} else {
 			/* reading 'minlen' bytes would wrap one or both around */
 			todo = minlen1;
 			/* read till the first wraps around */
 			ml2 = _min(toend1, toend2);
-			_mixs16(dstptr, src1, src2, ml2);
-			_aud_atrk_consume(rt, atrk1, ml2);
-			_aud_atrk_consume(rt, atrk2, ml2);
+			aud_mixs16(dstptr, src1, src2, ml2);
+			aud_atrk_consume(rt, atrk1, ml2);
+			aud_atrk_consume(rt, atrk2, ml2);
 			src1 = atrk1->data + atrk1->rdptr;
 			src2 = atrk2->data + atrk2->rdptr;
 			toend1 -= ml2;
@@ -1896,16 +1987,16 @@ _aud_mix_again:
 			/* one toendX is now zero and wrapped around, read the
 			 * other until wrap around */
 			l3 = _max(toend1, toend2);
-			_mixs16(dstptr + ml2, src1, src2, l3);
-			_aud_atrk_consume(rt, atrk1, l3);
-			_aud_atrk_consume(rt, atrk2, l3);
+			aud_mixs16(dstptr + ml2, src1, src2, l3);
+			aud_atrk_consume(rt, atrk1, l3);
+			aud_atrk_consume(rt, atrk2, l3);
 			src1 = atrk1->data + atrk1->rdptr;
 			src2 = atrk2->data + atrk2->rdptr;
 			todo -= l3;
 			/* now the rest */
-			_mixs16(dstptr + ml2 + l3, src1, src2, todo);
-			_aud_atrk_consume(rt, atrk1, todo);
-			_aud_atrk_consume(rt, atrk2, todo);
+			aud_mixs16(dstptr + ml2 + l3, src1, src2, todo);
+			aud_atrk_consume(rt, atrk1, todo);
+			aud_atrk_consume(rt, atrk2, todo);
 		}
 
 		mixable -= 2;
@@ -1914,7 +2005,7 @@ _aud_mix_again:
 		 * in effect.
 		 */
 		while (mixable > 0) {
-			atrk1 = _aud_get_mixable(rt);
+			atrk1 = aud_get_mixable(rt);
 			if (!atrk1) {
 				mixable = 0;
 				break;
@@ -1924,16 +2015,16 @@ _aud_mix_again:
 			src2 = dstptr;
 			toend1 = ATRK_MAXWP - atrk1->rdptr;
 			if (minlen1 <= toend1) {
-				_mixs16(dstptr, src1, src2, minlen1);
-				_aud_atrk_consume(rt, atrk1, minlen1);
+				aud_mixs16(dstptr, src1, src2, minlen1);
+				aud_atrk_consume(rt, atrk1, minlen1);
 			} else {
 				todo = minlen1;
-				_mixs16(dstptr, src1, src2, toend1);
-				_aud_atrk_consume(rt, atrk1, toend1);
+				aud_mixs16(dstptr, src1, src2, toend1);
+				aud_atrk_consume(rt, atrk1, toend1);
 				todo -= toend1;
 				src1 = atrk1->data + atrk1->rdptr;
-				_mixs16(dstptr + toend1, src1, src2 + toend1, todo);
-				_aud_atrk_consume(rt, atrk1, todo);
+				aud_mixs16(dstptr + toend1, src1, src2 + toend1, todo);
+				aud_atrk_consume(rt, atrk1, todo);
 			}
 			--mixable;
 		}
@@ -1946,18 +2037,19 @@ _aud_mix_again:
 		 *  minlen has finished, and we can assume a new minlen, and
 		 * repeat this cycle, appending to dst.
 		 */
-		active2 = _aud_count_active(rt);
+		active2 = aud_count_active(rt);
 		if (active2 < active1 && active2 != 0) {
 			/* last minlen stream is finished, a new minlen
 			 * can be set and more mixing be done, need to
 			 * clear the MIXED flag from all active streams.
 			 */
-			_aud_reset_mixable(rt);
+			aud_reset_mixable(rt);
 			goto _aud_mix_again;
 		}
 	}
-	_aud_reset_mixable(rt);
-	ctx->io->queue_audio(ctx->io->userctx, aptr, dstlen);
+	aud_reset_mixable(rt);
+	if (dstlen)
+		ctx->io->queue_audio(ctx->io->userctx, aptr, dstlen);
 }
 
 static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
@@ -2008,7 +2100,7 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 				atrk->flags |= AUD_RATE11KHZ;
 
 		} else if (cid == SDAT) {
-			atrk->flags |= AUD_ALLOCATED;
+			atrk->flags |= AUD_INUSE;
 			ctx->rt.acttrks++;
 			break;
 		}
@@ -2250,7 +2342,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 
 	if (rt->version > 1) {
 		rt->framedur  =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
-		rt->framedur = 1000001 / rt->framedur;
+		rt->framedur = 1000000 / rt->framedur;
 		maxframe =       le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
 		rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
 
