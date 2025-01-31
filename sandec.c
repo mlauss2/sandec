@@ -176,8 +176,7 @@ struct sanrt {
 	uint8_t  have_itable:1;	/* 1 have c47/48 interpolation table    */
 	uint8_t  can_ipol:1;	/* 1 do an interpolation                */
 	uint8_t  have_ipframe:1;/* 1 we have an interpolated frame      */
-	struct sanatrk sanatrk[8];	/* audio tracks */
-	uint16_t atrkmap[8];	/* 2 san-trkid to slot map		*/
+	struct sanatrk sanatrk[ATRK_NUM];	/* audio tracks 	*/
 	uint8_t  acttrks;	/* 1 active audio tracks in this frame	*/
 	uint8_t *atmpbuf1;	/* 8 audio buffer 1			*/
 	uint8_t psadhdr;	/* 1 psad type 1 = old 2 new		*/
