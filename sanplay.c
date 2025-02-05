@@ -193,7 +193,7 @@ static int sio_read(void *ctx, void *dst, uint32_t size)
 int main(int a, char **argv)
 {
 	int ret, speedmode, fc, running, paused, parserdone;
-	uint64_t t1, t2, ren, dec;
+	uint64_t t1, t2, ren, dec, ptick;
 	struct playpriv pp;
 	struct sanio sio;
 	void *sanctx;
@@ -243,6 +243,7 @@ int main(int a, char **argv)
 	fc = sandec_get_framecount(sanctx);
 	running = 1;
 	paused = 0;
+	ptick = 0;
 	parserdone = 0;
 	ren = 0;
 	dec = 0;
@@ -263,7 +264,11 @@ int main(int a, char **argv)
 
 					if (ke->keysym.scancode == SDL_SCANCODE_SPACE && speedmode < 1) {
 						paused ^= 1;
+						if (!paused)
+							pp.next_disp_us += (SDL_GetTicks64() - ptick) * 1000;
 						SDL_PauseAudioDevice(pp.aud, paused);
+						if (paused)
+							ptick = SDL_GetTicks64();
 					} else if (ke->keysym.scancode == SDL_SCANCODE_Q) {
 						running = 0;
 					} else if (ke->keysym.scancode == SDL_SCANCODE_F) {
@@ -301,7 +306,7 @@ int main(int a, char **argv)
 			}
 
 			t1 = SDL_GetTicks64();
-			if (running && ((t1 * 1000) >= (pp.next_disp_us - (ren * 1000)))) {
+			if (running && (((t1 * 1000) >= (pp.next_disp_us - (ren * 1000))) || speedmode == 1)) {
 				ret = render_frame(&pp);
 				if (ret)
 					goto err;
@@ -312,7 +317,6 @@ int main(int a, char **argv)
 				ret = sandec_decode_next_frame(sanctx);
 				t2 = SDL_GetTicks64();
 				dec = (t2 - t1);
-
 err:
 				if (ret == SANDEC_DONE) {
 					parserdone = 1;
@@ -320,7 +324,7 @@ err:
 				} else if (ret != 0) {
 					running = 0;
 				}
-
+				
 				if (running) {
 					printf("\r                           ");
 					printf("\r%u/%u  %lu ms/%lu ms I:%d R:%d", sandec_get_currframe(sanctx), fc, ren, dec, !!(sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION), ret);
