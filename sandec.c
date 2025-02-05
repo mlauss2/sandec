@@ -2071,7 +2071,7 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
-static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
+static int handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			uint32_t saudsize, uint32_t tid)
 {
 	uint32_t cid, csz, xsize = _min(size, saudsize);
@@ -2080,9 +2080,9 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 
 	atrk = aud_find_trk(ctx, tid, 0);
 	if (!atrk)
-		return;
+		return 20;
 
-	rate = 22050;
+	rate = ctx->rt.samplerate;
 	atrk->flags = AUD_SRC8BIT | AUD_1CH;
 	while (xsize > 7) {
 		cid = le32_to_cpu(ua32(src + 0));
@@ -2098,6 +2098,8 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 				atrk->flags &= ~AUD_RATE11KHZ;
 			else if (rate == 11025)
 				atrk->flags |= AUD_RATE11KHZ;
+			else
+				return 21;
 
 		} else if (cid == SDAT) {
 			atrk->flags |= AUD_INUSE;
@@ -2110,14 +2112,17 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	}
 	if (size > 0)
 		aud_read_pcmsrc(ctx, atrk, size, src);
+	return 0;
 }
 
-static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
+static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	uint32_t t1, csz, tid, idx, fcnt, flag, vol, pan;
+	uint32_t t1, csz, tid, idx, fcnt/*, flag, vol, pan*/;
 	struct sanrt *rt = &ctx->rt;
 	struct sanatrk *atrk;
+	int ret;
 
+	ret = 0;
 	/* scummvm says there are 2 type of psad headers, the old one has
 	 * all zeroes at data offset 4
 	 */
@@ -2129,19 +2134,24 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	if (rt->psadhdr == 1) {
 		tid = be32_to_cpu(ua32(src + 0));
 		idx = be32_to_cpu(ua32(src + 4));
+
 		fcnt = be32_to_cpu(ua32(src + 8));
+/*
 		vol = 127;
 		pan = 0;
 		flag = 0;
+*/
 		src += 12;
 		size -= 12;
 	} else {
 		tid = le16_to_cpu(*(uint16_t*)(src + 0));
 		idx = le16_to_cpu(*(uint16_t*)(src + 2));
 		fcnt = le16_to_cpu(*(uint16_t*)(src + 4));
+/*
 		flag = le16_to_cpu(*(uint16_t*)(src + 6));
 		vol = src[8];
 		pan = src[9];
+*/
 		src += 10;
 		size -= 10;
 	}
@@ -2150,19 +2160,22 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		t1 = le32_to_cpu(ua32(src + 0));
 		csz = be32_to_cpu(ua32(src + 4));
 		if (t1 == SAUD) {
-			handle_SAUD(ctx, size - 8, src + 8, csz, tid);
+			ret = handle_SAUD(ctx, size - 8, src + 8, csz, tid);
+			if (ret)
+				return ret;
 		}
 	} else {
 		/* handle_SAUD should have allocated it */
 		atrk = aud_find_trk(ctx, tid, 1);
 		if (!atrk)
-			return;
+			return 22;
 
 		if ((fcnt - idx) < 3)
 			atrk->flags |= AUD_SRCDONE;
 
 		aud_read_pcmsrc(ctx, atrk, size, src);
 	}
+	return 0;
 }
 
 /* subtitles: index of message in the Outlaws LOCAL.MSG file, 10000 - 12001.
@@ -2252,7 +2265,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case STOR: handle_STOR(ctx, csz, src); break;
 		case FTCH: handle_FTCH(ctx, csz, src); break;
 		case XPAL: ret = handle_XPAL(ctx, csz, src); break;
-		case PSAD: handle_PSAD(ctx, csz, src); break;
+		case PSAD: ret = handle_PSAD(ctx, csz, src); break;
 		default:   ret = 0;     /* unknown chunk, ignore */
 		}
 		/* all objects in the SAN stream are padded so their length
