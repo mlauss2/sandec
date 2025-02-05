@@ -22,7 +22,8 @@ Will expand with new features as I see fit.
   - OK for COMI/Outlaws/MotS/SotE
   - alright for Full Throttle and The Dig
     - it's far from perfect, lots of hiccups, upsampling is terrible.
-- good enough A/V sync in player
+- very good A/V sync in player
+  - Outlaws IN_SHB.SAN (Level 1 Intro) the sound of the shovel hitting the ground perfectly matches the video (at around 5 minutes).
 - player keyboard controls:
   - space  pause/unpause
   - q  to quit
@@ -34,6 +35,8 @@ Will expand with new features as I see fit.
 
 # What does **not** yet work:
 - fullscreen toggle
+- Rebel Assault I/II
+  - a few RA2 videos do work but player aborts on unknown video codecs.
 
 # Build:
 - Have SDL2
@@ -48,5 +51,5 @@ Will expand with new features as I see fit.
   - sanplay /path/to/throttle/resource/video/introd_8.san
   - sanplay /path/to/dig/dig/video/pigout.san
 
-20250131
+20250205
 

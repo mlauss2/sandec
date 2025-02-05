@@ -22,7 +22,7 @@ struct playpriv {
 	uint16_t winh;
 
 	uint32_t vbufsize;
-	uint32_t frame_duration;
+	uint64_t next_disp_us;
 	unsigned char *vbuf;
 	uint16_t subid;
 	int err;
@@ -124,7 +124,7 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 	p->pxh = h;
 	p->subid = subid;
 	p->err = 0;
-	p->frame_duration = frame_duration_us;
+	p->next_disp_us += frame_duration_us;
 }
 
 static int render_frame(struct playpriv *p)
@@ -192,7 +192,7 @@ static int sio_read(void *ctx, void *dst, uint32_t size)
 
 int main(int a, char **argv)
 {
-	int ret, speedmode, dtick, fc, running, paused, parserdone;
+	int ret, speedmode, fc, running, paused, parserdone;
 	uint64_t t1, t2, ren, dec;
 	struct playpriv pp;
 	struct sanio sio;
@@ -244,7 +244,6 @@ int main(int a, char **argv)
 	running = 1;
 	paused = 0;
 	parserdone = 0;
-	dtick = 0;
 	ren = 0;
 	dec = 0;
 
@@ -252,6 +251,7 @@ int main(int a, char **argv)
 		ret = sandec_decode_next_frame(sanctx);
 	} while (ret == SANDEC_OK && speedmode == 2);
 
+	pp.next_disp_us = SDL_GetTicks64() * 1000;
 	while (running && ret == SANDEC_OK) {
 		while (0 != SDL_PollEvent(&e) && running) {
 			if (e.type == SDL_QUIT)
@@ -300,8 +300,8 @@ int main(int a, char **argv)
 				}
 			}
 
-			if (running) {
-				t1 = SDL_GetTicks64();
+			t1 = SDL_GetTicks64();
+			if (running && ((t1 * 1000) >= (pp.next_disp_us - (ren * 1000)))) {
 				ret = render_frame(&pp);
 				if (ret)
 					goto err;
@@ -322,14 +322,9 @@ err:
 				}
 
 				if (running) {
-					t1 = SDL_GetTicks64();
 					printf("\r                           ");
 					printf("\r%u/%u  %lu ms/%lu ms I:%d R:%d", sandec_get_currframe(sanctx), fc, ren, dec, !!(sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION), ret);
 					fflush(stdout);
-					t2 = SDL_GetTicks64();
-					dtick = (pp.frame_duration / 1000) - ren - dec - (t2 - t1);
-					if (speedmode < 1 && dtick > 0)
-						SDL_Delay(dtick);
 				}
 			}
 		}
