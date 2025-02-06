@@ -21,7 +21,7 @@ Will expand with new features as I see fit.
 - Audio decoding
   - OK for COMI/Outlaws/MotS/SotE
   - alright for Full Throttle and The Dig
-    - it's far from perfect, lots of hiccups, upsampling is terrible.
+    - it's far from perfect: lots of hiccups, upsampling is terrible, plays too slowly for some unknown reason.
 - very good A/V sync in player
   - Outlaws IN_SHB.SAN (Level 1 Intro) the sound of the shovel hitting the ground perfectly matches the video (at around 5 minutes).
 - player keyboard controls:
@@ -51,5 +51,5 @@ Will expand with new features as I see fit.
   - sanplay /path/to/throttle/resource/video/introd_8.san
   - sanplay /path/to/dig/dig/video/pigout.san
 
-20250205
+20250206
 

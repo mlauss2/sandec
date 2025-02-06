@@ -137,6 +137,7 @@ struct sanatrk {
 	uint32_t pdcnt;		/* count of left over bytes from prev.  */
 	uint8_t pd[4];		/* unused bytes from prev. datablock	*/
 	uint16_t trkid;		/* ID of this track			*/
+	int32_t dataleft;	/* SAUD data left until track ends	*/
 };
 
 /* internal context: per-file */
@@ -1714,6 +1715,7 @@ static struct sanatrk *aud_find_trk(struct sanctx *ctx, uint16_t trkid, int fail
 		atrk->flags = 0;
 		atrk->pdcnt = 0;
 		atrk->trkid = trkid;
+		atrk->dataleft = 0;
 		return atrk;
 	}
 	return NULL;
@@ -2103,6 +2105,7 @@ static int handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 
 		} else if (cid == SDAT) {
 			atrk->flags |= AUD_INUSE;
+			atrk->dataleft = csz;
 			ctx->rt.acttrks++;
 			break;
 		}
@@ -2110,21 +2113,24 @@ static int handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		xsize -= csz;
 		size -= csz;
 	}
-	if (size > 0)
+	if (size > 0) {
 		aud_read_pcmsrc(ctx, atrk, size, src);
+		atrk->dataleft -= size;
+	}
 	return 0;
 }
 
 static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	uint32_t t1, csz, tid, idx, fcnt/*, flag, vol, pan*/;
 	struct sanrt *rt = &ctx->rt;
+	uint32_t t1, csz, tid, idx;
 	struct sanatrk *atrk;
 	int ret;
 
 	ret = 0;
 	/* scummvm says there are 2 type of psad headers, the old one has
-	 * all zeroes at data offset 4
+	 * all zeroes at data offset 4 at index 0 (which is hopefully the first
+	 * ever PSAD block encoutered).
 	 */
 	if (rt->psadhdr < 1) {
 		t1 = ua32(src + 4);
@@ -2134,24 +2140,11 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	if (rt->psadhdr == 1) {
 		tid = be32_to_cpu(ua32(src + 0));
 		idx = be32_to_cpu(ua32(src + 4));
-
-		fcnt = be32_to_cpu(ua32(src + 8));
-/*
-		vol = 127;
-		pan = 0;
-		flag = 0;
-*/
 		src += 12;
 		size -= 12;
 	} else {
 		tid = le16_to_cpu(*(uint16_t*)(src + 0));
 		idx = le16_to_cpu(*(uint16_t*)(src + 2));
-		fcnt = le16_to_cpu(*(uint16_t*)(src + 4));
-/*
-		flag = le16_to_cpu(*(uint16_t*)(src + 6));
-		vol = src[8];
-		pan = src[9];
-*/
 		src += 10;
 		size -= 10;
 	}
@@ -2170,10 +2163,10 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		if (!atrk)
 			return 22;
 
-		if ((fcnt - idx) < 3)
-			atrk->flags |= AUD_SRCDONE;
-
 		aud_read_pcmsrc(ctx, atrk, size, src);
+		atrk->dataleft -= size;
+		if (atrk->dataleft < 1)
+			atrk->flags |= AUD_SRCDONE;
 	}
 	return 0;
 }
