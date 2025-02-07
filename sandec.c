@@ -1369,7 +1369,7 @@ static inline uint8_t _u8clip(int a)
 	else return a;
 }
 
-static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
+static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	const uint16_t cmd = be16_to_cpu(*(uint16_t *)(src + 2));
 	uint32_t *pal = ctx->rt.palette;
@@ -1395,10 +1395,7 @@ static int handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		memcpy(ctx->rt.deltapal, src, 768 * 2);
 		if (size > (768 * 2 + 4))	/* cmd 2 */
 			read_palette(ctx, src + (768 * 2));
-	} else {
-		return 13;		/*  unknown XPAL cmd */
 	}
-	return 0;
 }
 
 static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
@@ -2266,7 +2263,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case TRES: handle_TRES(ctx, csz, src); break;
 		case STOR: handle_STOR(ctx, csz, src); break;
 		case FTCH: handle_FTCH(ctx, csz, src); break;
-		case XPAL: ret = handle_XPAL(ctx, csz, src); break;
+		case XPAL: handle_XPAL(ctx, csz, src); break;
 		case PSAD: ret = handle_PSAD(ctx, csz, src); break;
 		default:   ret = 0;     /* unknown chunk, ignore */
 		}
