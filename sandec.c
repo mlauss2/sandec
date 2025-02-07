@@ -2098,10 +2098,8 @@ static int handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 
 			if (rate == 22050 || rate == 22222)
 				atrk->flags &= ~AUD_RATE11KHZ;
-			else if (rate == 11025)
+			else	/* HACK ALERT FIXME: rate conversion required */
 				atrk->flags |= AUD_RATE11KHZ;
-			else
-				return 21;
 
 		} else if (cid == SDAT) {
 			atrk->flags |= AUD_INUSE;
@@ -2116,6 +2114,8 @@ static int handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	if (size > 0) {
 		aud_read_pcmsrc(ctx, atrk, size, src);
 		atrk->dataleft -= size;
+		if (atrk->dataleft < 0)
+			atrk->flags |= AUD_SRCDONE;
 	}
 	return 0;
 }
