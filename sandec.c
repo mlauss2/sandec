@@ -172,6 +172,7 @@ struct sanrt {
 	uint32_t samplerate;	/* 4 audio samplerate in Hz		*/
 	uint16_t FRMEcnt;	/* 2 number of FRMEs in SAN		*/
 	uint16_t version;	/* 2 SAN version number			*/
+	uint8_t  have_vdims:1;	/* 1 we have valid video dimensions	*/
 	uint8_t  have_frame:1;	/* 1 we have a valid video frame	*/
 	uint8_t  have_itable:1;	/* 1 have c47/48 interpolation table    */
 	uint8_t  can_ipol:1;	/* 1 do an interpolation                */
@@ -1257,52 +1258,70 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	codec = src[0];
 	param = src[1];
 
-	left   = le16_to_cpu(*(int16_t *)(src + 2));
-	top    = le16_to_cpu(*(int16_t *)(src + 4));
-	w = wr = le16_to_cpu(*(uint16_t *)(src + 6));
-	h = hr = le16_to_cpu(*(uint16_t *)(src + 8));
+	left = le16_to_cpu(*( int16_t *)(src + 2));
+	top  = le16_to_cpu(*( int16_t *)(src + 4));
+	w    = le16_to_cpu(*(uint16_t *)(src + 6));
+	h    = le16_to_cpu(*(uint16_t *)(src + 8));
 	param2 = le16_to_cpu(*(uint16_t *)(src + 12));
 
 	align = (codec == 37) ? 4 : 2;
 	align = (codec == 48) ? 8 : align;
 
-	/* ignore too small dimensions in first frames, happens with some
-	 * Full Throttle videos
+	/* ignore nonsensical dimensions in first frames, happens with
+	 * some Full Throttle and RA2 videos.
 	 */
-	if (!rt->fbsize && (w < align || h < align))
+	if ((w < align) || (h < align) || (w > 640) || (h > 480))
 		return 0;
 
-	/* there are some odd-sized frames in RA1, but all seem to work on
-	 * a 320x200 buffer.  Pass 320x200 to the buffer allocator.
-	 * Need also to set a separate pitch since most of the codec1-33 videos
-	 * work on parts of the image and have their dimensions and origin set
-	 * to that part.
-	 */
-	if (rt->version < 2 && (w < 320 || h < 200) && (top == 0) && left == 0) {
-		wr = 320;
-		hr = 200;
-		rt->pitch = 320;
-	}
-
-	/* disable left/top for codec47/48 videos.  Except for SotE, none use
+	/* disable left/top for codec37/47/48 videos.  Except for SotE, none use
 	 * it, and SotE uses it as a hack to get "widescreen" aspect, i.e. it's
 	 * just a black bar of 60 pixels heigth at the top.
 	 */
-	if (codec == 47 || codec == 48) {
-		rt->pitch = w;
+	if (codec == 37 || codec == 47 || codec == 48)
 		left = top = 0;
-	}
 
-	if (rt->pitch == 0 && w >= 300)
-		rt->pitch = w;
+	/* decide on a buffer size */
+	if (!rt->have_vdims) {
+		/* for ANIMv0/v1 (i.e. Rebel Assault 1) just create a 320x200
+		 * buffer.
+		 */
+		if (rt->version < 2) {
+			rt->have_vdims = 1;
+			wr = 320;
+			hr = 200;
+			rt->pitch = 320;
+			rt->frmw = 320;
+			rt->frmh = 200;
+		} else if (codec == 37 || codec == 47 || codec == 48) {
+			/* these codecs work on whole frames, trust their dimensions */
+			rt->have_vdims = 1;
+			wr = w;
+			hr = h;
+			rt->pitch = w;
+			rt->frmw = w;
+			rt->frmh = h;
+		} else {
+			/* don't know (yet) */
+			if ((left == 0) && (top == 0) && (w >= 200) && (h >= 100))
+				rt->have_vdims = 1; /* *looks* legit */
+
+			wr = w + left;
+			hr = h + top;
+			rt->pitch = w;
+			rt->frmw = w;
+			rt->frmh = h;
+		}
+		ret = fobj_alloc_buffers(rt, wr, hr, 1, align);
+		if (ret)
+			return ret;
+	}
 
 	ret = 0;
-	if ((rt->bufw < (left + wr)) || (rt->bufh < (top + hr))) {
-		ret = fobj_alloc_buffers(rt, _max(rt->bufw, left + wr),
-					 _max(rt->bufh, top + hr), 1, align);
+	if ((rt->have_vdims && ((w > rt->bufw) || (h > rt->bufh))) || (!rt->fbsize)) {
+		ret = fobj_alloc_buffers(rt, w, h, 1, align);
+		if (ret != 0)
+			return ret;
 	}
-	if (ret != 0)
-		return ret;
 
 	/* default image buffer is buf0 */
 	rt->vbuf = rt->buf0;
@@ -1319,17 +1338,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	if (ret == 0) {
 		ctx->rt.have_frame = 1;
 
-		/* trust the dimensions in the v2 videos; for older assume 320x200 as
-		 * the final dimensions.
-		 * FIXME: May need to be revisited for RA/RA2.
-		 */
-		if (rt->version > 1) {
-			rt->frmw = _max(rt->frmw, w);
-			rt->frmh = _max(rt->frmh, h);
-		} else {
-			rt->frmw = 320;
-			rt->frmh = 200;
-
+		if (rt->version < 2) {
 			/* that few stupid Full Throttle videos which are slightly
 			 * larger but still have the 320x200 visible area.
 			 * Concatenate the visible image area to 320x200 in the
