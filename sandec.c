@@ -126,8 +126,8 @@ static inline uint32_t ua32(uint8_t *p)
 
 /* audio track. 256k buffer is enough for The Dig sq1.san */
 #define ATRK_MAXWP	((1 << 18) - 26)
-/* 8 seems enough for The Dig */
-#define ATRK_NUM	8
+/* 16 seems required for some RA1/RA2 files */
+#define ATRK_NUM	16
 struct sanatrk {
 	uint8_t data[ATRK_MAXWP];/* 22,05kHz signed 16bit 2ch audio data	*/
 	uint32_t rdptr;
@@ -192,6 +192,11 @@ struct sanctx {
 	/* codec47 static data */
 	int8_t c47_glyph4x4[NGLYPHS][16];
 	int8_t c47_glyph8x8[NGLYPHS][64];
+	uint8_t c4tbl[2][256][16];
+	uint8_t c5tbl[2][256][16];
+	uint8_t c23lut[256];
+	uint8_t c45tbl1[768];
+	uint8_t c45tbl2[0x8000];
 };
 
 /* Codec37/Codec48 motion vectors */
@@ -503,6 +508,104 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 	}
 }
 
+static void c4_make_tiles(struct sanctx *ctx, uint8_t val)
+{
+	uint16_t v1, v2, v3, v4, v6;
+	uint8_t *dst000, *dst128;
+	int i, j, idx;
+
+	for (i = 1; i < 16; i += 2) {
+		v1 = (i + val) & 0xff;
+		for (j = 0; j < 16; j++) {
+			idx = ((i/2)*16) + j;
+			dst000 = &(ctx->c4tbl[0][idx +   0][0]);
+			dst128 = &(ctx->c4tbl[0][idx + 128][0]);
+			v2 = (j + val) & 0xff;
+			v6 = (val + ((i + j) >> 1)) & 0xff;
+			if ((v6 == v1) || (v6 == v2)) {
+				dst000[ 0] = v2; dst000[ 1] = v1; dst000[ 2] = v2; dst000[ 3] = v1;
+				dst000[ 4] = v1; dst000[ 5] = v2; dst000[ 6] = v1; dst000[ 7] = v1;
+				dst000[ 8] = v2; dst000[ 9] = v1; dst000[10] = v2; dst000[11] = v1;
+				dst000[12] = v2; dst000[13] = v2; dst000[14] = v1; dst000[15] = v2;
+
+				dst128[ 0] = v1; dst128[ 1] = v1; dst128[ 2] = v2; dst128[ 3] = v1;
+				dst128[ 4] = v1; dst128[ 5] = v1; dst128[ 6] = v1; dst128[ 7] = v2;
+				dst128[ 8] = v2; dst128[ 9] = v1; dst128[10] = v2; dst128[11] = v2;
+				dst128[12] = v1; dst128[13] = v2; dst128[14] = v1; dst128[15] = v2;
+			} else {
+				v3 = ((v6 + v1) >> 1) & 0xff;
+				v4 = ((v6 + v2) >> 1) & 0xff;
+				dst000[ 0] = v6; dst000[ 1] = v6; dst000[ 2] = v3; dst000[ 3] = v1;
+				dst000[ 4] = v6; dst000[ 5] = v6; dst000[ 6] = v3; dst000[ 7] = v1;
+				dst000[ 8] = v4; dst000[ 9] = v4; dst000[10] = v6; dst000[11] = v3;
+				dst000[12] = v2; dst000[13] = v2; dst000[14] = v4; dst000[15] = v6;
+
+				dst128[ 0] = v1; dst128[ 1] = v1; dst128[ 2] = v3; dst128[ 3] = v2;
+				dst128[ 4] = v1; dst128[ 5] = v1; dst128[ 6] = v3; dst128[ 7] = v2;
+				dst128[ 8] = v3; dst128[ 9] = v3; dst128[10] = v2; dst128[11] = v4;
+				dst128[12] = v2; dst128[13] = v2; dst128[14] = v4; dst128[15] = v2;
+			}
+		}
+	}
+}
+
+static void c5_make_tiles(struct sanctx *ctx, uint8_t val)
+{
+	uint8_t *dst000, *dst064, *dst128, *dst192;
+	int i, j, my, mx, m0, m1, m2;
+
+	for (i = 0; i < 8; i++) {
+		my = (i + val) & 0xff;
+		for (j = 0; j < 8; j++) {
+			mx = (j + val) & 0xff;
+			m0 = (val + ((i + j) / 2)) & 0xff;
+			m1 = ((m0 + my) / 2) & 0xff;
+			m2 = ((m0 + mx) / 2) & 0xff;
+
+			dst000 = &(ctx->c5tbl[0][i * 8 + j +   0][0]);
+			dst064 = &(ctx->c5tbl[0][i * 8 + j +  64][0]);
+			dst128 = &(ctx->c5tbl[0][i * 8 + j + 128][0]);
+			dst192 = &(ctx->c5tbl[0][i * 8 + j + 192][0]);
+
+			*dst000++ = m0; *dst000++ = m0; *dst000++ = m1; *dst000++ = my;
+			*dst000++ = m0; *dst000++ = m0; *dst000++ = m1; *dst000++ = my;
+			*dst000++ = m2; *dst000++ = m2; *dst000++ = m0; *dst000++ = m1;
+			*dst000++ = mx; *dst000++ = mx; *dst000++ = m2; *dst000++ = m0;
+
+			*dst064++ = my; *dst064++ = my; *dst064++ = my; *dst064++ = my;
+			*dst064++ = m0; *dst064++ = m0; *dst064++ = m0; *dst064++ = m0;
+			*dst064++ = m2; *dst064++ = m2; *dst064++ = m2; *dst064++ = m2;
+			*dst064++ = mx; *dst064++ = mx; *dst064++ = mx; *dst064++ = mx;
+
+			*dst128++ = my; *dst128++ = my; *dst128++ = m1; *dst128++ = m0;
+			*dst128++ = my; *dst128++ = my; *dst128++ = m1; *dst128++ = m0;
+			*dst128++ = m1; *dst128++ = m1; *dst128++ = m0; *dst128++ = m2;
+			*dst128++ = m0; *dst128++ = m0; *dst128++ = m2; *dst128++ = mx;
+
+			*dst192++ = my; *dst192++ = m0; *dst192++ = m2; *dst192++ = mx;
+			*dst192++ = my; *dst192++ = m0; *dst192++ = m2; *dst192++ = mx;
+			*dst192++ = my; *dst192++ = m0; *dst192++ = m2; *dst192++ = mx;
+			*dst192++ = my; *dst192++ = m0; *dst192++ = m2; *dst192++ = mx;
+		}
+	}
+}
+
+
+static uint8_t *c4_5_load_tiles(struct sanctx *ctx, uint8_t *src, uint16_t cnt, int five)
+{
+	uint8_t c, *g;
+	int i, j;
+
+	for (i = 0; i < cnt; i++) {
+		g = five ? &(ctx->c5tbl[1][i][0]) : &(ctx->c4tbl[1][i][0]);
+		for (j = 0; j < 16; j += 2) {
+			c = *src++;
+			g[j] = c >> 4;
+			g[j+1] = c & 0xf;
+		}
+	}
+	return src;
+}
 
 /******************************************************************************/
 
@@ -1157,29 +1260,343 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 
 /******************************************************************************/
 
+static void codec45(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		    int16_t top, int16_t left, uint16_t size, uint8_t param,
+		    uint16_t param2)
+{
+	uint8_t *tbl1 = ctx->c45tbl1, *tbl2 = ctx->c45tbl2, b2, *dst;
+	const uint16_t pitch = ctx->rt.pitch;
+	uint16_t t1, c1, c2, w1, w2, w3;
+	int32_t xoff, yoff;
+	int16_t xd;
+	int8_t b1;
+	int i;
+
+	/* RA2 FUN_00032b00 */
+	if (src[4] != 1)
+		return;
+
+	t1 = *(uint16_t *)(src + 2);
+	if (t1 == 0) {
+
+		memcpy(tbl1, src + 6, 0x300);
+		src += 0x306;
+		size -= 0x306;
+		i = 0;
+		do {
+			b2 = *src++;
+			while (b2 != 0) {
+				++i;
+				tbl2[i] = *src;
+				--b2;
+			}
+			src++;
+			size -= 2;
+		} while (i < 0x8000);
+	}
+
+	/* RA2 FUN_000523ea */
+	xoff = left;	/* XXX: unsure! */
+	yoff = top;	/* XXX: unsure! */
+	dst = ctx->rt.buf0;
+
+	while (size > 3) {
+		xd = le16_to_cpu(*(int16_t *)(src + 0));
+		b1 = src[2];
+		b2 = src[3];
+		src += 4;
+
+#if 0 // the following is wrong wrt. coordinates. FIXME: re-read disassembly.
+		xoff += xd;
+		yoff += b1;
+
+		dst = ctx->rt.buf0 + (yoff * pitch) + xoff;
+		while (b2 > 0) {
+			if (xoff > 0 && yoff > 0 && xoff < ctx->rt.bufw) {
+				if (yoff >= ctx->rt.bufh) {
+					return;
+				}
+
+				/* this looks like an early version of codec47
+				 * interpolation table system:
+				 * get the values of the 4 surrounding pixels,
+				 * sum up their color components (tbl1) and then
+				 * find an entry in tbl2 for a matching pixel.
+				 */
+				c1 = *(dst - 1) * 3; /* 0 - 765 */
+				c2 = *(dst + 1) * 3;
+				w1 = *(tbl1 + c1 + 0) + *(tbl1 + c2 + 0);
+				w2 = *(tbl1 + c1 + 1) + *(tbl1 + c2 + 1);
+				w3 = *(tbl1 + c1 + 2) + *(tbl1 + c2 + 2);
+				c1 = *(dst - pitch) * 3;
+				c1 = *(dst + pitch) * 3;
+				w1 += *(tbl1 + c1 + 0) + *(tbl1 + c2 + 0);
+				w2 += *(tbl1 + c1 + 1) + *(tbl1 + c2 + 1);
+				w3 += *(tbl1 + c1 + 2) + *(tbl1 + c2 + 2);
+				*dst = *(tbl2 + ((((w1 << 5) & 0x7c00) + (w2 & 0x3e0) + (w3 >> 5)) & 0x7fff));
+			}
+			b2--;
+			xoff++;
+			dst++;
+		}
+#endif
+		size -= 4;
+	}
+}
+
+/******************************************************************************/
+
+static void codec23(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		    int16_t top, int16_t left, uint16_t size, uint8_t param,
+		    int16_t param2)
+{
+	uint8_t c, *dst = ctx->rt.buf0, lut[256];
+	const uint16_t pitch = ctx->rt.pitch;
+	const uint32_t maxpxo = pitch * ctx->rt.bufh;
+	int skip, i, j, k, pc;
+	int32_t pxoff;
+
+	if (ctx->rt.version < 2) {
+		/* RA1 */
+		j = (param >= 0x30) ? param - 0x30 : 255 - (0x30 - param);
+		for (i = 0; i < 256; i++)
+			lut[i] = (i + j) & 0xff;
+	} else {
+		/* RA2 FUN_00032350: first c23 has this LUT (param2 == 256),
+		 * later frames reuse it (param2 == 257). param2 < 256 indicates
+		 * this is a delta value to apply to the color instead.
+		 */
+		if (param2 == 256) {
+			memcpy(ctx->c23lut, src, 256);
+			src += 256;
+			size -= 256;
+		} else if (param2 < 256) {
+			/* create a lut with constant delta */
+			for (i = 0; i < 256; i++)
+				lut[i] = (i + param2) & 0xff;
+		} else {
+			memcpy(lut, ctx->c23lut, 256);
+		}
+		if (size < 1)
+			return;
+	}
+
+	for (i = 0; i < h; i++) {
+		pxoff = ((top + i) * pitch) + left;
+		k = le16_to_cpu(ua16(src));
+		src += 2;
+		skip = 1;
+		pc = 0;
+		while (k > 0 && pc <= w) {
+			j = *src++;
+			if (!skip) {
+				while (j--) {
+					if (pxoff >= 0 && pxoff < maxpxo) {
+						c = *(dst + pxoff);
+						*(dst + pxoff) = lut[c];
+					}
+					pxoff += 1;
+					pc += 1;
+				}
+			} else {
+				pxoff += j;
+				pc += j;
+			}
+			skip ^= 1;
+		}
+	}
+}
+
+static void codec21(struct sanctx *ctx, uint8_t *src1, uint16_t w, uint16_t h,
+		    int16_t top, int16_t left, uint16_t size, uint8_t param)
+{
+	const uint16_t pitch = ctx->rt.pitch;
+	int i, y, len, skip;
+	uint8_t c, *dst, *nsrc, *src = src1;
+	uint16_t ls, offs;
+	int32_t dstoff, maxoff = pitch * ctx->rt.bufh;
+
+	/* FIXME: this seems to only work with RA2, but NOT RA1 */
+	nsrc = src;
+	dst = ctx->rt.buf0;
+	for (y = 0; y < h; y++) {
+		if (size < 2)
+			break;
+		dstoff = left + ((top + y) * pitch);
+		src = nsrc;
+		ls = le16_to_cpu(ua16(src));
+		src += 2;
+		size -= 2;
+		if (ls > size)
+			break;
+		nsrc = src + ls;
+		len = 0;
+		skip = 1;
+		while (size > 0 && ls > 0 && len <= w) {
+			offs = le16_to_cpu(ua16(src));
+			src += 2;
+			size -= 2;
+			ls -= 2;
+			if (skip) {
+				/* FIXME: seems wrong, but makes a good picture.
+				 * in RA2 05PLAY.SAN, the enemy Tie Fighters
+				 * are rendered first, the codec21 image is
+				 * rendered last.  This here then overdraws all
+				 * of those Ties.  If we skip properly, then we get
+				 * tearing but visible Tie Fighters.
+				 * It's as if the C21 is meant as first FOBJ
+				 * frame of the next FRME...
+				 */
+#if 1
+				for (i = 0; i < offs; i++) {
+					*(dst + dstoff) = 0;
+					dstoff++;
+					len++;
+				}
+#else
+				dstoff += offs;
+				len += offs;
+#endif
+			} else {
+				for (i = 0; i <= offs; i++) {
+					c = *src++;
+					size--;
+					ls--;
+					*(dst + dstoff) = c;
+					dstoff++;
+					len++;
+				}
+			}
+			skip ^= 1;
+		}
+	}
+}
+
+static void codec5(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left, uint32_t size, uint8_t param,
+		   uint16_t param2)
+{
+	uint8_t mask, bits, idx, *gs, *dst = ctx->rt.buf0;
+	const uint32_t maxpxo = ctx->rt.fbsize;
+	const uint16_t pitch = ctx->rt.pitch;
+	int32_t dstoff, dstoff2;
+	int i, j, k, l, bit;
+
+	c5_make_tiles(ctx, param);
+	if (param2 > 0)
+		src = c4_5_load_tiles(ctx, src, param2, 1);
+
+	for (j = 0; j < w; j += 4) {
+		mask = bits = 0;
+		for (i = 0; i < h; i += 4) {
+			dstoff = ((top + i) * pitch) + left + j;	/* curr. block offset */
+			if (param2 != 0) {
+				if (bits == 0) {
+					mask = *src++;
+					bits = 8;
+				}
+				bit = !!(mask & 0x80);
+				mask <<= 1;
+				bits -= 1;
+			} else {
+				bit = 0;
+			}
+
+			/* find the 4x4 block in the table and render it */
+			idx = *src++;
+			gs = &(ctx->c5tbl[bit][idx][0]);
+			for (k = 0; k < 4; k++) {
+				dstoff2 = dstoff + (k * pitch);
+				for (l = 0; l < 4; l++, gs++) {
+					if (((dstoff2 + l) > 0) && ((dstoff2 + l) < maxpxo))
+						*(dst + dstoff2 + l) = *gs;
+				}
+			}
+		}
+	}
+}
+
+static void codec4(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left, uint32_t size, uint8_t param,
+		   uint16_t param2)
+{
+	uint8_t mask, bits, idx, *gs, *dst = ctx->rt.buf0;
+	const uint32_t maxpxo = ctx->rt.fbsize;
+	const uint16_t pitch = ctx->rt.pitch;
+	int32_t dstoff, dstoff2;
+	int16_t xoff, yoff;
+	int i, j, k, l, bit;
+
+	c4_make_tiles(ctx, param);
+	if (param2 > 0)
+		src = c4_5_load_tiles(ctx, src, param2, 0);
+
+	xoff = left;
+	yoff = top;
+	for (j = 0; j < w; j += 4) {
+		mask = bits = 0;
+		for (i = 0; i < h; i += 4) {
+			dstoff = ((top + i) * pitch) + left + j;	/* curr. block offset */
+			if (param2 > 0) {
+				if (bits == 0) {
+					mask = *src++;
+					bits = 8;
+				}
+				bit = !!(mask & 0x80);
+				mask <<= 1;
+				bits -= 1;
+			} else {
+				bit = 0;
+			}
+
+			idx = *src++;
+			if (!bit && idx == 0x80)
+				continue;
+			gs = &(ctx->c4tbl[bit][idx][0]);
+
+			/* find the 4x4 block in the table and render it */
+			for (k = 0; k < 4; k++) {
+				dstoff2 = dstoff + (k * pitch);
+				for (l = 0; l < 4; l++, gs++) {
+					if ((dstoff2 + l) > 0 && (dstoff2 + l) < maxpxo)
+						*(dst + dstoff2 + l) = *gs;
+				}
+			}
+		}
+	}
+}
+
 static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
-		   int16_t top, int16_t left)
+		   int16_t top, int16_t left, uint32_t size, int transp)
 {
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
 	int i, j;
 
-	for (i = 0; i < h; i++) {
+	for (i = 0; i < h && size > 1; i++) {
 		dst = ctx->rt.buf0 + ((top + i) * ctx->rt.pitch) + left;
-		dlen = le16_to_cpu(ua16(src)); src += 2;
-		while (dlen > 0) {
-			code = *src++; dlen--;
+		dlen = le16_to_cpu(ua16(src));
+		src += 2;
+		size -= 2;
+		while (dlen && size) {
+			code = *src++;
+			dlen--;
+			if (--size < 1)
+				return;
 			rlen = (code >> 1) + 1;
 			if (code & 1) {
-				col = *src++; dlen--;
-				if (col)
+				col = *src++;
+				dlen--;
+				size--;
+				if (col || !transp)
 					for (j = 0; j < rlen; j++)
 						*(dst + j) = col;
 				dst += rlen;
 			} else {
-				for (j = 0; j < rlen; j++) {
+				for (j = 0; j < rlen && size; j++) {
 					col = *src++;
-					if (col)
+					size--;
+					if (col || !transp)
 						*dst = col;
 					dst++;
 				}
@@ -1187,6 +1604,39 @@ static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 			}
 		}
 	}
+}
+
+static void codec2(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left, uint32_t size, uint8_t param,
+		   uint16_t param2)
+{
+	const uint32_t maxpxo = ctx->rt.fbsize;
+	const uint16_t pitch = ctx->rt.pitch;
+	uint8_t c, *dst = ctx->rt.buf1;
+	int16_t xpos, ypos, xoff, yoff;
+	int32_t pxoff;
+
+	/* RA2 FUN_00031a10 */
+	if (param2 != 0) {
+		codec1(ctx, src, w, h, left, top, size, 1);
+		return;
+	}
+
+	xpos = left;
+	ypos = top;
+	while (size > 3) {
+		xoff = *(int16_t *)src; src += 2;
+		yoff = *src++;
+		c = *src++;
+		size -= 4;
+
+		xpos += xoff;
+		ypos += yoff;
+		pxoff = (ypos * pitch) + xpos;
+		if (pxoff >= 0 && pxoff < maxpxo)
+			*(dst + pxoff) = c;
+	}
+
 }
 
 /******************************************************************************/
@@ -1267,11 +1717,18 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	align = (codec == 37) ? 4 : 2;
 	align = (codec == 48) ? 8 : align;
 
-	/* ignore nonsensical dimensions in first frames, happens with
+	/* ignore nonsensical dimensions in frames, happens with
 	 * some Full Throttle and RA2 videos.
+	 * Do pass the data to codec45 though, it might have the tabledata in it!
 	 */
-	if ((w < align) || (h < align) || (w > 640) || (h > 480))
-		return 0;
+	if ((w < align) || (h < align) || (w > 640) || (h > 480)) {
+		if (codec == 45) {
+			codec45(ctx, src + 14, 0, 0, 0, 0, size - 14, param, param2);
+			return 0;
+		}
+		if (!rt->have_vdims)
+			return 0;
+	}
 
 	/* disable left/top for codec37/47/48 videos.  Except for SotE, none use
 	 * it, and SotE uses it as a hack to get "widescreen" aspect, i.e. it's
@@ -1282,38 +1739,49 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	/* decide on a buffer size */
 	if (!rt->have_vdims) {
-		/* for ANIMv0/v1 (i.e. Rebel Assault 1) just create a 320x200
-		 * buffer.
-		 */
-		if (rt->version < 2) {
-			rt->have_vdims = 1;
-			wr = 320;
-			hr = 200;
-			rt->pitch = 320;
-			rt->frmw = 320;
-			rt->frmh = 200;
-		} else if (codec == 37 || codec == 47 || codec == 48) {
-			/* these codecs work on whole frames, trust their dimensions */
+		if (codec == 37 || codec == 47 || codec == 48) {
+			/* these codecs work on whole frames, trust their dimensions.
+			 * some FT videos have SANM version 0/1 instead 2 though
+			 */
 			rt->have_vdims = 1;
 			wr = w;
 			hr = h;
 			rt->pitch = w;
 			rt->frmw = w;
 			rt->frmh = h;
+		} else  if (rt->version < 2) {
+			/* RA1: 384x242 or 320x200 */
+			if ((left + w == 384) && (top + h == 242)) {
+				wr = 384;
+				hr = 242;
+			} else {
+				wr = 320;
+				hr = 200;
+			}
+			rt->have_vdims = 1;
+			rt->pitch = wr;
+			rt->frmw = wr;
+			rt->frmh = hr;
 		} else {
 			/* don't know (yet) */
-			if ((left == 0) && (top == 0) && (w >= 200) && (h >= 100))
+			if ((left == 0) && (top == 0) && (w >= 320) && (h >= 200)
+			    && !(w & 1) && !(h & 1))
 				rt->have_vdims = 1; /* *looks* legit */
 
 			wr = w + left;
 			hr = h + top;
-			rt->pitch = w;
-			rt->frmw = w;
-			rt->frmh = h;
+			if ((wr == 424) && (hr == 260))
+				rt->have_vdims = 1;	/* RA2 frame size */
+
+			rt->pitch = wr;
+			rt->frmw = wr;
+			rt->frmh = hr;
 		}
-		ret = fobj_alloc_buffers(rt, wr, hr, 1, align);
-		if (ret)
-			return ret;
+		if (!rt->fbsize || (wr > rt->bufw) || (hr > rt->bufh)) {
+			ret = fobj_alloc_buffers(rt, wr, hr, 1, align);
+			if (ret)
+				return ret;
+		}
 	}
 
 	ret = 0;
@@ -1326,12 +1794,21 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	/* default image buffer is buf0 */
 	rt->vbuf = rt->buf0;
 
+	src += 14;
+	size -= 14;
+
 	switch (codec) {
 	case 1:
-	case 3: codec1(ctx, src + 14, w, h, top, left); break;
-	case 37:ret = codec37(ctx, src + 14, w, h, top, left); break;
-	case 47:ret = codec47(ctx, src + 14, w, h); break;
-	case 48:ret = codec48(ctx, src + 14, w, h); break;
+	case 3:   codec1(ctx, src, w, h, top, left, size, (codec == 1)); break;
+	case 2:   codec2(ctx, src, w, h, top, left, size, param, param2); break;
+	case 4:   codec4(ctx, src, w, h, top, left, size, param, param2); break;
+	case 5:   codec5(ctx, src, w, h, top, left, size, param, param2); break;
+	case 21: codec21(ctx, src, w, h, top ,left, size, param); break;
+	case 23: codec23(ctx, src, w, h, top, left, size, param, param2); break;
+	case 37:ret = codec37(ctx, src, w, h, top, left); break;
+	case 45: codec45(ctx, src, w, h, top, left, size, param, param2); break;
+	case 47:ret = codec47(ctx, src, w, h); break;
+	case 48:ret = codec48(ctx, src, w, h); break;
 	default: ret = 10;
 	}
 
@@ -2215,11 +2692,11 @@ static void handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			dst = ctx->rt.buf0;
 			for (i = 0; i < ctx->rt.bufh; i++) {
 				ry = (yoff + i) * ctx->rt.pitch;
-				if (ry < 0 || ry > ctx->rt.bufh)
+				if (ry < 0 || ry >= ctx->rt.bufh)
 					continue;
 				for (j = 0; j < ctx->rt.bufw; j++) {
 					rx = xoff + j;
-					if (rx < 0 || rx > ctx->rt.bufw)
+					if (rx < 0 || rx >= ctx->rt.bufw)
 						continue;
 					*(dst + ry + rx) = *(db + i * ctx->rt.pitch + j);
 				}
