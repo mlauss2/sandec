@@ -36,7 +36,7 @@ Will expand with new features as I see fit.
 # What does **not** yet work:
 - fullscreen toggle
 - Rebel Assault I/II
-  - a few RA2 videos do work but player aborts on unknown video codecs.
+  - all codecs used in RA1/RA2 are implemented, but the results look sometimes terrible.
 
 # Build:
 - Have SDL2
@@ -51,5 +51,5 @@ Will expand with new features as I see fit.
   - sanplay /path/to/throttle/resource/video/introd_8.san
   - sanplay /path/to/dig/dig/video/pigout.san
 
-20250206
+20250210
 
