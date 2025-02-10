@@ -26,6 +26,7 @@ Will expand with new features as I see fit.
   - Outlaws IN_SHB.SAN (Level 1 Intro) the sound of the shovel hitting the ground perfectly matches the video (at around 5 minutes).
 - player keyboard controls:
   - space  pause/unpause
+  - p  to toggle pause-at-every-frame
   - q  to quit
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
   - i  to toggle frame interpolation on codec47/48 on/off
@@ -43,13 +44,8 @@ Will expand with new features as I see fit.
 - run "make"
 
 # Use:
-- invoke with SAN file name:
-  - sanplay /path/to/Outlaws/OP_CR.SAN
-  - sanplay /path/to/SOTE/L00INTRO.SAN
-  - sanplay /path/to/COMI/OPENING.SAN
-  - sanplay /path/to/JKM/Resource/VIDEO/FINALE.SAN
-  - sanplay /path/to/throttle/resource/video/introd_8.san
-  - sanplay /path/to/dig/dig/video/pigout.san
+- sanplay <filename> [speedmode]
+  - speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
 20250210
 

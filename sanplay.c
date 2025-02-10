@@ -192,7 +192,7 @@ static int sio_read(void *ctx, void *dst, uint32_t size)
 
 int main(int a, char **argv)
 {
-	int ret, speedmode, fc, running, paused, parserdone;
+	int ret, speedmode, fc, running, paused, parserdone, autopause;
 	uint64_t t1, t2, ren, dec, ptick;
 	struct playpriv pp;
 	struct sanio sio;
@@ -201,7 +201,7 @@ int main(int a, char **argv)
 
 	if (a < 2) {
 		printf("usage: %s <file.san/.anm> [speedmode]\n speedmode ", argv[0]);
-		printf("1: ignore frametime, 2 don't render audio/video\n");
+		printf("1: ignore frametime, 2 don't render audio/video, 3 autopause\n");
 		return 1;
 	}
 
@@ -227,6 +227,13 @@ int main(int a, char **argv)
 		if (ret)
 			goto out;
 	}
+
+	autopause = 0;
+	if (speedmode == 3) {
+		speedmode = 0;
+		autopause = 1;
+	}
+
 	pp.sm = speedmode;
 	sio.ioread = sio_read;
 	sio.userctx = &pp;
@@ -269,12 +276,14 @@ int main(int a, char **argv)
 						SDL_PauseAudioDevice(pp.aud, paused);
 						if (paused)
 							ptick = SDL_GetTicks64();
+					} else if (ke->keysym.scancode == SDL_SCANCODE_P) {
+						autopause ^= 1;
 					} else if (ke->keysym.scancode == SDL_SCANCODE_Q) {
 						running = 0;
 					} else if (ke->keysym.scancode == SDL_SCANCODE_F) {
 						pp.fullscreen ^= 1;
 					} else if ((ke->keysym.scancode >= SDL_SCANCODE_1) &&
-					    (ke->keysym.scancode <= SDL_SCANCODE_6)) {
+						   (ke->keysym.scancode <= SDL_SCANCODE_6)) {
 						pp.nextmult = ke->keysym.scancode - SDL_SCANCODE_1 + 1;
 					} else if (ke->keysym.scancode == SDL_SCANCODE_I) {
 						sio.flags ^= SANDEC_FLAG_DO_FRAME_INTERPOLATION;
@@ -324,11 +333,15 @@ err:
 				} else if (ret != 0) {
 					running = 0;
 				}
-				
+
 				if (running) {
-					printf("\r                           ");
-					printf("\r%u/%u  %lu ms/%lu ms I:%d R:%d", sandec_get_currframe(sanctx), fc, ren, dec, !!(sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION), ret);
+					printf("\33[2K\r%4u/%4u  %lu ms/%lu ms I:%d S:%d P:%d  R:%d", sandec_get_currframe(sanctx), fc, ren, dec, !!(sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION), pp.texsmooth, autopause, ret);
 					fflush(stdout);
+				}
+				if (autopause) {
+					paused = 1;
+					SDL_PauseAudioDevice(pp.aud, paused);
+					ptick = SDL_GetTicks64();
 				}
 			}
 		}
