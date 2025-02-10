@@ -1358,9 +1358,8 @@ static void codec23(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 
 	if (ctx->rt.version < 2) {
 		/* RA1 */
-		j = (param >= 0x30) ? param - 0x30 : 255 - (0x30 - param);
 		for (i = 0; i < 256; i++)
-			lut[i] = (i + j) & 0xff;
+			lut[i] = (i + param + 0xd0) & 0xff;
 	} else {
 		/* RA2 FUN_00032350: first c23 has this LUT (param2 == 256),
 		 * later frames reuse it (param2 == 257). param2 < 256 indicates
