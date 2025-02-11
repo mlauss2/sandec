@@ -1264,6 +1264,7 @@ static void codec45(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		    int16_t top, int16_t left, uint16_t size, uint8_t param,
 		    uint16_t param2)
 {
+#if 0 /* disabled because I'm conviced it doesn't work at all */
 	uint8_t *tbl1 = ctx->c45tbl1, *tbl2 = ctx->c45tbl2, b2, *dst;
 	const uint16_t pitch = ctx->rt.pitch;
 	uint16_t t1, c1, c2, w1, w2, w3;
@@ -1296,26 +1297,38 @@ static void codec45(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	}
 
 	/* RA2 FUN_000523ea */
-	xoff = left;	/* XXX: unsure! */
-	yoff = top;	/* XXX: unsure! */
 	dst = ctx->rt.buf0;
 
+	xoff = left;
+	yoff = top;
+
+	/* the following is a literal C translation of the assembly of
+	 * RA2 0005245e - 00052603.  The data coming in from the codec
+	 * datastream keeps xoff and yoff 99,9% of the time outside the
+	 * visible area, with xoff quickly getting up to 50000
+	 * It's only used in the RA2 xxRETRY.SAN videos and only in
+	 * the iris-out shot during the first 10-20 frames, but I cannot see
+	 * its effects in RA2 either.
+	 * Also in the original EXE, this codec references areas which are only
+	 * ever read by this codec code, but they seem to be never written to
+	 * in the first place.
+	 */
 	while (size > 3) {
 		xd = le16_to_cpu(*(int16_t *)(src + 0));
-		b1 = src[2];
-		b2 = src[3];
-		src += 4;
-
-#if 0 // the following is wrong wrt. coordinates. FIXME: re-read disassembly.
+		src += 2;
 		xoff += xd;
-		yoff += b1;
+		dst += xd;
 
-		dst = ctx->rt.buf0 + (yoff * pitch) + xoff;
-		while (b2 > 0) {
-			if (xoff > 0 && yoff > 0 && xoff < ctx->rt.bufw) {
-				if (yoff >= ctx->rt.bufh) {
+		b1 = *src++;
+		yoff += b1;
+		dst += b1 * pitch;
+
+		b2 = *src++;
+
+		do {
+			if (xoff >=0 && yoff >= 0 && xoff < ctx->rt.frmw) {
+				if (yoff >= ctx->rt.frmh)
 					return;
-				}
 
 				/* this looks like an early version of codec47
 				 * interpolation table system:
@@ -1335,13 +1348,15 @@ static void codec45(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 				w3 += *(tbl1 + c1 + 2) + *(tbl1 + c2 + 2);
 				*dst = *(tbl2 + ((((w1 << 5) & 0x7c00) + (w2 & 0x3e0) + (w3 >> 5)) & 0x7fff));
 			}
-			b2--;
 			xoff++;
 			dst++;
-		}
-#endif
+			b2--;
+		} while (b2 > 0);
+		dst--;
+		xoff--;
 		size -= 4;
 	}
+#endif
 }
 
 /******************************************************************************/
