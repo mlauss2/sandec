@@ -1507,7 +1507,7 @@ static void codec5(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 			for (k = 0; k < 4; k++) {
 				dstoff2 = dstoff + (k * pitch);
 				for (l = 0; l < 4; l++, gs++) {
-					if (((dstoff2 + l) > 0) && ((dstoff2 + l) < maxpxo))
+					if (((dstoff2 + l) >= 0) && ((dstoff2 + l) < maxpxo))
 						*(dst + dstoff2 + l) = *gs;
 				}
 			}
@@ -1557,7 +1557,7 @@ static void codec4(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 			for (k = 0; k < 4; k++) {
 				dstoff2 = dstoff + (k * pitch);
 				for (l = 0; l < 4; l++, gs++) {
-					if ((dstoff2 + l) > 0 && (dstoff2 + l) < maxpxo)
+					if ((dstoff2 + l) >= 0 && (dstoff2 + l) < maxpxo)
 						*(dst + dstoff2 + l) = *gs;
 				}
 			}
