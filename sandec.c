@@ -1625,16 +1625,19 @@ static void codec2(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		   uint16_t param2)
 {
 	const uint32_t maxpxo = ctx->rt.fbsize;
-	const uint16_t pitch = ctx->rt.pitch;
+	uint16_t pitch = ctx->rt.pitch;
 	uint8_t c, *dst = ctx->rt.buf1;
 	int16_t xpos, ypos, xoff, yoff;
 	int32_t pxoff;
 
 	/* RA2 FUN_00031a10 */
-	if (param2 != 0) {
+	if (param2 != 0 && ctx->rt.version == 2) {
 		codec1(ctx, src, w, h, left, top, size, 1);
 		return;
 	}
+	/* ASSALT13.exe 11145-1114f: pitch is hardcoded to 320 */
+	if (ctx->rt.version < 2)
+		pitch = 320;
 
 	xpos = left;
 	ypos = top;
