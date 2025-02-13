@@ -1832,19 +1832,19 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	if (ret == 0) {
 		ctx->rt.have_frame = 1;
 
-		if (rt->version < 2) {
-			/* that few stupid Full Throttle videos which are slightly
-			 * larger but still have the 320x200 visible area.
-			 * Concatenate the visible image area to 320x200 in the
-			 * STOR buffer.
-			 */
-			if (w > 320 && w < 400 && h > 200 && h < 250) {
-				int i, j;
-				for (i = 0; i < 200; i++)
-					for (j = 0; j < 320; j++)
-						*(rt->buf3 + (i * 320) + j) = *(rt->vbuf + (i * w) + j);
-				rt->vbuf = rt->buf3;
-			}
+		/* that few stupid Full Throttle videos which are slightly
+		 * larger but still have the 320x200 visible area.
+		 * Concatenate the visible image area to 320x200 in the
+		 * STOR buffer.
+		 */
+		if (w == 384 && h == 242 && rt->version == 0) {
+			int i, j;
+			for (i = 0; i < 200; i++)
+				for (j = 0; j < 320; j++)
+					*(rt->buf3 + (i * 320) + j) = *(rt->vbuf + (i * w) + j);
+			rt->vbuf = rt->buf3;
+			rt->frmw = 320;
+			rt->frmh = 200;
 		}
 	}
 
