@@ -1,9 +1,12 @@
-Single-file A/V decoder library for LucasArts Outlaws game "SAN"/SMUSH movie files,
+Single-file A/V decoder library for LucasArts SAN/SMUSH movie files (originally
+intended only to play "Outlaws" videos, since they are awesome),
 with a simple SDL2-based player application to demonstrate library use.
 
 Can also play game movies from Curse of Monkey Island, Shadows of the Empire,
-Mysteries of the Sith, The Dig and Full Throttle.
-Will expand with new features as I see fit.
+Mysteries of the Sith, The Dig, Full Throttle.  Some of Rebel Assault 1 and most
+of Rebel Assault II.
+
+If you find this useful, I'd be very happy if you dropped me a line!
 
 # What works:
 - Linux/Unix.
@@ -17,7 +20,7 @@ Will expand with new features as I see fit.
   - Full Throttle
   - The Dig
 - Video decoding works for all SMUSH codec1/codec37/codec47/codec48 videos
-  - frame interpolation for codec47/48 videos (default off).
+  - frame interpolation for codec47/48 videos (default on).
 - Audio decoding
   - OK for COMI/Outlaws/MotS/SotE
   - alright for Full Throttle and The Dig
@@ -36,8 +39,9 @@ Will expand with new features as I see fit.
 
 # What does **not** yet work:
 - fullscreen toggle
+- PSAD/iMUSE audio is still very imperfect (All titles up to inclunding The Dig)
 - Rebel Assault I/II
-  - all codecs used in RA1/RA2 are implemented, but the results look sometimes terrible.
+  - all codecs used in RA1/RA2 are implemented, but the results look terrible. More reversing work is underway.
 
 # Build:
 - Have SDL2
@@ -47,5 +51,5 @@ Will expand with new features as I see fit.
 - sanplay <filename> [speedmode]
   - speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-20250210
+20250213
 
