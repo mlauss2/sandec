@@ -196,6 +196,7 @@ int main(int a, char **argv)
 	uint64_t t1, t2, ren, dec, ptick;
 	struct playpriv pp;
 	struct sanio sio;
+	int64_t delt;
 	void *sanctx;
 	SDL_Event e;
 
@@ -315,7 +316,8 @@ int main(int a, char **argv)
 			}
 
 			t1 = SDL_GetTicks64();
-			if (running && (((t1 * 1000) >= (pp.next_disp_us - (ren * 1000))) || speedmode == 1)) {
+			delt = pp.next_disp_us - (ren * 1000) - (t1 * 1000);
+			if (running && ((delt <= 0) || speedmode == 1)) {
 				ret = render_frame(&pp);
 				if (ret)
 					goto err;
@@ -343,6 +345,8 @@ err:
 					SDL_PauseAudioDevice(pp.aud, paused);
 					ptick = SDL_GetTicks64();
 				}
+			} else if (delt > 5000) {
+				SDL_Delay(5);
 			}
 		}
 	}
