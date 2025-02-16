@@ -29,6 +29,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Outlaws IN_SHB.SAN (Level 1 Intro) the sound of the shovel hitting the ground perfectly matches the video (at around 5 minutes).
 - player keyboard controls:
   - space  pause/unpause
+  - f  to toggle fullscreen/windowed
   - p  to toggle pause-at-every-frame
   - q  to quit
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
@@ -38,7 +39,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - BE targets are untested, there are probably issues with the audio format and palette.
 
 # What does **not** yet work:
-- fullscreen toggle
 - PSAD/iMUSE audio is still very imperfect (All titles up to inclunding The Dig)
 - Rebel Assault I/II
   - all codecs used in RA1/RA2 are implemented, but the results look terrible. More reversing work is underway.
@@ -51,5 +51,5 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - sanplay <filename> [speedmode]
   - speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-20250213
+20250216
 

@@ -15,6 +15,8 @@ struct playpriv {
 	SDL_Renderer *ren;
 	SDL_Window *win;
 	SDL_AudioDeviceID aud;
+	SDL_Rect dr;
+	SDL_Rect *drp;
 
 	uint16_t pxw;
 	uint16_t pxh;
@@ -27,7 +29,9 @@ struct playpriv {
 	uint16_t subid;
 	int err;
 	int fullscreen;
+	int rcc;
 	int nextmult;
+	int prevmult;
 	int sm;
 	int texsmooth;
 };
@@ -52,7 +56,7 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 	SDL_Palette *pal;
 	SDL_Surface *sur;
 	SDL_Texture *tex;
-	int ret, nw, nh;
+	int ret, nw, nh, fw, fh, xd, yd;
 
 	if (p->err || p->sm == 2)
 		return;
@@ -65,25 +69,70 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 			p->err = 1100;
 			return;
 		}
+		SDL_SetRenderDrawColor(p->ren, 0, 0, 0, 0);
 		SDL_SetWindowTitle(p->win, "SAN/ANIM Player");
 		p->winw = w;
 		p->winh = h;
+		if (p->nextmult == 0)
+			p->nextmult = 1;
 	}
 
 	if (p->winw < w || p->winh < h) {
 		SDL_SetWindowSize(p->win, w, h);
 		p->winw = w;
 		p->winh = h;
+		if (p->nextmult == 0)
+			p->nextmult = 1;
 	}
 
-	if (p->nextmult) {
+_nmult:
+	if (p->nextmult > 0) {
+		p->prevmult = p->nextmult;
 		nw = w * p->nextmult;
 		nh = h * p->nextmult;
 		p->nextmult = 0;
+		if (p->fullscreen) {
+			SDL_SetWindowFullscreen(p->win, 0);
+			p->fullscreen = 0;
+		}
+
 		if ((p->winw != nw) || (p->winh != nh)) {
 			SDL_SetWindowSize(p->win, nw, nh);
 			p->winw = nw;
 			p->winh = nh;
+		}
+		p->drp = NULL;
+	}
+	if (p->nextmult < 0) {
+		p->nextmult = 0;
+		if (!p->fullscreen) {
+			SDL_SetWindowFullscreen(p->win, SDL_WINDOW_FULLSCREEN_DESKTOP);
+			p->fullscreen = 1;
+			p->rcc = 3;
+			SDL_GetWindowSize(p->win, &fw, &fh);
+			xd = (fw * 1024) / w;
+			yd = (fh * 1024) / h;
+			if (xd == yd) {
+				p->drp = NULL;
+			} else  if (xd >= yd) {
+				p->dr.h = fh;
+				p->dr.y = 0;
+				p->dr.w = (w * fh) / h;
+				p->dr.x = (fw - p->dr.w) / 2;
+				p->drp = &p->dr;
+			} else {
+				p->dr.w = fw;
+				p->dr.x = 0;
+				p->dr.h = (h * fw) / w;
+				p->dr.y = (fh - p->dr.h) / 2;
+				p->drp = &p->dr;
+			}
+
+		} else {
+			SDL_SetWindowFullscreen(p->win, 0);
+			p->nextmult = p->prevmult;
+			p->fullscreen = 0;
+			goto _nmult;
 		}
 	}
 
@@ -112,7 +161,15 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 		p->err = 1104;
 		return;
 	}
-	ret = SDL_RenderCopy(p->ren, tex, NULL, NULL);
+
+	/* clear all render buffers, otherwise there will be a copy of the last
+	 * windowed image at the top left.  Unfortunately no way to clear them
+	 * all with a single call, so have to flip a few times to get them all.
+	 */
+	if (p->fullscreen && p->rcc--)
+		SDL_RenderClear(p->ren);
+
+	ret = SDL_RenderCopy(p->ren, tex, NULL, p->drp);
 	if (ret) {
 		p->err = 1003;
 		return;
@@ -160,6 +217,7 @@ static int init_sdl(struct playpriv *p)
 
 	SDL_SetHint(SDL_HINT_APP_NAME, "SAN/ANIM Player");
 	p->texsmooth = 2;
+	p->prevmult = 1;
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
 	specin.freq = 22050;
 	specin.format = AUDIO_S16;
@@ -282,7 +340,7 @@ int main(int a, char **argv)
 					} else if (ke->keysym.scancode == SDL_SCANCODE_Q) {
 						running = 0;
 					} else if (ke->keysym.scancode == SDL_SCANCODE_F) {
-						pp.fullscreen ^= 1;
+						pp.nextmult = -1;
 					} else if ((ke->keysym.scancode >= SDL_SCANCODE_1) &&
 						   (ke->keysym.scancode <= SDL_SCANCODE_6)) {
 						pp.nextmult = ke->keysym.scancode - SDL_SCANCODE_1 + 1;
