@@ -30,6 +30,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - player keyboard controls:
   - space  pause/unpause
   - f  to toggle fullscreen/windowed
+  - n  to play next video in list
   - p  to toggle pause-at-every-frame
   - q  to quit
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
@@ -48,8 +49,10 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - run "make"
 
 # Use:
-- sanplay <filename> [speedmode]
-  - speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
+- sanplay [-f] [-v] [-[0..3]] <file1.san/anm> [file2.san] [file3.san]...
+  - -f: start fullscreen
+  - -v: be verbose
+  - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
 20250216
 
