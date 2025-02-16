@@ -85,24 +85,6 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 			p->nextmult = 1;
 	}
 
-_nmult:
-	if (p->nextmult > 0) {
-		p->prevmult = p->nextmult;
-		nw = w * p->nextmult;
-		nh = h * p->nextmult;
-		p->nextmult = 0;
-		if (p->fullscreen) {
-			SDL_SetWindowFullscreen(p->win, 0);
-			p->fullscreen = 0;
-		}
-
-		if ((p->winw != nw) || (p->winh != nh)) {
-			SDL_SetWindowSize(p->win, nw, nh);
-			p->winw = nw;
-			p->winh = nh;
-		}
-		p->drp = NULL;
-	}
 	if (p->nextmult < 0) {
 		p->nextmult = 0;
 		if (!p->fullscreen) {
@@ -132,8 +114,25 @@ _nmult:
 			SDL_SetWindowFullscreen(p->win, 0);
 			p->nextmult = p->prevmult;
 			p->fullscreen = 0;
-			goto _nmult;
 		}
+	}
+
+	if (p->nextmult > 0) {
+		p->prevmult = p->nextmult;
+		nw = w * p->nextmult;
+		nh = h * p->nextmult;
+		p->nextmult = 0;
+		if (p->fullscreen) {
+			SDL_SetWindowFullscreen(p->win, 0);
+			p->fullscreen = 0;
+		}
+
+		if ((p->winw != nw) || (p->winh != nh)) {
+			SDL_SetWindowSize(p->win, nw, nh);
+			p->winw = nw;
+			p->winh = nh;
+		}
+		p->drp = NULL;
 	}
 
 	sur = SDL_CreateRGBSurfaceWithFormatFrom(vdata, w, h, 8, w, SDL_PIXELFORMAT_INDEX8);
