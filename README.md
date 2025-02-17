@@ -49,10 +49,11 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - run "make"
 
 # Use:
-- sanplay [-f] [-v] [-[0..3]] <file1.san/anm> [file2.san] [file3.san]...
+- sanplay [-f] [-v] [-s] [-[0..3]] <file1.san/anm> [file2.san] [file3.san]...
   - -f: start fullscreen
   - -v: be verbose
+  - -s: no audio (silent)
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-20250216
+20250217
 

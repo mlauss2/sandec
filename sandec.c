@@ -2504,6 +2504,9 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	uint16_t p[7];
 	int i;
 
+	if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
+		return;
+
 	for (i = 0; i < 7; i++)
 		p[i] = le16_to_cpu(*(uint16_t*)(src + (i<<1)));
 
@@ -2573,6 +2576,9 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	int ret;
 
 	ret = 0;
+	if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
+		return 0;
+
 	/* scummvm says there are 2 type of psad headers, the old one has
 	 * all zeroes at data offset 4 at index 0 (which is hopefully the first
 	 * ever PSAD block encoutered).
@@ -2748,7 +2754,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		}
 
 		/* mix multi-track audio and queue it up */
-		if (rt->acttrks)
+		if (rt->acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO))
 			aud_mix_tracks(ctx);
 
 		rt->to_store = 0;

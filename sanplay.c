@@ -255,8 +255,8 @@ int main(int a, char **argv)
 	sdl_inited = 0;
 
 	if (a < 2) {
-		printf("usage: %s [-f] [-v] [-[0..3]] <file.san/.anm> [file2.san] [file3.san] ...\n", argv[0]);
-		printf(" -f  start fullscreen\n -v be verbose\n -0..3 speedmode\n");
+		printf("usage: %s [-f] [-v] [-s] [-[0..3]] <file.san/.anm> [file2.san] [file3.san] ...\n", argv[0]);
+		printf(" -f  start fullscreen\n -v be verbose\n -s no audio\n -0..3 speedmode\n");
 		return 1001;
 	}
 
@@ -288,8 +288,9 @@ int main(int a, char **argv)
 			while (i--) {
 				switch(c[1]) {
 				case '0': case '1': case '2': case '3': speedmode = c[1] - '0'; break;
-				case 'f':	pp.nextmult = -1; break;
-				case 'v':	verbose++; break;
+				case 'f': pp.nextmult = -1; break;
+				case 'v': verbose++; break;
+				case 's': sio.flags |= SANDEC_FLAG_NO_AUDIO; break;
 				}
 				c++;
 				if (speedmode == 2)
