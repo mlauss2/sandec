@@ -80,17 +80,6 @@ static inline uint32_t ua32(uint8_t *p)
 
 #endif
 
-/* sizes of various internal static buffers */
-#define SZ_IACT		(4096)
-#define SZ_PAL		(256 * 4)
-#define SZ_DELTAPAL	(768 * 2)
-#define SZ_C47IPTBL	(256 * 256)
-#define SZ_AUDIOOUT	(4096)
-#define SZ_AUDTMPBUF1	(262144)
-#define SZ_ALL (SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL + SZ_AUDIOOUT + \
-		SZ_AUDTMPBUF1)
-
-
 /* chunk identifiers LE */
 #define ANIM	0x4d494e41
 #define AHDR	0x52444841
@@ -111,11 +100,26 @@ static inline uint32_t ua32(uint8_t *p)
 #define STRK	0x4B525453
 #define SDAT	0x54414453
 
+/* maximum image size */
+#define VID_MAXX	800
+#define VID_MAXY	600
+
+/* sizes of various internal work buffers */
+#define SZ_IACT		(4096)
+#define SZ_PAL		(256 * 4)
+#define SZ_DELTAPAL	(768 * 2)
+#define SZ_C47IPTBL	(256 * 256)
+#define SZ_AUDTMPBUF1	(262144)
+#define SZ_BUFS (SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL + \
+SZ_AUDTMPBUF1)
+
 
 /* codec47 glyhps */
 #define GLYPH_COORD_VECT_SIZE 16
 #define NGLYPHS 256
 
+
+/* PSAD/iMUS multistream audio track */
 #define AUD_INUSE		(1 << 0)
 #define AUD_SRC8BIT		(1 << 1)
 #define AUD_SRC12BIT		(1 << 2)
@@ -125,13 +129,13 @@ static inline uint32_t ua32(uint8_t *p)
 #define AUD_MIXED		(1 << 6)
 
 /* audio track. 256k buffer is enough for The Dig sq1.san */
-#define ATRK_MAXWP	((1 << 18) - 26)
+#define ATRK_MAXWP	(1 << 18)
 /* 16 seems required for some RA1/RA2 files */
 #define ATRK_NUM	16
 struct sanatrk {
-	uint8_t data[ATRK_MAXWP];/* 22,05kHz signed 16bit 2ch audio data	*/
-	uint32_t rdptr;
-	uint32_t wrptr;
+	uint8_t *data;		/* 22,05kHz signed 16bit 2ch audio data	*/
+	uint32_t rdptr;		/* read pointer				*/
+	uint32_t wrptr;		/* write pointer			*/
 	uint32_t datacnt;	/* currently held data in buffer	*/
 	uint32_t flags;		/* track flags				*/
 	uint32_t pdcnt;		/* count of left over bytes from prev.  */
@@ -151,7 +155,6 @@ struct sanrt {
 	uint8_t *buf4;		/* 8 last full frame for interpolation  */
 	uint8_t *buf5;		/* 8 interpolated frame                 */
 	uint8_t *vbuf;		/* 8 final image buffer passed to caller*/
-	uint8_t *abuf;		/* 8 audio output buffer		*/
 	uint16_t pitch;		/* 2 image pitch			*/
 	uint16_t bufw;		/* 2 alloc'ed buffer width/pitch	*/
 	uint16_t bufh;		/* 2 alloc'ed buffer height		*/
@@ -166,7 +169,6 @@ struct sanrt {
 	uint8_t *c47ipoltbl;	/* 8 c47 interpolation table Compression 1 */
 	int16_t  *deltapal;	/* 8 768x 16bit for XPAL chunks		*/
 	uint32_t *palette;	/* 8 256x ABGR				*/
-	uint8_t  *buf;		/* 8 fb baseptr				*/
 	uint32_t fbsize;	/* 4 size of the framebuffers		*/
 	uint32_t framedur;	/* 4 standard frame duration		*/
 	uint32_t samplerate;	/* 4 audio samplerate in Hz		*/
@@ -838,12 +840,11 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 	ctx->rt.have_itable = 1;
 }
 
-static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
+static void codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 {
 	uint8_t *insrc = src, *dst, comp, newrot, flag;
 	uint32_t decsize;
 	uint16_t seq;
-	int ret;
 
 	seq =    le16_to_cpu(*(uint16_t *)(src + 0));
 	comp =   src[2];
@@ -864,7 +865,6 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 		src += 0x8080;
 	}
 
-	ret = 0;
 	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0:	memcpy(dst, src, w * h); break;
@@ -885,8 +885,6 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 	ctx->rt.lastseq = seq;
 	if (seq > 1)
 		ctx->rt.can_ipol = 1;
-
-	return ret;
 }
 
 /******************************************************************************/
@@ -1035,11 +1033,10 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 	uint8_t comp, flag, *dst;
 	uint32_t pktsize, decsize;
 	uint16_t seq;
-	int ret;
 
 	comp =	src[0];		/* subcodec */
 	if (src[1] != 1)	/* mvec table variant, always 1 with MotS */
-		return 26;
+		return 22;
 
 	seq = le16_to_cpu(*(uint16_t*)(src + 2));
 
@@ -1068,7 +1065,6 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 		src += 0x8080;
 	}
 
-	ret = 0;
 	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0:	memcpy(dst, src, pktsize); break;
@@ -1083,7 +1079,7 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 	ctx->rt.lastseq = seq;
 	c47_swap_bufs(ctx, 1);	/* swap 0 and 2 */
 
-	return ret;
+	return 0;
 }
 
 /******************************************************************************/
@@ -1215,12 +1211,11 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	uint8_t comp, mvidx, flag, *dst, *db;
 	uint32_t decsize;
 	uint16_t seq;
-	int ret;
 
 	comp = src[0];
 	mvidx = src[1];
 	if (mvidx > 2)
-		return 18;
+		return 21;
 	seq = le16_to_cpu(*(uint16_t *)(src + 2));
 	decsize = le32_to_cpu(ua32(src + 4));
 	flag = src[12];
@@ -1228,9 +1223,8 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	if (decsize > ctx->rt.fbsize)
 		decsize = ctx->rt.fbsize;
 
-	if (comp == 0 || comp == 2) {
+	if (comp == 0 || comp == 2)
 		memset(ctx->rt.buf2, 0, decsize);
-	}
 
 	/* Codec37's  buffers are private, no other codec must touch them.
 	 * Therefore we operate on buf1/buf2 rather than buf0/buf2, since
@@ -1246,7 +1240,6 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	}
 
 	src += 16;
-	ret = 0;
 	dst = ctx->rt.buf1 + (top * w) + left;
 	db = ctx->rt.buf2 + (top * w) + left;
 
@@ -1265,7 +1258,7 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	memcpy(ctx->rt.buf0, ctx->rt.buf1, ctx->rt.fbsize);
 	ctx->rt.lastseq = seq;
 
-	return ret;
+	return 0;
 }
 
 /******************************************************************************/
@@ -1668,66 +1661,10 @@ static void codec2(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 
 /******************************************************************************/
 
-static int fobj_alloc_buffers(struct sanrt *rt, uint16_t w, uint16_t h, uint8_t bpp, unsigned align)
-{
-	uint16_t wb, hb;
-	uint32_t bs, fbs;
-	uint8_t *b;
-
-	if (align > 1) {
-		/* align sizes */
-		align -= 1;
-		wb = (w + align) & ~align;
-		hb = (h + align) & ~align;
-	} else {
-		wb = w;
-		hb = h;
-	}
-
-	/* don't support strides different from image width (yet) */
-	if (wb != w) {
-		return 50;
-	}
-
-	/* we require up to 3 buffers the size of the image.
-	 * a front buffer + 2 work buffers,  a buffer used to store
-	 * the frontbuffer on "STOR" and an 2 intermediate buffers for
-	 * interpolated frames (c47/c48 videos only).
-	 *
-	 * Then we need a "guard band" before and after the buffers for motion
-	 * vectors that point outside the defined video area, esp. for codec37
-	 * and codec48.  32 lines (max of mvec tables) is enough to get rid of
-	 * all tiny artifacts.
-	 */
-	bs = wb * hb * bpp;		/* block-aligned 8 bit sizes */
-	bs = (bs + 0xfff) & ~0xfff;	/* align to 4K */
-	fbs = bs * 6 + (wb * 32 * 4);	/* 4 buffers, 4 guard "bands" */
-	b = (uint8_t *)malloc(fbs);
-	if (!b)
-		return 51;
-	memset(b, 0, fbs);	/* clear everything including the guard bands */
-
-	if (rt->buf)
-		free(rt->buf);
-
-	rt->buf = b;
-	rt->buf0 = b + (wb * 32);	/* leave a guard band for motion vectors */
-	rt->buf1 = rt->buf0 + (wb * 32) + bs;
-	rt->buf2 = rt->buf1 + (wb * 32) + bs;
-	rt->buf3 = rt->buf2 + (wb * 32) + bs;
-	rt->buf4 = rt->buf3 + bs;
-	rt->buf5 = rt->buf4 + bs;
-	rt->fbsize = w * h * bpp;	/* image size reported to caller */
-	rt->bufw = w;			/* buffer (aligned) width */
-	rt->bufh = h;
-
-	return 0;
-}
-
 static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
-	uint16_t w, h, wr, hr, align, param2;
+	uint16_t w, h, wr, hr, param2;
 	uint8_t codec, param;
 	int16_t left, top;
 	int ret;
@@ -1737,18 +1674,15 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	left = le16_to_cpu(*( int16_t *)(src + 2));
 	top  = le16_to_cpu(*( int16_t *)(src + 4));
-	w    = le16_to_cpu(*(uint16_t *)(src + 6));
-	h    = le16_to_cpu(*(uint16_t *)(src + 8));
+	w = wr = le16_to_cpu(*(uint16_t *)(src + 6));
+	h = hr = le16_to_cpu(*(uint16_t *)(src + 8));
 	param2 = le16_to_cpu(*(uint16_t *)(src + 12));
-
-	align = (codec == 37) ? 4 : 2;
-	align = (codec == 48) ? 8 : align;
 
 	/* ignore nonsensical dimensions in frames, happens with
 	 * some Full Throttle and RA2 videos.
 	 * Do pass the data to codec45 though, it might have the tabledata in it!
 	 */
-	if ((w < align) || (h < align) || (w > 640) || (h > 480)) {
+	if ((w < 2) || (h < 2) || (w > VID_MAXX) || (h > VID_MAXY)) {
 		if (codec == 45) {
 			codec45(ctx, src + 14, 0, 0, 0, 0, size - 14, param, param2);
 			return 0;
@@ -1805,17 +1739,15 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			rt->frmh = hr;
 		}
 		if (!rt->fbsize || (wr > rt->bufw) || (hr > rt->bufh)) {
-			ret = fobj_alloc_buffers(rt, wr, hr, 1, align);
-			if (ret)
-				return ret;
+			rt->bufw = _max(rt->bufw, wr);
+			rt->bufh = _max(rt->bufh, hr);
+			rt->fbsize = rt->bufw * rt->bufh * 1;
 		}
-	}
-
-	ret = 0;
-	if ((rt->have_vdims && ((w > rt->bufw) || (h > rt->bufh))) || (!rt->fbsize)) {
-		ret = fobj_alloc_buffers(rt, w, h, 1, align);
-		if (ret != 0)
-			return ret;
+	} else if (rt->have_vdims && ((w > rt->bufw) || (h > rt->bufh))) {
+		rt->bufw = _max(rt->bufw, wr);
+		rt->bufh = _max(rt->bufh, hr);
+		rt->pitch = _max(rt->pitch, rt->bufw);
+		rt->fbsize = rt->pitch * rt->bufh * 1;
 	}
 
 	/* default image buffer is buf0 */
@@ -1823,6 +1755,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	src += 14;
 	size -= 14;
+	ret = 0;
 
 	switch (codec) {
 	case 1:
@@ -1834,16 +1767,18 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	case 23: codec23(ctx, src, w, h, top, left, size, param, param2); break;
 	case 37:ret = codec37(ctx, src, w, h, top, left); break;
 	case 45: codec45(ctx, src, w, h, top, left, size, param, param2); break;
-	case 47:ret = codec47(ctx, src, w, h); break;
+	case 47: codec47(ctx, src, w, h); break;
 	case 48:ret = codec48(ctx, src, w, h); break;
-	default: ret = 10;
+	default: ret = 18;
 	}
 
 	if (ret == 0) {
 		ctx->rt.have_frame = 1;
 
-		/* that few stupid Full Throttle videos which are slightly
-		 * larger but still have the 320x200 visible area.
+		/* there are a few Full Throttle videos which have RA2 frame
+		 * dimensions but still have the 320x200 visible area.
+		 * Fortunately, they can be identified by image size and
+		 * SAN version 0.
 		 * Concatenate the visible image area to 320x200 in the
 		 * STOR buffer.
 		 */
@@ -1918,7 +1853,7 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 				size = 0;
 			} else {
 				memcpy(ib + ctx->rt.iactpos, src, len);
-				dst = (int16_t *)ctx->rt.abuf;
+				dst = (int16_t *)ctx->rt.atmpbuf1;
 				src2 = ib + 2;
 				v1 = *src2++;
 				v2 = v1 >> 4;
@@ -1933,7 +1868,7 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 						*dst++ = cpu_to_le16((int8_t)v3) << ((count & 1) ? v1 : v2);
 					}
 				} while (--count);
-				ctx->io->queue_audio(ctx->io->userctx, ctx->rt.abuf, SZ_AUDIOOUT);
+				ctx->io->queue_audio(ctx->io->userctx, ctx->rt.atmpbuf1, 4096);
 				size -= len;
 				src += len;
 				ctx->rt.iactpos = 0;
@@ -2592,7 +2527,7 @@ static int handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 
 	atrk = aud_find_trk(ctx, tid, 0);
 	if (!atrk)
-		return 20;
+		return 17;
 
 	rate = ctx->rt.samplerate;
 	atrk->flags = AUD_SRC8BIT | AUD_1CH;
@@ -2671,7 +2606,7 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		/* handle_SAUD should have allocated it */
 		atrk = aud_find_trk(ctx, tid, 1);
 		if (!atrk)
-			return 22;
+			return 16;
 
 		aud_read_pcmsrc(ctx, atrk, size, src);
 		atrk->dataleft -= size;
@@ -2699,6 +2634,7 @@ static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static void handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
+	struct sanrt *rt = &ctx->rt;
 	int32_t xoff, yoff, rx, ry;
 	uint8_t *db, *dst;
 	int i, j;
@@ -2713,19 +2649,19 @@ static void handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	if (ctx->rt.buf0) {
 		if (xoff == 0 && yoff == 0)
-			memcpy(ctx->rt.buf0, ctx->rt.buf3, ctx->rt.fbsize);
+			memcpy(rt->buf0, rt->buf3, rt->bufw * rt->bufh);
 		else {
-			db = ctx->rt.buf3;
-			dst = ctx->rt.buf0;
-			for (i = 0; i < ctx->rt.bufh; i++) {
-				ry = (yoff + i) * ctx->rt.pitch;
-				if (ry < 0 || ry >= ctx->rt.bufh)
+			db = rt->buf3;
+			dst = rt->buf0;
+			for (i = 0; i < rt->bufh; i++) {
+				ry = (yoff + i) * rt->pitch;
+				if (ry < 0 || ry >= rt->bufh)
 					continue;
-				for (j = 0; j < ctx->rt.bufw; j++) {
+				for (j = 0; j < rt->bufw; j++) {
 					rx = xoff + j;
-					if (rx < 0 || rx >= ctx->rt.bufw)
+					if (rx < 0 || rx >= rt->bufw)
 						continue;
-					*(dst + ry + rx) = *(db + i * ctx->rt.pitch + j);
+					*(dst + ry + rx) = *(db + i * rt->pitch + j);
 				}
 			}
 		}
@@ -2746,7 +2682,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 	src = rt->fcache;
 	if (read_source(ctx, src, size))
-		return 10;
+		return 14;
 
 	ret = 0;
 	while ((size > 7) && (ret == 0)) {
@@ -2757,7 +2693,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		size -= 8;
 
 		if (csz > size)
-			return 17;
+			return 15;
 
 		switch (cid)
 		{
@@ -2783,7 +2719,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	if (ret == 0) {
 		if (ctx->rt.have_frame) {
 			if (rt->to_store)	/* STOR */
-				memcpy(rt->buf3, rt->vbuf, rt->fbsize);
+				memcpy(rt->buf3, rt->vbuf, rt->frmw * rt->frmh * 1);
 
 			/* if possible, interpolate a frame using the itable,
 			 * and queue that plus the decoded one.
@@ -2795,17 +2731,19 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 						  rt->c47ipoltbl, rt->bufw, rt->bufh);
 				rt->have_ipframe = 1;
 				rt->can_ipol = 0;
-				memcpy(rt->buf4, rt->vbuf, rt->fbsize);
-				ctx->io->queue_video(ctx->io->userctx, rt->buf5, rt->fbsize,
+				memcpy(rt->buf4, rt->vbuf, rt->frmw * rt->frmh * 1);
+				ctx->io->queue_video(ctx->io->userctx, rt->buf5,
+					     rt->frmw * rt->frmh * 1,
 					     rt->frmw, rt->frmh, rt->palette,
 					     rt->subid, rt->framedur / 2);
 			} else {
-				ctx->io->queue_video(ctx->io->userctx, rt->vbuf, rt->fbsize,
+				ctx->io->queue_video(ctx->io->userctx, rt->vbuf,
+					     rt->frmw * rt->frmh * 1,
 					     rt->frmw, rt->frmh, rt->palette,
 					     rt->subid, rt->framedur);
 				/* save frame as possible interpolation source */
 				if (rt->have_itable)
-					memcpy(rt->buf4, rt->vbuf, rt->fbsize);
+					memcpy(rt->buf4, rt->vbuf, rt->bufw * rt->bufh * 1);
 			}
 		}
 
@@ -2825,34 +2763,19 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
-	uint8_t *ahbuf, *xbuf = NULL;
 	uint32_t maxframe;
-	int ret = SANDEC_OK;
+	uint8_t *ahbuf;
 
 	ahbuf = (uint8_t *)malloc(size);
 	if (!ahbuf)
-		return 5;
+		return 11;
 	if (read_source(ctx, ahbuf, size)) {
-		ret = 6;
-		goto out;
+		free(ahbuf);
+		return 12;
 	}
 
 	rt->version = le16_to_cpu(*(uint16_t *)(ahbuf + 0));
 	rt->FRMEcnt = le16_to_cpu(*(uint16_t *)(ahbuf + 2));
-
-	/* allocate memory for static work buffers */
-	xbuf = malloc(SZ_ALL);
-	if (!xbuf) {
-		ret = 8;
-		goto out;
-	}
-
-	rt->iactbuf = (uint8_t *)xbuf;
-	rt->palette = (uint32_t *)((uint8_t *)(rt->iactbuf) + SZ_IACT);
-	rt->deltapal = (int16_t *)((uint8_t *)rt->palette + SZ_PAL);
-	rt->c47ipoltbl = (uint8_t *)rt->deltapal + SZ_DELTAPAL;
-	rt->abuf = (uint8_t *)rt->c47ipoltbl + SZ_C47IPTBL;
-	rt->atmpbuf1 = rt->abuf + SZ_AUDIOOUT;
 
 	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
 
@@ -2867,7 +2790,10 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		 * plus 1 byte.
 		 */
 		if ((maxframe > 9) && (maxframe < 4 * 1024 * 1024)) {
-			ret = allocfrme(ctx, maxframe);
+			if (allocfrme(ctx, maxframe)) {
+				free(ahbuf);
+				return 13;
+			}
 		}
 	} else {
 		rt->framedur = 1000000 / 10;	/* ANIMv1 default */
@@ -2875,12 +2801,8 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		rt->frmebufsz = 0;
 	}
 
-out:
-	if ((ret != SANDEC_OK) && xbuf)
-		free(xbuf);
-
 	free(ahbuf);
-	return ret;
+	return 0;
 }
 
 static void sandec_free_memories(struct sanctx *ctx)
@@ -2888,13 +2810,61 @@ static void sandec_free_memories(struct sanctx *ctx)
 	/* delete existing FRME buffer */
 	if (ctx->rt.fcache)
 		free(ctx->rt.fcache);
-	/* delete work buffers */
+	/* delete work + video buffers, iactbuf is entry point */
 	if (ctx->rt.iactbuf)
 		free(ctx->rt.iactbuf);
-	/* delete an existing framebuffer */
-	if (ctx->rt.buf && ctx->rt.fbsize)
-		free(ctx->rt.buf);
 	memset(&ctx->rt, 0, sizeof(struct sanrt));
+}
+
+static int sandec_alloc_memories(struct sanctx *ctx)
+{
+	uint32_t vmem, mem;
+	struct sanrt *rt = &ctx->rt;
+	uint8_t *m;
+	int i;
+
+	/* work buffers + psad/imus track buffers */
+	mem = SZ_BUFS + (ATRK_NUM * ATRK_MAXWP);
+
+	/* video buffer: 16bpp * W * H + 32lines top/bottom empty
+	 * guard bands for codec MVs that point outside the visible
+	 * area (codec37/48).
+	 */
+	vmem = 2 * VID_MAXX * (VID_MAXY + 64);
+
+	/* 6 video buffers: front, prev1, prev2, STOR/FTCH, prev full frame,
+	 * interpolated frame.
+	 */
+	mem += vmem * 6;
+
+	/* allocate memory for work buffers */
+	m = (uint8_t *)malloc(mem);
+	if (!m)
+		return 1;
+
+	memset(m, 0, mem);
+	rt->iactbuf = (uint8_t *)m;	m += SZ_IACT;
+	rt->palette = (uint32_t *)m; 	m += SZ_PAL;
+	rt->deltapal = (int16_t *)m;	m += SZ_DELTAPAL;
+	rt->c47ipoltbl = (uint8_t *)m;	m += SZ_C47IPTBL;
+	rt->atmpbuf1 = m;		m += SZ_AUDTMPBUF1;
+
+	for (i = 0; i < ATRK_NUM; i++) {
+		rt->sanatrk[i].data = m;
+		m += ATRK_MAXWP;
+	}
+
+	/* set up video buffers */
+	rt->buf0 = m;			/* front buffer			*/
+	rt->buf3 = rt->buf0 + vmem;	/* STOR buffer			*/
+	rt->buf4 = rt->buf3 + vmem;	/* interpolation last frame buf */
+	rt->buf5 = rt->buf4 + vmem;	/* interpolated frame buffer	*/
+	rt->buf1 = rt->buf5 + vmem;	/* delta buf 2 (c47), c37 main  */
+	rt->buf2 = rt->buf1 + vmem;	/* delta buf 1 (c47/48)		*/
+	rt->buf1 += (32 * VID_MAXX);	/* db1 guard band top		*/
+	rt->buf2 += (32 * VID_MAXX);
+
+	return 0;
 }
 
 /******************************************************************************/
@@ -2932,7 +2902,7 @@ int sandec_decode_next_frame(void *sanctx)
 	c[1] = be32_to_cpu(c[1]);
 	switch (c[0]) {
 	case FRME: 	ret = handle_FRME(ctx, c[1]); break;
-	default:	ret = 4;
+	default:	ret = 10;
 	}
 
 out:
@@ -2948,8 +2918,9 @@ int sandec_init(void **ctxout)
 		return 1;
 	ctx = (struct sanctx *)malloc(sizeof(struct sanctx));
 	if (!ctx)
-		return 1;
+		return 2;
 	memset(ctx, 0, sizeof(struct sanctx));
+
 	/* set to error state initially until a valid file has been opened */
 	ctx->errdone = 44;
 
@@ -2963,37 +2934,50 @@ int sandec_init(void **ctxout)
 int sandec_open(void *sanctx, struct sanio *io)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
-	int ret, have_anim = 0, have_ahdr = 0;
 	uint32_t c[2];
+	int ret;
 
 	if (!io || !sanctx) {
-		ret = 1;
+		ret = 3;
 		goto out;
 	}
 	ctx->io = io;
 
 	sandec_free_memories(ctx);
-
-	while (1) {
-		ret = read_source(ctx, &c[0], 4 * 2);
-		if (ret) {
-			ret = 3;
-			goto out;
-		}
-		if (!have_anim) {
-			if (c[0] == ANIM) {
-				have_anim = 1;
-			}
-			continue;
-		}
-		if (c[0] == AHDR) {
-			have_ahdr = 1;
-			break;
-		}
+	if (sandec_alloc_memories(ctx)) {
+		ret = 4;
+		goto out;
 	}
 
-	if (have_ahdr)
+	/* files can either start with "ANIM____AHDR___" or
+	 * "SAUD____", the latter are not supported yet.
+	 */
+	ret = read_source(ctx, &c[0], 4 * 2);
+	if (ret) {
+		ret = 5;
+		goto out;
+	}
+	if (c[0] == ANIM) {
+		ret = read_source(ctx, &c[0], 4 * 2);
+		if (ret) {
+			ret = 6;
+			goto out;
+		}
+		if (c[0] != AHDR) {
+			ret = 7;
+			goto out;
+		}
 		ret = handle_AHDR(ctx, be32_to_cpu(c[1]));
+
+	} else if (c[0] == SAUD) {
+		/* FIXME: implement later */
+		ret = 8;
+		goto out;
+
+	} else {
+		ret = 9;
+	}
+
 out:
 	ctx->errdone = ret;
 	return ret;
