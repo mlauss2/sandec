@@ -850,6 +850,8 @@ static int codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 	newrot = src[3];
 	flag =   src[4];
 	decsize  = le32_to_cpu(ua32(src + 14));	/* decoded (raw frame) size */
+	if (decsize > ctx->rt.fbsize)
+		decsize = ctx->rt.fbsize;
 
 	if (seq == 0) {
 		ctx->rt.lastseq = -1;
@@ -1049,6 +1051,11 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 	pktsize = le32_to_cpu(ua32(src + 8));
 	flag =	src[12];
 
+	if (decsize > ctx->rt.fbsize)
+		decsize = ctx->rt.fbsize;
+	if (pktsize > ctx->rt.fbsize)
+		pktsize = ctx->rt.fbsize;
+
 	if (seq == 0) {
 		ctx->rt.lastseq = -1;
 		memset(ctx->rt.buf0, 0, decsize);
@@ -1217,6 +1224,9 @@ static int codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	seq = le16_to_cpu(*(uint16_t *)(src + 2));
 	decsize = le32_to_cpu(ua32(src + 4));
 	flag = src[12];
+
+	if (decsize > ctx->rt.fbsize)
+		decsize = ctx->rt.fbsize;
 
 	if (comp == 0 || comp == 2) {
 		memset(ctx->rt.buf2, 0, decsize);
