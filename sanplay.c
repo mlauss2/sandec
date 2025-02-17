@@ -82,7 +82,7 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 		p->winw = w;
 		p->winh = h;
 		if (p->nextmult == 0)
-			p->nextmult = 1;
+			p->nextmult = p->fullscreen ? -1 : p->prevmult;
 	}
 
 	if (p->nextmult < 0) {
