@@ -195,7 +195,6 @@ struct sanctx {
 	int8_t c47_glyph4x4[NGLYPHS][16];
 	int8_t c47_glyph8x8[NGLYPHS][64];
 	uint8_t c4tbl[2][256][16];
-	uint8_t c5tbl[2][256][16];
 	uint8_t c23lut[256];
 	uint8_t c45tbl1[768];
 	uint8_t c45tbl2[0x8000];
@@ -510,101 +509,215 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 	}
 }
 
-static void c4_make_tiles(struct sanctx *ctx, uint8_t val)
+static void c4_5_tilegen(uint8_t *dst, int8_t param1)
 {
-	uint16_t v1, v2, v3, v4, v6;
-	uint8_t *dst000, *dst128;
-	int i, j, idx;
+	int i, j, k, l, m, n, o;
 
-	for (i = 1; i < 16; i += 2) {
-		v1 = (i + val) & 0xff;
-		for (j = 0; j < 16; j++) {
-			idx = ((i/2)*16) + j;
-			dst000 = &(ctx->c4tbl[0][idx +   0][0]);
-			dst128 = &(ctx->c4tbl[0][idx + 128][0]);
-			v2 = (j + val) & 0xff;
-			v6 = (val + ((i + j) >> 1)) & 0xff;
-			if ((v6 == v1) || (v6 == v2)) {
-				dst000[ 0] = v2; dst000[ 1] = v1; dst000[ 2] = v2; dst000[ 3] = v1;
-				dst000[ 4] = v1; dst000[ 5] = v2; dst000[ 6] = v1; dst000[ 7] = v1;
-				dst000[ 8] = v2; dst000[ 9] = v1; dst000[10] = v2; dst000[11] = v1;
-				dst000[12] = v2; dst000[13] = v2; dst000[14] = v1; dst000[15] = v2;
-
-				dst128[ 0] = v1; dst128[ 1] = v1; dst128[ 2] = v2; dst128[ 3] = v1;
-				dst128[ 4] = v1; dst128[ 5] = v1; dst128[ 6] = v1; dst128[ 7] = v2;
-				dst128[ 8] = v2; dst128[ 9] = v1; dst128[10] = v2; dst128[11] = v2;
-				dst128[12] = v1; dst128[13] = v2; dst128[14] = v1; dst128[15] = v2;
+	// 23316
+	for (i = 1; i < 16; i += 2) {			// i = l24
+		// 23321
+		for (k = 0; k < 16; k++) {		// k = bx
+			// 23329
+			j = i + param1;			// j = l34
+			l = k + param1;			// k = l30
+			m = (j + l) / 2;		// esi, dx
+			n = (j + m) / 2;		// n = l28, l20 (16bit)
+			o = (l + m) / 2;		// o = l28, l1c (16bit)
+			if (j == m || k == m) {
+				// 23376
+				*dst++ = l; *dst++ = j; *dst++ = l; *dst++ = j;
+				*dst++ = j; *dst++ = l; *dst++ = j; *dst++ = j;
+				*dst++ = l; *dst++ = j; *dst++ = l; *dst++ = j;
+				*dst++ = l; *dst++ = l; *dst++ = l; *dst++ = j;
 			} else {
-				v3 = ((v6 + v1) >> 1) & 0xff;
-				v4 = ((v6 + v2) >> 1) & 0xff;
-				dst000[ 0] = v6; dst000[ 1] = v6; dst000[ 2] = v3; dst000[ 3] = v1;
-				dst000[ 4] = v6; dst000[ 5] = v6; dst000[ 6] = v3; dst000[ 7] = v1;
-				dst000[ 8] = v4; dst000[ 9] = v4; dst000[10] = v6; dst000[11] = v3;
-				dst000[12] = v2; dst000[13] = v2; dst000[14] = v4; dst000[15] = v6;
+				// 233ab
+				*dst++ = m; *dst++ = m; *dst++ = n; *dst++ = j;
+				*dst++ = m; *dst++ = m; *dst++ = n; *dst++ = j;
+				*dst++ = o; *dst++ = o; *dst++ = m; *dst++ = n;
+				*dst++ = l; *dst++ = l; *dst++ = o; *dst++ = m;
+			}
+		}
+	}
 
-				dst128[ 0] = v1; dst128[ 1] = v1; dst128[ 2] = v3; dst128[ 3] = v2;
-				dst128[ 4] = v1; dst128[ 5] = v1; dst128[ 6] = v3; dst128[ 7] = v2;
-				dst128[ 8] = v3; dst128[ 9] = v3; dst128[10] = v2; dst128[11] = v4;
-				dst128[12] = v2; dst128[13] = v2; dst128[14] = v4; dst128[15] = v2;
+	// 23415
+	for (i = 0; i < 16; i += 2) {			// i = l24
+		// 23420
+		for (k = 0; k < 16; k++) {		// k = bx
+			// 23428
+			j = i + param1;			// j = l34
+			l = k + param1;			// l = l2c
+			m = (j + l) / 2;		// m = si, dx
+			n = (i + m) / 2;		// n = l28, l20 (16bit)
+			o = (l + m) / 2;		// o = l28, l1c (16bit)
+			if (m == j || m == l) {
+				// 23477
+				*dst++ = j; *dst++ = j; *dst++ = l; *dst++ = j;
+				*dst++ = j; *dst++ = j; *dst++ = j; *dst++ = l;
+				*dst++ = l; *dst++ = j; *dst++ = l; *dst++ = l;
+				*dst++ = j; *dst++ = l; *dst++ = j; *dst++ = l;
+			} else {
+				// 234b1  l14 = j
+				*dst++ = j; *dst++ = j; *dst++ = n; *dst++ = m;
+				*dst++ = j; *dst++ = j; *dst++ = n; *dst++ = m;
+				*dst++ = j; *dst++ = j; *dst++ = m; *dst++ = o;
+				*dst++ = m; *dst++ = m; *dst++ = o; *dst++ = l;
 			}
 		}
 	}
 }
 
-static void c5_make_tiles(struct sanctx *ctx, uint8_t val)
+static void c33_34_tilegen(uint8_t *dst, int8_t param1)
 {
-	uint8_t *dst000, *dst064, *dst128, *dst192;
-	int i, j, my, mx, m0, m1, m2;
+	int i, j, k, l, m, n, o, p;
 
-	for (i = 0; i < 8; i++) {
-		my = (i + val) & 0xff;
-		for (j = 0; j < 8; j++) {
-			mx = (j + val) & 0xff;
-			m0 = (val + ((i + j) / 2)) & 0xff;
-			m1 = ((m0 + my) / 2) & 0xff;
-			m2 = ((m0 + mx) / 2) & 0xff;
+	/* ASSALT13.EXE 23802 - 23315 */
+	for (i = 0; i < 8; i++) {			// i = l24
+		for (k = 0; k < 8; k++) { 		// k = bx
+			j = i + param1;			// j = l34/l20
+			l = k + param1;			// l = l28
+			p = (j + k) / 2;
+			j = (j + p) / 2;		// j = l20/l34
+			m = l / 2;			// m = l1c
+			n = (i + param1);		// n = l14
+			o = (k + param1);
 
-			dst000 = &(ctx->c5tbl[0][i * 8 + j +   0][0]);
-			dst064 = &(ctx->c5tbl[0][i * 8 + j +  64][0]);
-			dst128 = &(ctx->c5tbl[0][i * 8 + j + 128][0]);
-			dst192 = &(ctx->c5tbl[0][i * 8 + j + 192][0]);
+			*dst++ = p;
+			*dst++ = p;
+			*dst++ = j;
+			*dst++ = n;
 
-			*dst000++ = m0; *dst000++ = m0; *dst000++ = m1; *dst000++ = my;
-			*dst000++ = m0; *dst000++ = m0; *dst000++ = m1; *dst000++ = my;
-			*dst000++ = m2; *dst000++ = m2; *dst000++ = m0; *dst000++ = m1;
-			*dst000++ = mx; *dst000++ = mx; *dst000++ = m2; *dst000++ = m0;
+			*dst++ = p;
+			*dst++ = p;
+			*dst++ = j;
+			*dst++ = i;
 
-			*dst064++ = my; *dst064++ = my; *dst064++ = my; *dst064++ = my;
-			*dst064++ = m0; *dst064++ = m0; *dst064++ = m0; *dst064++ = m0;
-			*dst064++ = m2; *dst064++ = m2; *dst064++ = m2; *dst064++ = m2;
-			*dst064++ = mx; *dst064++ = mx; *dst064++ = mx; *dst064++ = mx;
+			*dst++ = m;
+			*dst++ = m;
+			*dst++ = p;
+			*dst++ = j;
 
-			*dst128++ = my; *dst128++ = my; *dst128++ = m1; *dst128++ = m0;
-			*dst128++ = my; *dst128++ = my; *dst128++ = m1; *dst128++ = m0;
-			*dst128++ = m1; *dst128++ = m1; *dst128++ = m0; *dst128++ = m2;
-			*dst128++ = m0; *dst128++ = m0; *dst128++ = m2; *dst128++ = mx;
+			*dst++ = l;
+			*dst++ = l;
+			*dst++ = m;
+			*dst++ = p;
+		}
+	}
 
-			*dst192++ = my; *dst192++ = m0; *dst192++ = m2; *dst192++ = mx;
-			*dst192++ = my; *dst192++ = m0; *dst192++ = m2; *dst192++ = mx;
-			*dst192++ = my; *dst192++ = m0; *dst192++ = m2; *dst192++ = mx;
-			*dst192++ = my; *dst192++ = m0; *dst192++ = m2; *dst192++ = mx;
+	// 2313d - 231b5
+	for (i = 0; i < 8; i++) {			// i = l24
+		// 23145
+		for (k = 0; k < 8; k++) {
+			// 2314a
+			j = i + param1;			// j = l34
+			l = k + param1;
+			n = ((j + l) / 2);
+			m = ((l + n) / 2);		// esi/l = l1c
+			*dst++ = j;
+			*dst++ = j;
+			*dst++ = j;
+			*dst++ = j;
+
+			*dst++ = n;
+			*dst++ = n;
+			*dst++ = n;
+			*dst++ = n;
+
+			*dst++ = m;
+			*dst++ = m;
+			*dst++ = m;
+			*dst++ = m;
+
+			*dst++ = l;
+			*dst++ = l;
+			*dst++ = l;
+			*dst++ = l;
+		}
+	}
+
+	// 231bc - 2326b
+	for (i = 0; i < 8; i++)	{			// i = l24
+		// 231c7
+		for (k = 0; k < 8; k++) {		// k = bx
+			// 231cf
+			j = i + param1;			// j = l34
+			l = k + param1;			// l = esi
+			m = (j + l) / 2;		// m = l28 16bit
+			n = (j + m) / 2;		// n = l34_neu / l20 16bit
+			o = m / 2;			// o = l1c 16bit
+			p = j & 0xff;			// p = l14
+			*dst++ = p;
+			*dst++ = p;
+			*dst++ = n;
+			*dst++ = m;
+
+			*dst++ = p;
+			*dst++ = p;
+			*dst++ = n;
+			*dst++ = m;
+		
+			*dst++ = n;
+			*dst++ = n;
+			*dst++ = m;
+			*dst++ = o;
+
+			*dst++ = m;
+			*dst++ = m;
+			*dst++ = o;
+			*dst++ = l;
+		}
+	}
+
+	// 2326c - 23306
+	for (i = 0; i < 8; i++) {			// i = l24
+		// 23277
+		for (k = 0; k < 8; k++) {		// k = bx
+			// 2327c
+			j = i + param1;			// j = dx / l18
+			l = k + param1;			// l = esi / l14
+			m = (j + l) / 2;		// m = dx / edi
+			n = m / 2;			// n = esi / l1c
+			*dst++ = j;
+			*dst++ = m;
+			*dst++ = n;
+			*dst++ = l;
+
+			*dst++ = j;
+			*dst++ = m;
+			*dst++ = n;
+			*dst++ = l;
+
+			*dst++ = j;
+			*dst++ = m;
+			*dst++ = n;
+			*dst++ = l;
+
+			*dst++ = j;
+			*dst++ = m;
+			*dst++ = n;
+			*dst++ = l;
 		}
 	}
 }
 
-
-static uint8_t *c4_5_load_tiles(struct sanctx *ctx, uint8_t *src, uint16_t cnt, int five)
+static uint8_t *c4_5_param2(struct sanctx *ctx, uint8_t *src, uint16_t cnt,
+			    uint8_t clr)
 {
-	uint8_t c, *g;
-	int i, j;
+	uint8_t c, *dst;
+	uint32_t loop;
 
-	for (i = 0; i < cnt; i++) {
-		g = five ? &(ctx->c5tbl[1][i][0]) : &(ctx->c4tbl[1][i][0]);
-		for (j = 0; j < 16; j += 2) {
-			c = *src++;
-			g[j] = c >> 4;
-			g[j+1] = c & 0xf;
-		}
+	if (cnt > 255)
+		return NULL;
+
+	/* ASSALT13.EXE 11bd0 - 11c16 */
+	loop = cnt << 2;
+	dst = (uint8_t *)&(ctx->c4tbl[1]);
+	while (loop--) {
+		c = *src++;			// lodsb [*esi into al] | xor ah,ah vor schleife
+		*dst++ = (c >> 4) + clr;	// ror ax, 4; add al, bl; stosb
+		*dst++ = (c & 0xf) + clr;	// rol ax, 4; and ax, 0xf, add al, bl; stosb
+		c = *src++;
+		*dst++ = (c >> 4) + clr;
+		*dst++ = (c & 0xf) + clr;
 	}
 	return src;
 }
@@ -1488,7 +1601,7 @@ static void codec21(struct sanctx *ctx, uint8_t *src1, uint16_t w, uint16_t h,
 	}
 }
 
-static void codec5(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+static void codec5_main(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		   int16_t top, int16_t left, uint32_t size, uint8_t param,
 		   uint16_t param2)
 {
@@ -1498,9 +1611,12 @@ static void codec5(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	int32_t dstoff, dstoff2;
 	int i, j, k, l, bit;
 
-	c5_make_tiles(ctx, param);
-	if (param2 > 0)
-		src = c4_5_load_tiles(ctx, src, param2, 1);
+	c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	if (param2 > 0) {
+		src = c4_5_param2(ctx, src, param2, 0);
+		if (src == NULL)
+			return;
+	}
 
 	for (j = 0; j < w; j += 4) {
 		mask = bits = 0;
@@ -1520,7 +1636,7 @@ static void codec5(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 
 			/* find the 4x4 block in the table and render it */
 			idx = *src++;
-			gs = &(ctx->c5tbl[bit][idx][0]);
+			gs = &(ctx->c4tbl[bit][idx][0]);
 			for (k = 0; k < 4; k++) {
 				dstoff2 = dstoff + (k * pitch);
 				for (l = 0; l < 4; l++, gs++) {
@@ -1532,7 +1648,23 @@ static void codec5(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	}
 }
 
-static void codec4(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+static void codec5(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left, uint32_t size, uint8_t param,
+		   uint16_t param2)
+{
+	c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	codec5_main(ctx, src, w, h, top, left, size, param, param2);
+}
+
+static void codec34(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left, uint32_t size, uint8_t param,
+		   uint16_t param2)
+{
+	c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	codec5_main(ctx, src, w, h, top, left, size, param, param2);
+}
+
+static void codec4_main(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		   int16_t top, int16_t left, uint32_t size, uint8_t param,
 		   uint16_t param2)
 {
@@ -1543,9 +1675,11 @@ static void codec4(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 	int16_t xoff, yoff;
 	int i, j, k, l, bit;
 
-	c4_make_tiles(ctx, param);
-	if (param2 > 0)
-		src = c4_5_load_tiles(ctx, src, param2, 0);
+	if (param2 > 0) {
+		src = c4_5_param2(ctx, src, param2, 0);
+		if (src == NULL)
+			return;
+	}
 
 	xoff = left;
 	yoff = top;
@@ -1580,6 +1714,22 @@ static void codec4(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 			}
 		}
 	}
+}
+
+static void codec33(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left, uint32_t size, uint8_t param,
+		   uint16_t param2)
+{
+	c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	codec4_main(ctx, src, w, h, top, left, size, param, param2);
+}
+
+static void codec4(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left, uint32_t size, uint8_t param,
+		   uint16_t param2)
+{
+	c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	codec4_main(ctx, src, w, h, top, left, size, param, param2);
 }
 
 static void codec1(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
@@ -1764,6 +1914,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	case 5:   codec5(ctx, src, w, h, top, left, size, param, param2); break;
 	case 21: codec21(ctx, src, w, h, top ,left, size, param); break;
 	case 23: codec23(ctx, src, w, h, top, left, size, param, param2); break;
+	case 33: codec33(ctx, src, w, h, top, left, size, param, param2); break;
+	case 34: codec34(ctx, src, w, h, top, left, size, param, param2); break;
 	case 37:ret = codec37(ctx, src, w, h, top, left); break;
 	case 45: codec45(ctx, src, w, h, top, left, size, param, param2); break;
 	case 47: codec47(ctx, src, w, h); break;
