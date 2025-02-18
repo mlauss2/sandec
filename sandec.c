@@ -1286,15 +1286,11 @@ static void codec45(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		memcpy(tbl1, src + 6, 0x300);
 		src += 0x306;
 		size -= 0x306;
-		i = 0;
+		i = 1;
 		do {
 			b2 = *src++;
-			while (b2 != 0) {
-				++i;
-				tbl2[i] = *src;
-				--b2;
-			}
-			src++;
+			memset(tbl2 + i, *src++, b2);
+			i += b2;
 			size -= 2;
 		} while (i < 0x8000);
 	}
