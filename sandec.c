@@ -1423,11 +1423,12 @@ static void codec23(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 static void codec21(struct sanctx *ctx, uint8_t *src1, uint16_t w, uint16_t h,
 		    int16_t top, int16_t left, uint16_t size, uint8_t param)
 {
+	const uint32_t maxoff = ctx->rt.pitch * ctx->rt.bufh;
 	const uint16_t pitch = ctx->rt.pitch;
-	int i, y, len, skip;
 	uint8_t c, *dst, *nsrc, *src = src1;
+	int i, y, len, skip;
 	uint16_t ls, offs;
-	int32_t dstoff, maxoff = pitch * ctx->rt.bufh;
+	int32_t dstoff;
 
 	/* FIXME: this seems to only work with RA2, but NOT RA1 */
 	nsrc = src;
@@ -1462,7 +1463,8 @@ static void codec21(struct sanctx *ctx, uint8_t *src1, uint16_t w, uint16_t h,
 				 */
 #if 1
 				for (i = 0; i < offs; i++) {
-					*(dst + dstoff) = 0;
+					if (dstoff >= 0 && dstoff < maxoff)
+						*(dst + dstoff) = 0;
 					dstoff++;
 					len++;
 				}
@@ -1475,7 +1477,8 @@ static void codec21(struct sanctx *ctx, uint8_t *src1, uint16_t w, uint16_t h,
 					c = *src++;
 					size--;
 					ls--;
-					*(dst + dstoff) = c;
+					if (dstoff >= 0 && dstoff < maxoff)
+						*(dst + dstoff) = c;
 					dstoff++;
 					len++;
 				}
