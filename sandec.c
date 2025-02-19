@@ -1444,11 +1444,13 @@ static void codec23(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 			for (i = 0; i < 256; i++)
 				lut[i] = (i + param2) & 0xff;
 		} else {
-			memcpy(lut, ctx->c23lut, 256);
+			for (i = 0; i < 256; i++)
+				lut[i] = ctx->c23lut[i];
 		}
-		if (size < 1)
-			return;
 	}
+
+	if (size < 1)
+		return;
 
 	for (i = 0; i < h; i++) {
 		pxoff = ((top + i) * pitch) + left;
@@ -2187,7 +2189,7 @@ static void aud_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
 	 * store the rest for the next datapacket for this track
 	 */
 	atrk->pdcnt = size;
-	for (i = 0; i < size; i++)
+	for (i = 0; size; i++, size--)
 		atrk->pd[i] = *src++;
 
 	/* update track pointers, slowpath does that in atrk_put_sample() */
