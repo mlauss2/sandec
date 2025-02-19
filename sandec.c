@@ -581,25 +581,10 @@ static void c33_34_tilegen(uint8_t *dst, int8_t param1)
 			n = (i + param1);		// n = l14
 			o = (k + param1);
 
-			*dst++ = p;
-			*dst++ = p;
-			*dst++ = j;
-			*dst++ = n;
-
-			*dst++ = p;
-			*dst++ = p;
-			*dst++ = j;
-			*dst++ = i;
-
-			*dst++ = m;
-			*dst++ = m;
-			*dst++ = p;
-			*dst++ = j;
-
-			*dst++ = l;
-			*dst++ = l;
-			*dst++ = m;
-			*dst++ = p;
+			*dst++ = p; *dst++ = p; *dst++ = j; *dst++ = n;
+			*dst++ = p; *dst++ = p; *dst++ = j; *dst++ = i;
+			*dst++ = m; *dst++ = m; *dst++ = p; *dst++ = j;
+			*dst++ = l; *dst++ = l; *dst++ = m; *dst++ = p;
 		}
 	}
 
@@ -612,25 +597,11 @@ static void c33_34_tilegen(uint8_t *dst, int8_t param1)
 			l = k + param1;
 			n = ((j + l) / 2);
 			m = ((l + n) / 2);		// esi/l = l1c
-			*dst++ = j;
-			*dst++ = j;
-			*dst++ = j;
-			*dst++ = j;
 
-			*dst++ = n;
-			*dst++ = n;
-			*dst++ = n;
-			*dst++ = n;
-
-			*dst++ = m;
-			*dst++ = m;
-			*dst++ = m;
-			*dst++ = m;
-
-			*dst++ = l;
-			*dst++ = l;
-			*dst++ = l;
-			*dst++ = l;
+			*dst++ = j; *dst++ = j; *dst++ = j; *dst++ = j;
+			*dst++ = n; *dst++ = n; *dst++ = n; *dst++ = n;
+			*dst++ = m; *dst++ = m; *dst++ = m; *dst++ = m;
+			*dst++ = l; *dst++ = l; *dst++ = l; *dst++ = l;
 		}
 	}
 
@@ -645,25 +616,11 @@ static void c33_34_tilegen(uint8_t *dst, int8_t param1)
 			n = (j + m) / 2;		// n = l34_neu / l20 16bit
 			o = m / 2;			// o = l1c 16bit
 			p = j & 0xff;			// p = l14
-			*dst++ = p;
-			*dst++ = p;
-			*dst++ = n;
-			*dst++ = m;
 
-			*dst++ = p;
-			*dst++ = p;
-			*dst++ = n;
-			*dst++ = m;
-		
-			*dst++ = n;
-			*dst++ = n;
-			*dst++ = m;
-			*dst++ = o;
-
-			*dst++ = m;
-			*dst++ = m;
-			*dst++ = o;
-			*dst++ = l;
+			*dst++ = p; *dst++ = p; *dst++ = n; *dst++ = m;
+			*dst++ = p; *dst++ = p; *dst++ = n; *dst++ = m;
+			*dst++ = n; *dst++ = n; *dst++ = m; *dst++ = o;
+			*dst++ = m; *dst++ = m; *dst++ = o; *dst++ = l;
 		}
 	}
 
@@ -676,25 +633,11 @@ static void c33_34_tilegen(uint8_t *dst, int8_t param1)
 			l = k + param1;			// l = esi / l14
 			m = (j + l) / 2;		// m = dx / edi
 			n = m / 2;			// n = esi / l1c
-			*dst++ = j;
-			*dst++ = m;
-			*dst++ = n;
-			*dst++ = l;
 
-			*dst++ = j;
-			*dst++ = m;
-			*dst++ = n;
-			*dst++ = l;
-
-			*dst++ = j;
-			*dst++ = m;
-			*dst++ = n;
-			*dst++ = l;
-
-			*dst++ = j;
-			*dst++ = m;
-			*dst++ = n;
-			*dst++ = l;
+			*dst++ = j; *dst++ = m; *dst++ = n; *dst++ = l;
+			*dst++ = j; *dst++ = m; *dst++ = n; *dst++ = l;
+			*dst++ = j; *dst++ = m; *dst++ = n; *dst++ = l;
+			*dst++ = j; *dst++ = m; *dst++ = n; *dst++ = l;
 		}
 	}
 }
@@ -1672,7 +1615,6 @@ static void codec4_main(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	const uint32_t maxpxo = ctx->rt.fbsize;
 	const uint16_t pitch = ctx->rt.pitch;
 	int32_t dstoff, dstoff2;
-	int16_t xoff, yoff;
 	int i, j, k, l, bit;
 
 	if (param2 > 0) {
@@ -1681,8 +1623,6 @@ static void codec4_main(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 			return;
 	}
 
-	xoff = left;
-	yoff = top;
 	for (j = 0; j < w; j += 4) {
 		mask = bits = 0;
 		for (i = 0; i < h; i += 4) {
