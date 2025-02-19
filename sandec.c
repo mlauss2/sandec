@@ -523,7 +523,7 @@ static void c4_5_tilegen(uint8_t *dst, int8_t param1)
 			m = (j + l) / 2;		// esi, dx
 			n = (j + m) / 2;		// n = l28, l20 (16bit)
 			o = (l + m) / 2;		// o = l28, l1c (16bit)
-			if (j == m || k == m) {
+			if (j == m || l == m) {
 				// 23376
 				*dst++ = l; *dst++ = j; *dst++ = l; *dst++ = j;
 				*dst++ = j; *dst++ = l; *dst++ = j; *dst++ = j;
@@ -1556,7 +1556,6 @@ static void codec5_main(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	int32_t dstoff, dstoff2;
 	int i, j, k, l, bit;
 
-	c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
 	if (param2 > 0) {
 		src = c4_5_param2(ctx, src, param2, 0);
 		if (src == NULL)
