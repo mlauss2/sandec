@@ -1776,36 +1776,28 @@ static void codec2(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		   int16_t top, int16_t left, uint32_t size, uint8_t param,
 		   uint16_t param2)
 {
-	const uint32_t maxpxo = ctx->rt.fbsize;
-	uint16_t pitch = ctx->rt.pitch;
-	uint8_t c, *dst = ctx->rt.buf1;
-	int16_t xpos, ypos, xoff, yoff;
-	int32_t pxoff;
+	const uint16_t pitch = ctx->rt.pitch, maxx = ctx->rt.bufw, maxy = ctx->rt.bufh;
+	uint8_t *dst = ctx->rt.buf0;
+	int16_t xpos, ypos;
 
-	/* RA2 FUN_00031a10 */
+	/* RA2 31a10; but there are no codec2 fobjs in RA2 at all.. */
 	if (param2 != 0 && ctx->rt.version == 2) {
 		codec1(ctx, src, w, h, left, top, size, 1);
 		return;
 	}
-	/* ASSALT13.exe 11145-1114f: pitch is hardcoded to 320 */
-	if (ctx->rt.version < 2)
-		pitch = 320;
 
-	xpos = left;
-	ypos = top;
+	/* ASSAULT.EXE 110f8 */
+	xpos = left;	/* original:  - param7(xoff) */
+	ypos = top;	/* original:  - param8(yoff) */
 	while (size > 3) {
-		xoff = *(int16_t *)src; src += 2;
-		yoff = *src++;
-		c = *src++;
+		xpos += (int16_t)le16_to_cpu(*(int16_t *)(src));
+		ypos += (int8_t)src[2];
+		if (xpos >= 0 && ypos >= 0 && xpos < maxx && ypos < maxy) {
+			*(dst + xpos + ypos * pitch) = src[3]; /* 110ff: pitch 320 */
+		}
+		src += 4;
 		size -= 4;
-
-		xpos += xoff;
-		ypos += yoff;
-		pxoff = (ypos * pitch) + xpos;
-		if (pxoff >= 0 && pxoff < maxpxo)
-			*(dst + pxoff) = c;
 	}
-
 }
 
 /******************************************************************************/
