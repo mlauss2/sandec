@@ -99,6 +99,7 @@ static inline uint32_t ua32(uint8_t *p)
 #define SAUD	0x44554153
 #define STRK	0x4B525453
 #define SDAT	0x54414453
+#define PVOC	0x434f5650
 
 /* maximum image size */
 #define VID_MAXX	800
@@ -2696,7 +2697,7 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		/* handle_SAUD should have allocated it */
 		atrk = aud_find_trk(ctx, tid, 1);
 		if (!atrk)
-			return 16;
+			return 0;	/* RA1 hack for later */
 
 		aud_read_pcmsrc(ctx, atrk, size, src);
 		atrk->dataleft -= size;
@@ -2794,6 +2795,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case STOR: handle_STOR(ctx, csz, src); break;
 		case FTCH: handle_FTCH(ctx, csz, src); break;
 		case XPAL: handle_XPAL(ctx, csz, src); break;
+		case PVOC: /* falltrough */
 		case PSAD: ret = handle_PSAD(ctx, csz, src); break;
 		default:   ret = 0;     /* unknown chunk, ignore */
 		}
@@ -2886,7 +2888,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 			}
 		}
 	} else {
-		rt->framedur = 1000000 / 10;	/* ANIMv1 default */
+		rt->framedur = 1000000 / 15;	/* ANIMv1 default */
 		rt->samplerate = 11025;		/* ANIMv1 default */
 		rt->frmebufsz = 0;
 	}
