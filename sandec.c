@@ -1208,7 +1208,6 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 
 			/* copy a 4x4 block from the previous frame from same spot */
 			if (copycnt > 0) {
-c37_blk:
 				for (k = 0; k < 4; k++) {
 					ofs = j + (k * w);
 					for (l = 0; l < 4; l++) {
@@ -1243,10 +1242,6 @@ c37_blk:
 					for (l = 0; l < 4; l++)
 						*(dst + ofs + l) = c;
 				}
-			} else if (c4 && (opc == 0)) {
-				/* copy 4x4 block from prev frame, cnt from src */
-				copycnt = 1 + *src++;
-				goto c37_blk; /* curr. block needs to be handled too */
 			} else {
 				/* 4x4 block copy from prev with MV */
 				mvofs = c37_mv[mvidx][opc*2] + (c37_mv[mvidx][opc*2 + 1] * w);
@@ -1255,6 +1250,9 @@ c37_blk:
 					for (l = 0; l < 4; l++)
 						*(dst + ofs + l) = *(db + ofs + l + mvofs);
 				}
+				/* comp 4 opcode 0 indicates run start */
+				if (c4 && (opc == 0))
+					copycnt = *src++;
 			}
 		}
 		dst += w * 4;
