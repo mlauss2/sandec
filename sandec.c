@@ -1545,6 +1545,29 @@ static void codec21(struct sanctx *ctx, uint8_t *src1, uint16_t w, uint16_t h,
 	}
 }
 
+static void codec20(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		    int16_t top, int16_t left, uint32_t size)
+{
+	const uint16_t pitch = ctx->rt.pitch;
+	uint8_t *dst;
+
+	dst = ctx->rt.buf0 + (top * pitch) + left;
+	if (pitch == w) {
+		/* copy the whole thing in one go */
+		if (size > w * h)
+			size = w * h;
+		memcpy(dst, src, size);
+	} else {
+		/* eh need to go line by line */
+		while (h-- && size > 0) {
+			memcpy(dst, src, w);
+			dst += pitch;
+			src += w;
+			size -= w;
+		}
+	}
+}
+
 static void codec5_main(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 		   int16_t top, int16_t left, uint32_t size, uint8_t param,
 		   uint16_t param2)
@@ -1844,6 +1867,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	case 2:   codec2(ctx, src, w, h, top, left, size, param, param2); break;
 	case 4:   codec4(ctx, src, w, h, top, left, size, param, param2); break;
 	case 5:   codec5(ctx, src, w, h, top, left, size, param, param2); break;
+	case 20: codec20(ctx, src, w, h, top, left, size); break;
 	case 21: codec21(ctx, src, w, h, top ,left, size, param); break;
 	case 23: codec23(ctx, src, w, h, top, left, size, param, param2); break;
 	case 33: codec33(ctx, src, w, h, top, left, size, param, param2); break;
