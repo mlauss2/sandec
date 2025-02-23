@@ -1486,7 +1486,6 @@ static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src1, uint16_t w,
 	uint16_t ls, offs;
 	int32_t dstoff;
 
-	/* FIXME: this seems to only work with RA2, but NOT RA1 */
 	nsrc = src;
 	for (y = 0; y < h; y++) {
 		if (size < 2)
@@ -1507,26 +1506,8 @@ static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src1, uint16_t w,
 			size -= 2;
 			ls -= 2;
 			if (skip) {
-				/* FIXME: seems wrong, but makes a good picture.
-				 * in RA2 05PLAY.SAN, the enemy Tie Fighters
-				 * are rendered first, the codec21 image is
-				 * rendered last.  This here then overdraws all
-				 * of those Ties.  If we skip properly, then we get
-				 * tearing but visible Tie Fighters.
-				 * It's as if the C21 is meant as first FOBJ
-				 * frame of the next FRME...
-				 */
-#if 1
-				for (i = 0; i < offs; i++) {
-					if (dstoff >= 0 && dstoff < maxoff)
-						*(dst + dstoff) = 0;
-					dstoff++;
-					len++;
-				}
-#else
 				dstoff += offs;
 				len += offs;
-#endif
 			} else {
 				for (i = 0; i <= offs; i++) {
 					c = *src++;
@@ -1852,6 +1833,30 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	/* default image buffer is buf0 */
 	rt->vbuf = rt->buf0;
+	if (rt->to_store == 2 ||
+	    (rt->to_store != 0 && (codec == 37 || codec == 47 || codec == 48))) {
+		/* decode the image and change it to a FOBJ with codec20.
+		 * Used sometimes in RA1 only; RA2+ had this feature removed.
+		 * We can however use it for codecs37/47/48 since they work on
+		 * the full buffer and don't modify existing images like the
+		 * other codecs can do.
+		 */
+		*(uint32_t *)(rt->buf3 + 0) = rt->fbsize;/* block size in host endian */
+		memcpy(rt->buf3 + 4, src, 14);		/* FOBJ header		*/
+		*( uint8_t *)(rt->buf3 + 4) = 20;	/* set to codec20	*/
+		rt->vbuf = rt->buf3 + 4 + 14;		/* image data here	*/
+	} else if (rt->to_store == 1) {
+		/* copy the FOBJ whole (all SAN versions), and render it normally
+		 * to the default front buffer.
+		 */
+		rt->to_store = 0;
+		if (size <= rt->fbsize) {
+			*(uint32_t *)rt->buf3 = size;
+			memcpy(rt->buf3 + 4, src, size);
+		} else {
+			return 26;		/* STOR buffer too small! */
+		}
+	}
 
 	src += 14;
 	size -= 14;
@@ -1876,6 +1881,16 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 	
 	if (ret == 0) {
+		/* the decoding-STOR was done, but we still need to put the image
+		 * to the front buffer now.
+		 */
+		if (rt->to_store) {
+			rt->to_store = 0;
+			ret = handle_FOBJ(ctx, *(uint32_t *)rt->buf3, rt->buf3 + 4);
+			if (ret)
+				return ret;
+		}
+
 		ctx->rt.have_frame = 1;
 
 		/* there are a few Full Throttle videos which have RA2 frame
@@ -1895,6 +1910,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			rt->frmh = 200;
 		}
 	}
+
+	rt->to_store = 0;
 
 	return ret;
 }
@@ -2738,44 +2755,35 @@ static void handle_TRES(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	ctx->rt.to_store = 1;
+	/* STOR usually caches the FOBJ raw data in the aux buffer.
+	 * In RA1 however, there's the option to decode the image immediately,
+	 * and store that instead with a standard FOBJ codec header with codec20
+	 * and 320x200 size (I guess for perf reasons in 1993).
+	 * This is indicated by STOR data 0 being 3.
+	 */
+	ctx->rt.to_store = (src[0] == 3 ? 2 : 1);
 }
 
-static void handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
+static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	struct sanrt *rt = &ctx->rt;
-	int32_t xoff, yoff, rx, ry;
-	uint8_t *db, *dst;
-	int i, j;
+	int16_t xoff, yoff, left, top;
+	uint8_t *vb = ctx->rt.buf3;
 
 	if (size != 12) {
-		xoff = *(int16_t *)(src + 2);
-		yoff = *(int16_t *)(src + 4);
+		xoff = le16_to_cpu(*(int16_t *)(src + 2));
+		yoff = le16_to_cpu(*(int16_t *)(src + 4));
 	} else {
-		xoff = be32_to_cpu(ua32(src + 4));
-		yoff = be32_to_cpu(ua32(src + 8));
+		xoff = (int16_t)be32_to_cpu(ua32(src + 4));
+		yoff = (int16_t)be32_to_cpu(ua32(src + 8));
 	}
 
-	if (ctx->rt.buf0) {
-		if (xoff == 0 && yoff == 0)
-			memcpy(rt->buf0, rt->buf3, rt->bufw * rt->bufh);
-		else {
-			db = rt->buf3;
-			dst = rt->buf0;
-			for (i = 0; i < rt->bufh; i++) {
-				ry = (yoff + i) * rt->pitch;
-				if (ry < 0 || ry >= rt->bufh)
-					continue;
-				for (j = 0; j < rt->bufw; j++) {
-					rx = xoff + j;
-					if (rx < 0 || rx >= rt->bufw)
-						continue;
-					*(dst + ry + rx) = *(db + i * rt->pitch + j);
-				}
-			}
-		}
-		ctx->rt.have_frame = 1;
-	}
+	/* add FTCH xoff/yoff to the FOBJs left/top offsets */
+	left = le16_to_cpu(*(int16_t *)(vb + 6));
+	top  = le16_to_cpu(*(int16_t *)(vb + 8));
+	*(int16_t *)(vb + 6) = cpu_to_le16(left + xoff);
+	*(int16_t *)(vb + 8) = cpu_to_le16(top  + yoff);
+
+	return handle_FOBJ(ctx, *(uint32_t *)(vb + 0), vb + 4);
 }
 
 static int handle_FRME(struct sanctx *ctx, uint32_t size)
@@ -2811,7 +2819,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case IACT: handle_IACT(ctx, csz, src); break;
 		case TRES: handle_TRES(ctx, csz, src); break;
 		case STOR: handle_STOR(ctx, csz, src); break;
-		case FTCH: handle_FTCH(ctx, csz, src); break;
+		case FTCH: ret = handle_FTCH(ctx, csz, src); break;
 		case XPAL: handle_XPAL(ctx, csz, src); break;
 		case PVOC: /* falltrough */
 		case PSAD: ret = handle_PSAD(ctx, csz, src); break;
@@ -2828,9 +2836,6 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	/* OK case: all usable bytes of the FRME read, no errors */
 	if (ret == 0) {
 		if (ctx->rt.have_frame) {
-			if (rt->to_store)	/* STOR */
-				memcpy(rt->buf3, rt->vbuf, rt->frmw * rt->frmh * 1);
-
 			/* if possible, interpolate a frame using the itable,
 			 * and queue that plus the decoded one.
 			 */
@@ -2861,7 +2866,6 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		if (rt->acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO))
 			aud_mix_tracks(ctx);
 
-		rt->to_store = 0;
 		rt->currframe++;
 		rt->subid = 0;
 		rt->have_frame = 0;

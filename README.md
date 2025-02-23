@@ -56,12 +56,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
 # Dev Notes
-- STOR/FTCH is implemented wrongly for RA1:  On STOR, the game EXE just caches the complete next FOBJ chunk in a temporary buffer, renders it,
-  and an FTCH, replays it (i.e. decodes the image again; STOR does NOT store the current front buffer, like it is implemented now). The current
-  scheme works more or less by accident with FT/Dig/+ because they really only render one FOBJ per frame.
-  I.e. see L8PLAY.ANM where the walker is only visible if FTCH is diabled.
 - RA1 has more sound chunks ("Crea" indicates a VOC file dumped into the stream, RAW!/SBL1/SBL2 for I guess, raw PCM.
 - codec4/5 tilegen is still buggy, there are miscolored edges on tiles (L11PLAY.ANM)
 
-20250221
-
+20250223
