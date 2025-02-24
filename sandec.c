@@ -129,15 +129,15 @@ SZ_AUDTMPBUF1)
 #define AUD_SRCDONE		(1 << 5)
 #define AUD_MIXED		(1 << 6)
 
-/* audio track. 256k buffer is enough for The Dig sq1.san */
-#define ATRK_MAXWP	(1 << 18)
+/* audio track. 1M buffer seems required for a few RA2 files */
+#define ATRK_MAXWP	(1 << 20)
 /* 16 seems required for some RA1/RA2 files */
 #define ATRK_NUM	16
 struct sanatrk {
 	uint8_t *data;		/* 22,05kHz signed 16bit 2ch audio data	*/
 	uint32_t rdptr;		/* read pointer				*/
 	uint32_t wrptr;		/* write pointer			*/
-	uint32_t datacnt;	/* currently held data in buffer	*/
+	int32_t datacnt;	/* currently held data in buffer	*/
 	uint32_t flags;		/* track flags				*/
 	uint32_t pdcnt;		/* count of left over bytes from prev.  */
 	uint8_t pd[4];		/* unused bytes from prev. datablock	*/
@@ -2293,7 +2293,7 @@ static struct sanatrk *aud_find_trk(struct sanctx *ctx, uint16_t trkid, int fail
  * of FRME handling.
  */
 static void iact_buffer_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
-			      uint16_t trkid, uint16_t uid, int done)
+			      uint16_t trkid, uint16_t uid)
 {
 	uint32_t cid, csz, mapsz;
 	uint16_t rate, bits, chnl;
@@ -2367,19 +2367,23 @@ static void iact_buffer_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		if (size < 8)
 			return;
 		cid = le32_to_cpu(ua32(src + 0));
+		csz = be32_to_cpu(ua32(src + 4));
 		src += 8;
 		size -= 8;
 		if (cid != DATA)
 			return;
 
 		atrk->flags |= AUD_INUSE;	/* active track */
+		atrk->dataleft = csz;
 		ctx->rt.acttrks++;
 	}
 
-	if (done)
+	if (size >= atrk->dataleft) {
+		size = atrk->dataleft;
 		atrk->flags |= AUD_SRCDONE;	/* free track after mixing */
-
+	}
 	aud_read_pcmsrc(ctx, atrk, size, src);
+	atrk->dataleft -= size;
 }
 
 /* count all active tracks: tracks which are still allocated */
@@ -2447,23 +2451,18 @@ static void aud_atrk_consume(struct sanrt *rt, struct sanatrk *atrk, uint32_t by
 {
 	atrk->datacnt -= bytes;
 	atrk->rdptr += bytes;
+	if (atrk->rdptr >= ATRK_MAXWP)
+		atrk->rdptr -= ATRK_MAXWP;
 
-	if (atrk->datacnt == 0) {
+	if (atrk->datacnt < 1) {
 		atrk->rdptr = 0;
 		atrk->wrptr = 0;
 		if (atrk->flags & AUD_SRCDONE) {
 			atrk->flags = 0;
 			atrk->pdcnt = 0;
 			atrk->trkid = 0;
+			atrk->dataleft = 0;
 			rt->acttrks--;
-		}
-	} else {
-		/* move rest to front of buffer to avoid wraparound */
-		/* FIXME FIXME fix the ring buffer instead, this is EXPENSIVE */
-		if (atrk->rdptr >= atrk->datacnt) {
-			memcpy(atrk->data, atrk->data + atrk->rdptr, atrk->datacnt);
-			atrk->rdptr = 0;
-			atrk->wrptr = atrk->datacnt;
 		}
 	}
 }
@@ -2487,10 +2486,9 @@ static void aud_mix_tracks(struct sanctx *ctx)
 
 	dstlen = 0;
 	step = 0;
-	aptr = rt->atmpbuf1;
+	dstptr = aptr = rt->atmpbuf1;
 
 _aud_mix_again:
-	dstptr = rt->atmpbuf1 + dstlen;
 	mixable = aud_count_mixable(rt, &minlen1);
 	active1 = aud_count_active(rt);
 
@@ -2509,7 +2507,7 @@ _aud_mix_again:
 			aud_atrk_consume(rt, atrk1, atrk1->datacnt);
 		} else {
 			toend1 = ATRK_MAXWP - atrk1->rdptr;
-			if (toend1 <= minlen1) {
+			if (minlen1 <= toend1) {
 				memcpy(dstptr, atrk1->data + atrk1->rdptr, minlen1);
 				aud_atrk_consume(rt, atrk1, minlen1);
 			} else {
@@ -2567,6 +2565,7 @@ _aud_mix_again:
 		}
 
 		mixable -= 2;
+		step++;
 
 		/* step 1: mix the next tracks into dstptr, minlen is still
 		 * in effect.
@@ -2597,6 +2596,7 @@ _aud_mix_again:
 		}
 
 		dstlen += minlen1;
+		dstptr += minlen1;
 		/* now all tracks including the one with minimal lenght have
 		 * been mixed into destination.
 		 * Now test if the number of active streams has changed.
@@ -2624,19 +2624,19 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	uint16_t p[7];
 	int i;
 
-	if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
-		return;
-
 	for (i = 0; i < 7; i++)
 		p[i] = le16_to_cpu(*(uint16_t*)(src + (i<<1)));
 
 	if (p[0] == 8 && p[1] == 46) {
+		if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
+			return;
+
 		if (p[3] == 0) {
 			/* subchunkless scaled IACT audio codec47/48 videos */
 			iact_audio_scaled(ctx, size - 18, src + 18);
 		} else {
 			/* imuse-type */
-			iact_buffer_imuse(ctx, size - 18, src + 18, p[4], p[3], (p[6] - p[5]) < 2);
+			iact_buffer_imuse(ctx, size - 18, src + 18, p[4], p[3]);
 		}
 	}
 }
@@ -2732,12 +2732,13 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		/* handle_SAUD should have allocated it */
 		atrk = aud_find_trk(ctx, tid, 1);
 		if (!atrk)
-			return 0;	/* RA1 hack for later */
+			return 16;
 
-		aud_read_pcmsrc(ctx, atrk, size, src);
-		atrk->dataleft -= size;
-		if (atrk->dataleft < 1)
+		if (size > atrk->dataleft) {
+			size = atrk->dataleft;
 			atrk->flags |= AUD_SRCDONE;
+		}
+		aud_read_pcmsrc(ctx, atrk, size, src);
 	}
 	return 0;
 }
