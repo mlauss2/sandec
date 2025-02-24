@@ -2551,7 +2551,8 @@ _aud_mix_again:
 			todo -= ml2;
 			/* one toendX is now zero and wrapped around, read the
 			 * other until wrap around */
-			l3 = _max(toend1, toend2);
+			l3 = _min(todo, toend1);
+			l3 = _min(l3, toend2);
 			aud_mixs16(dstptr + ml2, src1, src2, l3);
 			aud_atrk_consume(rt, atrk1, l3);
 			aud_atrk_consume(rt, atrk2, l3);
@@ -2559,9 +2560,11 @@ _aud_mix_again:
 			src2 = atrk2->data + atrk2->rdptr;
 			todo -= l3;
 			/* now the rest */
-			aud_mixs16(dstptr + ml2 + l3, src1, src2, todo);
-			aud_atrk_consume(rt, atrk1, todo);
-			aud_atrk_consume(rt, atrk2, todo);
+			if (todo) {
+				aud_mixs16(dstptr + ml2 + l3, src1, src2, todo);
+				aud_atrk_consume(rt, atrk1, todo);
+				aud_atrk_consume(rt, atrk2, todo);
+			}
 		}
 
 		mixable -= 2;
