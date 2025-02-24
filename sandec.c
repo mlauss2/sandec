@@ -2739,6 +2739,7 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			atrk->flags |= AUD_SRCDONE;
 		}
 		aud_read_pcmsrc(ctx, atrk, size, src);
+		atrk->dataleft -= size;
 	}
 	return 0;
 }
