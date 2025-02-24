@@ -1833,6 +1833,14 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	/* default image buffer is buf0 */
 	rt->vbuf = rt->buf0;
+
+	/* When it's the very first FOBJ in a FRME, and it's not one of the
+	 * full-frame codecs, the frontbuffer needs to be cleared first.
+	 */
+	if (!rt->have_frame && rt->fbsize && codec != 37 && codec != 47 && codec != 48) {
+		memset(rt->vbuf, 0, rt->fbsize);
+	}
+
 	if (rt->to_store == 2 ||
 	    (rt->to_store != 0 && (codec == 37 || codec == 47 || codec == 48))) {
 		/* decode the image and change it to a FOBJ with codec20.
