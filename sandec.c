@@ -2784,6 +2784,7 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	int16_t xoff, yoff, left, top;
 	uint8_t *vb = ctx->rt.buf3;
+	int ret;
 
 	if (size != 12) {
 		xoff = le16_to_cpu(*(int16_t *)(src + 2));
@@ -2799,7 +2800,12 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	*(int16_t *)(vb + 6) = cpu_to_le16(left + xoff);
 	*(int16_t *)(vb + 8) = cpu_to_le16(top  + yoff);
 
-	return handle_FOBJ(ctx, *(uint32_t *)(vb + 0), vb + 4);
+	ret = handle_FOBJ(ctx, *(uint32_t *)(vb + 0), vb + 4);
+
+	/* restore the FOBJs left/top values, otherwise we scroll endlessly */
+	*(int16_t *)(vb + 6) = cpu_to_le16(left);
+	*(int16_t *)(vb + 8) = cpu_to_le16(top);
+	return ret;
 }
 
 static int handle_FRME(struct sanctx *ctx, uint32_t size)
