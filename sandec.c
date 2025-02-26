@@ -1798,15 +1798,12 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			rt->frmw = w;
 			rt->frmh = h;
 		} else  if (rt->version < 2) {
-			/* RA1: 384x242 or 320x200 */
-			if ((left + w == 384) && (top + h == 242)) {
-				wr = 384;
-				hr = 242;
-			} else {
-				wr = 320;
-				hr = 200;
-			}
+			/* RA1: 384x242 internal buffer, 320x200 display */
+			wr = 384;
+			hr = 242;
 			rt->have_vdims = 1;
+			rt->bufw = wr;
+			rt->bufh = hr;
 			rt->pitch = wr;
 			rt->frmw = wr;
 			rt->frmh = hr;
@@ -1907,19 +1904,17 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 		ctx->rt.have_frame = 1;
 
-		/* there are a few Full Throttle videos which have RA2 frame
-		 * dimensions but still have the 320x200 visible area.
-		 * Fortunately, they can be identified by image size and
-		 * SAN version 0.
-		 * Concatenate the visible image area to 320x200 in the
-		 * STOR buffer.
+		/* RA1 has a 384x242 internal window, but presents at 320x200.
+		 * The Full Throttle "blink*.san" animations have the same dimensions,
+		 * but only content in the 320x200 upper left area.
+		 * Copy the visible area to a new buffer.
 		 */
-		if (w == 384 && h == 242 && rt->version == 0) {
+		if (rt->version < 2) {
 			int i, j;
 			for (i = 0; i < 200; i++)
 				for (j = 0; j < 320; j++)
-					*(rt->buf3 + (i * 320) + j) = *(rt->vbuf + (i * w) + j);
-			rt->vbuf = rt->buf3;
+					*(rt->buf4 + (i * 320) + j) = *(rt->vbuf + (i * rt->pitch) + j);
+			rt->vbuf = rt->buf4;
 			rt->frmw = 320;
 			rt->frmh = 200;
 		}

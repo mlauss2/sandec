@@ -46,7 +46,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - PSAD/iMUSE audio is still very imperfect (All titles up to inclunding The Dig)
 - Rebel Assault I
   - all codecs used in the DOS Version of RA1 have been implemented, there
-    are still visual glitches in codecs4/5 and pitch issues in most videos.
+    are still visual glitches in codecs4/5.
 - Bl16 Video / VIMA Audio
 
 # Build:
