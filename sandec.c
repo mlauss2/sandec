@@ -3040,7 +3040,7 @@ int sandec_decode_next_frame(void *sanctx)
 
 	ret = read_source(ctx, c, 8);
 	if (ret) {
-		if (ctx->rt.currframe == ctx->rt.FRMEcnt)
+		if (ctx->rt.currframe >= ctx->rt.FRMEcnt)
 			ret = SANDEC_DONE;	/* seems we reached file end */
 		goto out;
 	}
