@@ -511,7 +511,7 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 	}
 }
 
-static void c4_5_tilegen(uint8_t *dst, int8_t param1)
+static void c4_5_tilegen(uint8_t *dst, uint8_t param1)
 {
 	int i, j, k, l, m, n, o;
 
@@ -2780,6 +2780,7 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	int16_t xoff, yoff, left, top;
 	uint8_t *vb = ctx->rt.buf3;
+	uint32_t sz;
 	int ret;
 
 	if (size != 12) {
@@ -2790,17 +2791,21 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		yoff = (int16_t)be32_to_cpu(ua32(src + 8));
 	}
 
-	/* add FTCH xoff/yoff to the FOBJs left/top offsets */
-	left = le16_to_cpu(*(int16_t *)(vb + 6));
-	top  = le16_to_cpu(*(int16_t *)(vb + 8));
-	*(int16_t *)(vb + 6) = cpu_to_le16(left + xoff);
-	*(int16_t *)(vb + 8) = cpu_to_le16(top  + yoff);
+	ret = 0;
+	sz = *(uint32_t *)(vb + 0);
+	if (sz > 0 && sz < ctx->rt.fbsize) {
+		/* add FTCH xoff/yoff to the FOBJs left/top offsets */
+		left = le16_to_cpu(*(int16_t *)(vb + 6));
+		top  = le16_to_cpu(*(int16_t *)(vb + 8));
+		*(int16_t *)(vb + 6) = cpu_to_le16(left + xoff);
+		*(int16_t *)(vb + 8) = cpu_to_le16(top  + yoff);
 
-	ret = handle_FOBJ(ctx, *(uint32_t *)(vb + 0), vb + 4);
+		ret = handle_FOBJ(ctx, sz, vb + 4);
 
-	/* restore the FOBJs left/top values, otherwise we scroll endlessly */
-	*(int16_t *)(vb + 6) = cpu_to_le16(left);
-	*(int16_t *)(vb + 8) = cpu_to_le16(top);
+		/* restore the FOBJs left/top values, otherwise we scroll endlessly */
+		*(int16_t *)(vb + 6) = cpu_to_le16(left);
+		*(int16_t *)(vb + 8) = cpu_to_le16(top);
+	}
 	return ret;
 }
 
