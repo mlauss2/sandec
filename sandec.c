@@ -644,14 +644,14 @@ static void c33_34_tilegen(uint8_t *dst, int8_t param1)
 	}
 }
 
-static uint8_t *c4_5_param2(struct sanctx *ctx, uint8_t *src, uint16_t cnt,
-			    uint8_t clr)
+static void c4_5_param2(struct sanctx *ctx, uint8_t *src, uint16_t cnt,
+		       uint8_t clr)
 {
 	uint8_t c, *dst;
 	uint32_t loop;
 
 	if (cnt > 255)
-		return NULL;
+		return;
 
 	/* ASSALT13.EXE 11bd0 - 11c16 */
 	loop = cnt << 2;
@@ -664,7 +664,6 @@ static uint8_t *c4_5_param2(struct sanctx *ctx, uint8_t *src, uint16_t cnt,
 		*dst++ = (c >> 4) + clr;
 		*dst++ = (c & 0xf) + clr;
 	}
-	return src;
 }
 
 /******************************************************************************/
@@ -1558,9 +1557,8 @@ static void codec5_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 	int i, j, k, l, bit;
 
 	if (param2 > 0) {
-		src = c4_5_param2(ctx, src, param2, 0);
-		if (src == NULL)
-			return;
+		c4_5_param2(ctx, src, param2, ctx->c4tblparam);
+		src += param2 * 8;
 	}
 
 	for (j = 0; j < w; j += 4) {
@@ -1624,9 +1622,8 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 	int i, j, k, l, bit;
 
 	if (param2 > 0) {
-		src = c4_5_param2(ctx, src, param2, 0);
-		if (src == NULL)
-			return;
+		c4_5_param2(ctx, src, param2, ctx->c4tblparam);
+		src += param2 * 8;
 	}
 
 	for (j = 0; j < w; j += 4) {
