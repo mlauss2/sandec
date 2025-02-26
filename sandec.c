@@ -1737,7 +1737,7 @@ static void codec2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	xpos = left;	/* original:  - param7(xoff) */
 	ypos = top;	/* original:  - param8(yoff) */
 	while (size > 3) {
-		xpos += (int16_t)le16_to_cpu(*(int16_t *)(src));
+		xpos += (int16_t)le16_to_cpu(ua16(src));
 		ypos += (int8_t)src[2];
 		if (xpos >= 0 && ypos >= 0 && xpos < maxx && ypos < maxy) {
 			*(dst + xpos + ypos * pitch) = src[3]; /* 110ff: pitch 320 */
@@ -2725,8 +2725,8 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		src += 12;
 		size -= 12;
 	} else {
-		tid = le16_to_cpu(*(uint16_t*)(src + 0));
-		idx = le16_to_cpu(*(uint16_t*)(src + 2));
+		tid = le16_to_cpu(ua16(src + 0));
+		idx = le16_to_cpu(ua16(src + 2));
 		src += 10;
 		size -= 10;
 	}
@@ -2827,6 +2827,16 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 	ret = 0;
 	while ((size > 7) && (ret == 0)) {
+
+		/* some blocks like IACT have odd size, and RA1 L2PLAY.ANM
+		 * has a few unaligned (not at 2 byte boundary) FOBJs.
+		 * This is how the smush game engine deals with that.
+		 */
+		if (((uintptr_t)src & 1) && (*src == 0)) {
+			src++;
+			size--;
+		}
+
 		cid = le32_to_cpu(ua32(src + 0));
 		csz = be32_to_cpu(ua32(src + 4));
 
@@ -2850,10 +2860,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case PSAD: ret = handle_PSAD(ctx, csz, src); break;
 		default:   ret = 0;     /* unknown chunk, ignore */
 		}
-		/* all objects in the SAN stream are padded so their length
-		 * is even. */
-		if (csz & 1)
-			csz += 1;
+
 		src += csz;
 		size -= csz;
 	}
