@@ -529,7 +529,7 @@ static void c4_5_tilegen(uint8_t *dst, int8_t param1)
 				*dst++ = l; *dst++ = j; *dst++ = l; *dst++ = j;
 				*dst++ = j; *dst++ = l; *dst++ = j; *dst++ = j;
 				*dst++ = l; *dst++ = j; *dst++ = l; *dst++ = j;
-				*dst++ = l; *dst++ = l; *dst++ = l; *dst++ = j;
+				*dst++ = l; *dst++ = l; *dst++ = j; *dst++ = l;
 			} else {
 				// 233ab
 				*dst++ = m; *dst++ = m; *dst++ = n; *dst++ = j;
@@ -548,7 +548,7 @@ static void c4_5_tilegen(uint8_t *dst, int8_t param1)
 			j = i + param1;			// j = l34
 			l = k + param1;			// l = l2c
 			m = (j + l) / 2;		// m = si, dx
-			n = (i + m) / 2;		// n = l28, l20 (16bit)
+			n = (j + m) / 2;		// n = l28, l20 (16bit)
 			o = (l + m) / 2;		// o = l28, l1c (16bit)
 			if (m == j || m == l) {
 				// 23477
@@ -560,7 +560,7 @@ static void c4_5_tilegen(uint8_t *dst, int8_t param1)
 				// 234b1  l14 = j
 				*dst++ = j; *dst++ = j; *dst++ = n; *dst++ = m;
 				*dst++ = j; *dst++ = j; *dst++ = n; *dst++ = m;
-				*dst++ = j; *dst++ = j; *dst++ = m; *dst++ = o;
+				*dst++ = n; *dst++ = n; *dst++ = m; *dst++ = o;
 				*dst++ = m; *dst++ = m; *dst++ = o; *dst++ = l;
 			}
 		}
