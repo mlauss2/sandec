@@ -100,6 +100,7 @@ static inline uint32_t ua32(uint8_t *p)
 #define STRK	0x4B525453
 #define SDAT	0x54414453
 #define PVOC	0x434f5650
+#define PSD2	0x32445350
 
 /* maximum image size */
 #define VID_MAXX	800
@@ -2844,7 +2845,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case STOR: handle_STOR(ctx, csz, src); break;
 		case FTCH: ret = handle_FTCH(ctx, csz, src); break;
 		case XPAL: handle_XPAL(ctx, csz, src); break;
-		case PVOC: /* falltrough */
+		case PVOC: /* fallthrough */
+		case PSD2: /* fallthrough */
 		case PSAD: ret = handle_PSAD(ctx, csz, src); break;
 		default:   ret = 0;     /* unknown chunk, ignore */
 		}
