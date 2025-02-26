@@ -49,8 +49,8 @@ static void queue_audio(void *ctx, unsigned char *adata, uint32_t size)
 
 /* this is called once per "sandec_decode_next_frame()" */
 static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
-			uint16_t w, uint16_t h, uint32_t *imgpal, uint16_t subid,
-			uint32_t frame_duration_us)
+			uint16_t w, uint16_t h, uint16_t pitch,
+			uint32_t *imgpal, uint16_t subid, uint32_t frame_duration_us)
 {
 	struct playpriv *p = (struct playpriv *)ctx;
 	SDL_Palette *pal;
@@ -135,7 +135,8 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 		p->drp = NULL;
 	}
 
-	sur = SDL_CreateRGBSurfaceWithFormatFrom(vdata, w, h, 8, w, SDL_PIXELFORMAT_INDEX8);
+	sur = SDL_CreateRGBSurfaceWithFormatFrom(vdata, w, h, 8, pitch,
+			 imgpal ? SDL_PIXELFORMAT_INDEX8 : SDL_PIXELFORMAT_RGB565);
 	if (!sur) {
 		p->err = 1101;
 		return;

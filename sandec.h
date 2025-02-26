@@ -30,7 +30,9 @@
  *  userctx: context data from struct sanio
  *  vbuf, bufsize: image data and size of buffer
  *  w, h: width/height in pixels of image
- *  pal: 256 * 4 byte buffer with palette data in ARGB format
+ *  pitch: line size/stride/pitch in bytes
+ *  pal: 256 * 4 byte buffer with palette data in ARGB format.  If pal is NULL,
+ *   then pixelformat is RGB565, otherwise if PAL is set, the pixelformat is INDEX8.
  *  subid: index of the subtitle to display, or zero.
  *  frame_duration_us: how long to display the frame, in microsecods.  The frame
  *   duration _may_ vary during playback!
@@ -102,8 +104,8 @@
 struct sanio {
 	int(*ioread)(void *userctx, void *dst, uint32_t size);
 	void(*queue_video)(void *userctx, unsigned char *vdata, uint32_t size,
-			  uint16_t w, uint16_t h, uint32_t *pal, uint16_t subid,
-			  uint32_t frame_duration_us);
+			  uint16_t w, uint16_t h, uint16_t pitch, uint32_t *pal,
+			  uint16_t subid, uint32_t frame_duration_us);
 	void(*queue_audio)(void *userctx, unsigned char *adata, uint32_t size);
 	void *userctx;
 	uint32_t flags;

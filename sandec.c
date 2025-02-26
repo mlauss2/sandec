@@ -1805,8 +1805,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			rt->bufw = wr;
 			rt->bufh = hr;
 			rt->pitch = wr;
-			rt->frmw = wr;
-			rt->frmh = hr;
+			rt->frmw = 320;
+			rt->frmh = 200;
 		} else {
 			/* don't know (yet) */
 			if ((left == 0) && (top == 0) && (w >= 320) && (h >= 200)
@@ -1827,7 +1827,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			rt->bufh = _max(rt->bufh, hr);
 			rt->fbsize = rt->bufw * rt->bufh * 1;
 		}
-	} else if (rt->have_vdims && ((w > rt->bufw) || (h > rt->bufh))) {
+	}
+	else if (rt->have_vdims && ((w > rt->bufw) || (h > rt->bufh))) {
 		rt->bufw = _max(rt->bufw, wr);
 		rt->bufh = _max(rt->bufh, hr);
 		rt->pitch = _max(rt->pitch, rt->bufw);
@@ -1907,14 +1908,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		/* RA1 has a 384x242 internal window, but presents at 320x200.
 		 * The Full Throttle "blink*.san" animations have the same dimensions,
 		 * but only content in the 320x200 upper left area.
-		 * Copy the visible area to a new buffer.
 		 */
 		if (rt->version < 2) {
-			int i, j;
-			for (i = 0; i < 200; i++)
-				for (j = 0; j < 320; j++)
-					*(rt->buf4 + (i * 320) + j) = *(rt->vbuf + (i * rt->pitch) + j);
-			rt->vbuf = rt->buf4;
 			rt->frmw = 320;
 			rt->frmh = 200;
 		}
@@ -2872,12 +2867,12 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 				memcpy(rt->buf4, rt->vbuf, rt->frmw * rt->frmh * 1);
 				ctx->io->queue_video(ctx->io->userctx, rt->buf5,
 					     rt->frmw * rt->frmh * 1,
-					     rt->frmw, rt->frmh, rt->palette,
+					     rt->frmw, rt->frmh, rt->pitch, rt->palette,
 					     rt->subid, rt->framedur / 2);
 			} else {
 				ctx->io->queue_video(ctx->io->userctx, rt->vbuf,
 					     rt->frmw * rt->frmh * 1,
-					     rt->frmw, rt->frmh, rt->palette,
+					     rt->frmw, rt->frmh, rt->pitch, rt->palette,
 					     rt->subid, rt->framedur);
 				/* save frame as possible interpolation source */
 				if (rt->have_itable)
@@ -3024,7 +3019,7 @@ int sandec_decode_next_frame(void *sanctx)
 		struct sanrt *rt = &ctx->rt;
 		rt->have_ipframe = 0;
 		ctx->io->queue_video(ctx->io->userctx, rt->vbuf, rt->fbsize,
-				     rt->frmw, rt->frmh, rt->palette,
+				     rt->frmw, rt->frmh, rt->pitch, rt->palette,
 				     rt->subid, rt->framedur / 2);
 		return SANDEC_OK;
 	}
