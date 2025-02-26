@@ -199,6 +199,7 @@ struct sanctx {
 	uint8_t c23lut[256];
 	uint8_t c45tbl1[768];
 	uint8_t c45tbl2[0x8000];
+	uint16_t c4tblparam;
 };
 
 /* Codec37/Codec48 motion vectors */
@@ -1596,7 +1597,9 @@ static void codec5(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		   uint16_t h, int16_t top, int16_t left, uint32_t size,
 		   uint8_t param, uint16_t param2)
 {
-	c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	if (ctx->c4tblparam != param)
+		c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	ctx->c4tblparam = param;
 	codec5_main(ctx, dst, src, w, h, top, left, size, param, param2);
 }
 
@@ -1604,7 +1607,9 @@ static void codec34(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t top, int16_t left, uint32_t size,
 		    uint8_t param, uint16_t param2)
 {
-	c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	if (ctx->c4tblparam != (param + 0x100))
+		c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	ctx->c4tblparam = param + 0x100;
 	codec5_main(ctx, dst, src, w, h, top, left, size, param, param2);
 }
 
@@ -1661,7 +1666,9 @@ static void codec33(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t top, int16_t left, uint32_t size,
 		    uint8_t param, uint16_t param2)
 {
-	c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	if (ctx->c4tblparam != (param + 0x100))
+		c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	ctx->c4tblparam = param + 0x100;
 	codec4_main(ctx, dst, src, w, h, top, left, size, param, param2);
 }
 
@@ -1669,7 +1676,9 @@ static void codec4(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		   uint16_t h, int16_t top, int16_t left, uint32_t size,
 		   uint8_t param, uint16_t param2)
 {
-	c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	if (ctx->c4tblparam != param)
+		c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	ctx->c4tblparam = param;
 	codec4_main(ctx, dst, src, w, h, top, left, size, param, param2);
 }
 
@@ -3084,6 +3093,9 @@ int sandec_open(void *sanctx, struct sanio *io)
 		ret = 4;
 		goto out;
 	}
+
+	/* impossible value in case a FOBJ with param1 == 0 comes first */
+	ctx->c4tblparam = 0xffff;
 
 	/* files can either start with "ANIM____AHDR___" or
 	 * "SAUD____", the latter are not supported yet.

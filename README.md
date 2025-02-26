@@ -3,8 +3,8 @@ intended only to play "Outlaws" videos, since they are awesome),
 with a simple SDL2-based player application to demonstrate library use.
 
 Can also play game movies from Curse of Monkey Island, Shadows of the Empire,
-Mysteries of the Sith, The Dig, Full Throttle,  some of Rebel Assault 1 and most
-of Rebel Assault II.
+Mysteries of the Sith, The Dig, Full Throttle,  almost all of Rebel Assault II
+and roughly half of Rebel Assault I.
 
 If you find this useful, I'd be very happy if you dropped me a line!
 
@@ -19,8 +19,10 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Mysteries of the Sith
   - Full Throttle
   - The Dig
-- Video decoding works for all SMUSH codec1/codec37/codec47/codec48 videos
+  - Rebel Assault II
+- Decodes almost all SMUSHv1/v2 (8bit-paletted) video codecs
   - frame interpolation for codec47/48 videos (default on).
+  - missing codecs 31/32 (RA1 for SEGA), due to no samples available.
 - Audio decoding
   - OK for COMI/Outlaws/MotS/SotE
   - so-so for Full Throttle and The Dig
@@ -42,8 +44,10 @@ If you find this useful, I'd be very happy if you dropped me a line!
 
 # What does **not** yet work:
 - PSAD/iMUSE audio is still very imperfect (All titles up to inclunding The Dig)
-- Rebel Assault I/II
-  - all codecs used in RA1/RA2 are implemented, but the results look terrible. More reversing work is underway. 
+- Rebel Assault I
+  - all codecs used in the DOS Version of RA1 have been implemented, there
+    are still visual glitches in codecs4/5 and pitch issues in most videos.
+- Bl16 Video / VIMA Audio
 
 # Build:
 - Have SDL2
@@ -60,4 +64,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - RA1 has more sound chunks ("Crea" indicates a VOC file dumped into the stream, RAW!/SBL1/SBL2 for I guess, raw PCM.
 - codec4/5 tilegen is still buggy, there are miscolored edges on tiles (L11PLAY.ANM)
 
-20250224
+20250226
