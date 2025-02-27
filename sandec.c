@@ -185,6 +185,7 @@ struct sanrt {
 	uint8_t  acttrks;	/* 1 active audio tracks in this frame	*/
 	uint8_t *atmpbuf1;	/* 8 audio buffer 1			*/
 	uint8_t psadhdr;	/* 1 psad type 1 = old 2 new		*/
+	uint16_t audfragsize;	/* 2 PSAD/iMUS audio fragment size	*/
 };
 
 /* internal context: static stuff. */
@@ -2486,7 +2487,7 @@ static void aud_mix_tracks(struct sanctx *ctx)
 	struct sanrt *rt = &ctx->rt;
 	struct sanatrk *atrk1, *atrk2;
 	int active1, active2, mixable, step, l3;
-	uint32_t minlen1, dstlen, ml2, toend1, toend2, todo;
+	uint32_t minlen1, dstlen, ml2, toend1, toend2, todo, dff;
 	uint8_t *dstptr, *src1, *src2, *aptr;
 
 	dstlen = 0;
@@ -2494,8 +2495,20 @@ static void aud_mix_tracks(struct sanctx *ctx)
 	dstptr = aptr = rt->atmpbuf1;
 
 _aud_mix_again:
+	dff = rt->audfragsize - dstlen;
 	mixable = aud_count_mixable(rt, &minlen1);
 	active1 = aud_count_active(rt);
+
+	if (dff < 1)
+		goto done;
+
+	if (dff && (minlen1 == -1)) {
+		/* hmm underrun */
+		goto done;
+	}
+
+	if (minlen1 > dff)
+		minlen1 = dff;
 
 	/* only one mixable track found.  If we haven't mixed before, we can
 	 * queue the track buffer directly; otherwise we append to the dest
@@ -2508,8 +2521,8 @@ _aud_mix_again:
 
 		if (step == 0) {
 			aptr = atrk1->data + atrk1->rdptr;
-			dstlen += atrk1->datacnt;
-			aud_atrk_consume(rt, atrk1, atrk1->datacnt);
+			dstlen += minlen1;
+			aud_atrk_consume(rt, atrk1, minlen1);
 		} else {
 			toend1 = ATRK_MAXWP - atrk1->rdptr;
 			if (minlen1 <= toend1) {
@@ -2622,9 +2635,11 @@ _aud_mix_again:
 			 * clear the MIXED flag from all active streams.
 			 */
 			aud_reset_mixable(rt);
-			goto _aud_mix_again;
 		}
+		if (minlen1 < dff)
+			goto _aud_mix_again;
 	}
+done:
 	aud_reset_mixable(rt);
 	if (dstlen)
 		ctx->io->queue_audio(ctx->io->userctx, aptr, dstlen);
@@ -2647,6 +2662,8 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			iact_audio_scaled(ctx, size - 18, src + 18);
 		} else {
 			/* imuse-type */
+			if (!ctx->rt.audfragsize)
+				ctx->rt.audfragsize = 7352;
 			iact_buffer_imuse(ctx, size - 18, src + 18, p[4], p[3]);
 		}
 	}
@@ -2911,7 +2928,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
 	uint32_t maxframe;
-	uint8_t *ahbuf;
+	uint8_t *ahbuf, fps;
 
 	ahbuf = (uint8_t *)malloc(size);
 	if (!ahbuf)
@@ -2928,7 +2945,8 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 
 	if (rt->version > 1) {
 		rt->framedur  =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
-		rt->framedur = 1000000 / rt->framedur;
+		fps = rt->framedur;
+		rt->framedur = 1000000 / fps;
 		maxframe =       le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
 		rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
 
@@ -2943,10 +2961,13 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 			}
 		}
 	} else {
-		rt->framedur = 1000000 / 15;	/* ANIMv1 default */
+		fps = 15;
+		rt->framedur = 1000000 / fps;	/* ANIMv1 default */
 		rt->samplerate = 11025;		/* ANIMv1 default */
 		rt->frmebufsz = 0;
 	}
+	/* minimum audio fragment size per FRME to sustain click-free playback */
+	rt->audfragsize = (((22050 * 2 * 2) / fps) + 3) & ~3;
 
 	free(ahbuf);
 	return 0;
