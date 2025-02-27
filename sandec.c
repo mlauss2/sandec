@@ -2690,12 +2690,13 @@ static int handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		xsize -= csz;
 		size -= csz;
 	}
-	if (size > 0) {
-		aud_read_pcmsrc(ctx, atrk, size, src);
-		atrk->dataleft -= size;
-		if (atrk->dataleft < 0)
-			atrk->flags |= AUD_SRCDONE;
-	}
+	if (size > atrk->dataleft)
+		size = atrk->dataleft;
+	aud_read_pcmsrc(ctx, atrk, size, src);
+	atrk->dataleft -= size;
+	if (atrk->dataleft <= 0)
+		atrk->flags |= AUD_SRCDONE;
+
 	return 0;
 }
 
@@ -2745,12 +2746,12 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		if (!atrk)
 			return 16;
 
-		if (size > atrk->dataleft) {
+		if (size > atrk->dataleft)
 			size = atrk->dataleft;
-			atrk->flags |= AUD_SRCDONE;
-		}
 		aud_read_pcmsrc(ctx, atrk, size, src);
 		atrk->dataleft -= size;
+		if (atrk->dataleft < 1)
+			atrk->flags |= AUD_SRCDONE;
 	}
 	return 0;
 }
