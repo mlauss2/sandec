@@ -2669,7 +2669,7 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
-static int handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
+static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			uint32_t saudsize, uint32_t tid)
 {
 	uint32_t cid, csz, xsize = _min(size, saudsize);
@@ -2678,7 +2678,18 @@ static int handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 
 	atrk = aud_find_trk(ctx, tid, 0);
 	if (!atrk)
-		return 17;
+		return;
+
+	/* RA1 does this */
+	if (atrk->flags != 0) {
+		atrk->wrptr = 0;
+		atrk->rdptr = 0;
+		atrk->datacnt = 0;
+		atrk->dataleft = 0;
+		atrk->flags = 0;
+		atrk->pdcnt = 0;
+		atrk->trkid = tid;
+	}
 
 	rate = ctx->rt.samplerate;
 	atrk->flags = AUD_SRC8BIT | AUD_1CH;
@@ -2713,20 +2724,16 @@ static int handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	atrk->dataleft -= size;
 	if (atrk->dataleft <= 0)
 		atrk->flags |= AUD_SRCDONE;
-
-	return 0;
 }
 
-static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
+static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
 	uint32_t t1, csz, tid, idx;
 	struct sanatrk *atrk;
-	int ret;
 
-	ret = 0;
 	if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
-		return 0;
+		return;
 
 	/* scummvm says there are 2 type of psad headers, the old one has
 	 * all zeroes at data offset 4 at index 0 (which is hopefully the first
@@ -2753,15 +2760,15 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		t1 = le32_to_cpu(ua32(src + 0));
 		csz = be32_to_cpu(ua32(src + 4));
 		if (t1 == SAUD) {
-			ret = handle_SAUD(ctx, size - 8, src + 8, csz, tid);
-			if (ret)
-				return ret;
+			handle_SAUD(ctx, size - 8, src + 8, csz, tid);
 		}
 	} else {
-		/* handle_SAUD should have allocated it */
+		/* handle_SAUD should have allocated it.  RA1 however
+		 * sometimes repeats the last index of a tid a few times.
+		 */
 		atrk = aud_find_trk(ctx, tid, 1);
 		if (!atrk)
-			return 16;
+			return;
 
 		if (size > atrk->dataleft)
 			size = atrk->dataleft;
@@ -2770,7 +2777,6 @@ static int handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		if (atrk->dataleft < 1)
 			atrk->flags |= AUD_SRCDONE;
 	}
-	return 0;
 }
 
 /* subtitles: index of message in the Outlaws LOCAL.MSG file, 10000 - 12001.
@@ -2875,8 +2881,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case XPAL: handle_XPAL(ctx, csz, src); break;
 		case PVOC: /* fallthrough */
 		case PSD2: /* fallthrough */
-		case PSAD: ret = handle_PSAD(ctx, csz, src); break;
-		default:   ret = 0;     /* unknown chunk, ignore */
+		case PSAD: handle_PSAD(ctx, csz, src); break;
+		default:   ret = 0;		/* unknown chunk, ignore */
 		}
 
 		src += csz;
