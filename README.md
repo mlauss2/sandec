@@ -1,10 +1,9 @@
 Single-file A/V decoder library for LucasArts SAN/SMUSH movie files (originally
 intended only to play "Outlaws" videos, since they are awesome),
-with a simple SDL2-based player application to demonstrate library use.
+with an SDL2-based player application to demonstrate library use.
 
 Can also play game movies from Curse of Monkey Island, Shadows of the Empire,
-Mysteries of the Sith, The Dig, Full Throttle,  almost all of Rebel Assault II
-and roughly half of Rebel Assault I.
+Mysteries of the Sith, The Dig, Full Throttle,  Rebel Assault II and Rebel Assault I.
 
 If you find this useful, I'd be very happy if you dropped me a line!
 
@@ -20,14 +19,18 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Full Throttle
   - The Dig
   - Rebel Assault II
+    - few sound issues
+  - Rebel Assault I
+    - palette issues resulting in wrong colors and black squares in some videos.
+    - sound issues in a lot of videos.
 - Decodes almost all SMUSHv1/v2 (8bit-paletted) video codecs
   - frame interpolation for codec47/48 videos (default on).
   - missing codecs 31/32 (RA1 for SEGA), due to no samples available.
 - Audio decoding
   - OK for COMI/Outlaws/MotS/SotE
-  - so-so for Full Throttle and The Dig
-    - it's far from perfect: upsampling is terrible, plays too slowly for some unknown
-      reason, some tracks should overlap but don't, ...
+  - acceptable for RA1/RA2/Full Throttle/The Dig
+    - source is 11kHz/8bit/mono, but very crudely upsampled to 22kHz/16bit/stereo
+    - volume/pan flags are currently ignored
 - very good A/V sync in player
   - Outlaws IN_SHB.SAN (Level 1 Intro) the sound of the shovel hitting the ground perfectly matches the video (at around 5 minutes).
 - player keyboard controls:
@@ -43,10 +46,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - BE targets are untested, there are probably issues with the audio format and palette.
 
 # What does **not** yet work:
-- PSAD/iMUSE audio is still very imperfect (All titles up to inclunding The Dig)
-- Rebel Assault I
-  - all codecs used in the DOS Version of RA1 have been implemented, there
-    are still visual glitches in codecs4/5.
 - Bl16 Video / VIMA Audio
 
 # Build:
@@ -61,7 +60,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
 # Dev Notes
-- RA1 has more sound chunks ("Crea" indicates a VOC file dumped into the stream, RAW!/SBL1/SBL2 for I guess, raw PCM.
-- codec4/5 tilegen is still buggy, there are miscolored edges on tiles (L11PLAY.ANM)
+- look at RA1 palette code
+- add the codec4/5 block smoothing code
 
-20250226
+20250228
