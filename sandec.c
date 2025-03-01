@@ -1761,11 +1761,11 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	codec = src[0];
 	param = src[1];
 
-	left = le16_to_cpu(*( int16_t *)(src + 2));
-	top  = le16_to_cpu(*( int16_t *)(src + 4));
-	w = wr = le16_to_cpu(*(uint16_t *)(src + 6));
-	h = hr = le16_to_cpu(*(uint16_t *)(src + 8));
-	param2 = le16_to_cpu(*(uint16_t *)(src + 12));
+	left = le16_to_cpu(ua16(src + 2));
+	top  = le16_to_cpu(ua16(src + 4));
+	w = wr = le16_to_cpu(ua16(src + 6));
+	h = hr = le16_to_cpu(ua16(src + 8));
+	param2 = le16_to_cpu(ua16(src + 12));
 
 	/* ignore nonsensical dimensions in frames, happens with
 	 * some Full Throttle and RA2 videos.
