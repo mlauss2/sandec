@@ -2831,6 +2831,9 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		*(int16_t *)(vb + 6) = cpu_to_le16(left);
 		*(int16_t *)(vb + 8) = cpu_to_le16(top);
 	}
+	ctx->rt.can_ipol = 0;
+	if (ret == 0)
+		ctx->rt.have_frame = 1;
 	return ret;
 }
 
