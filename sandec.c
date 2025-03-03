@@ -1830,12 +1830,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			rt->fbsize = rt->bufw * rt->bufh * 1;
 		}
 	}
-	else if (rt->have_vdims && ((w > rt->bufw) || (h > rt->bufh))) {
-		rt->bufw = _max(rt->bufw, wr);
-		rt->bufh = _max(rt->bufh, hr);
-		rt->pitch = _max(rt->pitch, rt->bufw);
-		rt->fbsize = rt->pitch * rt->bufh * 1;
-	}
 
 	/* default image buffer is buf0 */
 	rt->vbuf = rt->buf0;
