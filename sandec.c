@@ -42,18 +42,6 @@
 #define be16_to_cpu(x) bswap_16(x)
 #define cpu_to_le16(x) (x)
 
-/* read an unaligned 16bit value from memory */
-static inline uint16_t ua16(uint8_t *p)
-{
-	return p[0] | p[1] << 8;
-}
-
-/* read an unaligned 32bit value from memory */
-static inline uint32_t ua32(uint8_t *p)
-{
-	return p[0] | p[1] << 8 | p[2] << 16 | p[3] << 24;
-}
-
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 
 #define be32_to_cpu(x)  (x)
@@ -62,23 +50,23 @@ static inline uint32_t ua32(uint8_t *p)
 #define le16_to_cpu(x)  bswap_16(x)
 #define cpu_to_le16(x)  bswap_16(x)
 
-/* read an unaligned 16bit value from memory */
-static inline uint16_t ua16(uint8_t *p)
-{
-	return p[1] | p[0] << 8;
-}
-
-/* read an unaligned 32bit value from memory */
-static inline uint32_t ua32(uint8_t *p)
-{
-	return p[3] | p[2] << 8 | p[1] << 16 | p[0] << 24;
-}
-
 #else
 
 #error "unknown endianness"
 
 #endif
+
+/* bytewise read an unaligned 16bit value from memory */
+static inline uint16_t ua16(uint8_t *p)
+{
+	return p[0] | p[1] << 8;
+}
+
+/* bytewise read an unaligned 32bit value from memory */
+static inline uint32_t ua32(uint8_t *p)
+{
+	return p[0] | p[1] << 8 | p[2] << 16 | p[3] << 24;
+}
 
 /* chunk identifiers LE */
 #define ANIM	0x4d494e41
