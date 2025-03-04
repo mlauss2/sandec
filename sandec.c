@@ -694,6 +694,12 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 		*pal++ = 0xff << 24 | t[2] << 16 | t[1] << 8 | t[0];
 		i++;
 	}
+	/* HACK: (not sure though if really a hack): palette index 0
+	 * is always 0/0/0 for RA1. Fixes a lot of scenes with blue/
+	 * white/gray/.. space backgrounds, at least until the next NPAL.
+	 */
+	if (rt->version < 2)
+		rt->palette[0] = 0;
 }
 
 static void interpolate_frame(uint8_t *dst, const uint8_t *sr1, const uint8_t *srs,
