@@ -1871,6 +1871,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	case 4:   codec4(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
 	case 5:   codec5(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
 	case 20: codec20(ctx, rt->vbuf, src, w, h, top, left, size); break;
+	case 44:
 	case 21: codec21(ctx, rt->vbuf, src, w, h, top ,left, size, param); break;
 	case 23: codec23(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
 	case 33: codec33(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
@@ -2943,7 +2944,6 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	if (rt->version > 1) {
 		rt->framedur  =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
 		fps = rt->framedur;
-		rt->framedur = 1000000 / fps;
 		maxframe =       le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
 		rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
 
@@ -2958,11 +2958,14 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 			}
 		}
 	} else {
-		fps = 15;
-		rt->framedur = 1000000 / fps;	/* ANIMv1 default */
+		fps = 15;			/* ANIMv1 default */
 		rt->samplerate = 11025;		/* ANIMv1 default */
 		rt->frmebufsz = 0;
 	}
+
+	if (!fps)
+		fps = 15;
+	rt->framedur = 1000000 / fps;
 	/* minimum audio fragment size per FRME to sustain click-free playback */
 	rt->audfragsize = (((22050 * 2 * 2) / fps) + 3) & ~3;
 
