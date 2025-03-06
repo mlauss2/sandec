@@ -3062,15 +3062,22 @@ int sandec_decode_next_frame(void *sanctx)
 
 	ret = read_source(ctx, c, 8);
 	if (ret) {
-		if (ctx->rt.currframe >= ctx->rt.FRMEcnt)
+		if (ctx->rt.currframe >= ctx->rt.FRMEcnt) {
 			ret = SANDEC_DONE;	/* seems we reached file end */
+			while ((ctx->rt.acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)))
+				aud_mix_tracks(ctx);
+		}
 		goto out;
 	}
 
 	c[1] = be32_to_cpu(c[1]);
-	switch (c[0]) {
-	case FRME: 	ret = handle_FRME(ctx, c[1]); break;
-	default:	ret = 10;
+	if (c[0] == FRME) {
+		/* default case */
+		ret = handle_FRME(ctx, c[1]);
+	} else if (ctx->rt.acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)) {
+		aud_mix_tracks(ctx);
+	} else {
+		ret = 10;
 	}
 
 out:
@@ -3141,10 +3148,21 @@ int sandec_open(void *sanctx, struct sanio *io)
 		ret = handle_AHDR(ctx, be32_to_cpu(c[1]));
 
 	} else if (c[0] == SAUD) {
-		/* FIXME: implement later */
+		uint32_t csz = be32_to_cpu(c[1]);
 		ret = 8;
-		goto out;
-
+		if ((csz < 8) || (csz > (1 << 20))) {
+			goto out;
+		} else {
+			uint8_t *dat = malloc(csz);
+			if (!dat)
+				goto out;
+			if (read_source(ctx, dat, csz))
+				goto out;
+			handle_SAUD(ctx, csz, dat, csz, 0);
+			free(dat);
+			ctx->rt.audfragsize = 32768;
+			ret = ctx->rt.acttrks > 0 ? 0 : 8;
+		}	
 	} else {
 		ret = 9;
 	}
