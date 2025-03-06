@@ -3110,6 +3110,7 @@ int sandec_open(void *sanctx, struct sanio *io)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
 	uint32_t c[2];
+	uint8_t *dat;
 	int ret;
 
 	if (!io || !sanctx) {
@@ -3153,14 +3154,16 @@ int sandec_open(void *sanctx, struct sanio *io)
 		if ((csz < 8) || (csz > (1 << 20))) {
 			goto out;
 		} else {
-			uint8_t *dat = malloc(csz);
+			dat = malloc(csz);
 			if (!dat)
 				goto out;
-			if (read_source(ctx, dat, csz))
+			if (read_source(ctx, dat, csz)) {
+				free(dat);
 				goto out;
+			}
 			handle_SAUD(ctx, csz, dat, csz, 0);
 			free(dat);
-			ctx->rt.audfragsize = 32768;
+			ctx->rt.audfragsize = (22050 * 2 * 2) / 2; /* half a sec */
 			ret = ctx->rt.acttrks > 0 ? 0 : 8;
 		}	
 	} else {
