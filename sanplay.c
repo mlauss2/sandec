@@ -142,18 +142,20 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 		return;
 	}
 
-	pal = SDL_AllocPalette(256);
-	if (!pal) {
-		SDL_FreeSurface(sur);
-		p->err = 1102;
-		return;
-	}
-	memcpy(pal->colors, imgpal, 256 * sizeof(uint32_t));
-	ret = SDL_SetSurfacePalette(sur, pal);
-	if (ret) {
-		SDL_FreeSurface(sur);
-		p->err = 1103;
-		return;
+	if (imgpal) {
+		pal = SDL_AllocPalette(256);
+		if (!pal) {
+			SDL_FreeSurface(sur);
+			p->err = 1102;
+			return;
+		}
+		memcpy(pal->colors, imgpal, 256 * sizeof(uint32_t));
+		ret = SDL_SetSurfacePalette(sur, pal);
+		if (ret) {
+			SDL_FreeSurface(sur);
+			p->err = 1103;
+			return;
+		}
 	}
 
 	tex = SDL_CreateTextureFromSurface(p->ren, sur);

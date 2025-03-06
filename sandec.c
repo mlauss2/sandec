@@ -2896,12 +2896,12 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 				rt->can_ipol = 0;
 				memcpy(rt->buf4, rt->vbuf, rt->frmw * rt->frmh * 1);
 				ctx->io->queue_video(ctx->io->userctx, rt->buf5,
-					     rt->frmw * rt->frmh * 1,
+					     rt->pitch * rt->frmh,
 					     rt->frmw, rt->frmh, rt->pitch, rt->palette,
 					     rt->subid, rt->framedur / 2);
 			} else {
 				ctx->io->queue_video(ctx->io->userctx, rt->vbuf,
-					     rt->frmw * rt->frmh * 1,
+					     rt->pitch * rt->frmh * 1,
 					     rt->frmw, rt->frmh, rt->pitch, rt->palette,
 					     rt->subid, rt->framedur);
 				/* save frame as possible interpolation source */
@@ -3054,7 +3054,7 @@ int sandec_decode_next_frame(void *sanctx)
 	if (ctx->rt.have_ipframe) {
 		struct sanrt *rt = &ctx->rt;
 		rt->have_ipframe = 0;
-		ctx->io->queue_video(ctx->io->userctx, rt->vbuf, rt->fbsize,
+		ctx->io->queue_video(ctx->io->userctx, rt->vbuf, rt->pitch * rt->frmh,
 				     rt->frmw, rt->frmh, rt->pitch, rt->palette,
 				     rt->subid, rt->framedur / 2);
 		return SANDEC_OK;
