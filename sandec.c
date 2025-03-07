@@ -2271,8 +2271,8 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			bl16_comp2((uint8_t *)dst, src, width, height,
 				   (uint8_t *)db1, (uint8_t *)db2, tbl1, tbl2, ctx);
 		break;
-	case 3:	memcpy(dst, db1, rt->fbsize); break;
-	case 4: memcpy(dst, db2, rt->fbsize); break;
+	case 3:	memcpy(dst, db1, width * height * 2); break;
+	case 4: memcpy(dst, db2, width * height * 2); break;
 	case 5: codec47_comp5(src, (uint8_t *)dst, decsize); break;
 	case 6: bl16_comp6(dst, src, width, height, tbl2); break;
 	case 7: bl16_comp7(dst, src, width, height, tbl2); break;
@@ -2281,7 +2281,7 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	rt->vbuf = rt->buf0;
 	rt->have_frame = 1;
-	rt->palette = nullptr;
+	rt->palette = NULL;
 	if (seq == rt->lastseq + 1)
 		c47_swap_bufs(ctx, newrot);
 	rt->lastseq = seq;
