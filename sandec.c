@@ -89,6 +89,11 @@ static inline uint32_t ua32(uint8_t *p)
 #define SDAT	0x54414453
 #define PVOC	0x434f5650
 #define PSD2	0x32445350
+#define SANM	0x4d4e4153
+#define SHDR	0x52444853
+#define FLHD	0x44484c46
+#define BL16	0x36316c42
+#define WAVE	0x65766157
 
 /* maximum image size */
 #define VID_MAXX	800
@@ -173,7 +178,8 @@ struct sanrt {
 	uint8_t  acttrks;	/* 1 active audio tracks in this frame	*/
 	uint8_t *atmpbuf1;	/* 8 audio buffer 1			*/
 	uint8_t psadhdr;	/* 1 psad type 1 = old 2 new		*/
-	uint16_t audfragsize;	/* 2 PSAD/iMUS audio fragment size	*/
+	uint32_t audfragsize;	/* 2 PSAD/iMUS audio fragment size	*/
+	uint32_t audchans;	/* 4 VIMA audio channel count		*/
 };
 
 /* internal context: static stuff. */
@@ -1911,6 +1917,376 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	return ret;
 }
 
+/* like c47_comp5 but adjusted for tbl2 lookups */
+static void bl16_comp8(uint16_t *dst, uint8_t *src, uint32_t left, uint16_t *tbl2)
+{
+	uint8_t opc, rlen, j;
+	uint16_t col;
+
+	left >>= 1;	/* 16bit pixels */
+	while (left) {
+		opc = *src++;
+		rlen = (opc >> 1) + 1;
+		if (rlen > left)
+			rlen = left;
+		if (opc & 1) {
+			col = tbl2[*src++];		/* le16_to_cpu() ? */
+			for (j = 0; j < rlen; j++)
+				*dst++ = col;
+		} else {
+			for (j = 0; j < rlen; j++)
+				*dst++ = tbl2[*src++];	/* le16_to_cpu() ? */
+		}
+		left -= rlen;
+	}
+}
+
+/* TGSMUSH.DLL 1000c690 */
+static inline uint16_t bl16_c7_avg_col(uint16_t c1, uint16_t c2)
+{
+	return	(((c2 & 0x07e0) + (c1 & 0x07e0)) & 0x00fc0) |
+		(((c2 & 0xf800) + (c1 & 0xf800)) & 0x1f000) |
+		(((c2 & 0x001f) + (c1 & 0x001f))) >> 1;
+}
+
+/* this is basically codec47_comp1(), but for 16bit colors, with color averaging
+ * instead of the interpolation table.
+ * TGSMUSH.DLL c6f0
+ */
+static void bl16_comp7(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
+		       uint16_t *tbl2)
+{
+	uint16_t hh, hw, c1, c2, c3;
+	uint8_t *dst1, *dst2;
+
+	if (h > 0) {
+		hh = (h + 1) >> 1;
+		dst1 = (uint8_t *)(dst + (w * 2));
+		do {
+			dst2 = dst1 + 4;
+			c1 = tbl2[*src++];
+			*(uint32_t *)dst1 = (c1 << 16 | c1);
+			if (w - 2 > 0) {
+				hw = (w - 1) >> 1;
+				do {
+					c2 = tbl2[*src++];
+					c3 = bl16_c7_avg_col(c1, c2) & 0xffff;
+					*(uint32_t *)dst2 = c2 << 16 | c3;
+					dst2 += 4;
+					c1 = c2;
+				} while (--hw != 0);
+			}
+			dst1 += w * 2;	/* next line */
+		} while (--hh != 0);
+	}
+
+	/* top row is a copy of 2nd row */
+	memcpy(dst, dst + w * 2, w * 2);
+
+	dst1 = (uint8_t *)(dst + (w * 4));
+	if (h - 2 > 0) {
+		hh = (h - 1) >> 1;
+		while (hh--) {
+			hw = w;				/* width is pixels! */
+			while (hw--) {
+				c1 = *(uint16_t *)(dst1 - (w * 2)); /* above */
+				c2 = *(uint16_t *)(dst1 + (w * 2)); /* below */
+				c3 = bl16_c7_avg_col(c1, c2);
+				*(uint16_t *)dst1 = c3;
+				dst1 += 2;		/* 16 bit pixel */
+			}
+		}
+	}
+}
+
+/* TGSMUSH.DLL c0b4 */
+static void bl16_comp6(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
+		       uint16_t *tbl2)
+{
+	int i;
+	for (i = 0; i < w * h; i++) {
+		*dst++ = tbl2[*src++];
+	}
+}
+
+/* TGSMUSH.DLL c5a0 */
+static void bl16_comp1(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h)
+{
+	const uint32_t stride = 2 * w;
+	uint8_t *dst1, *dst2;
+	uint16_t hh, hw, c1, c2, c3;
+
+	if (h > 0) {
+		hh = (h + 1) >> 1;
+		dst1 = ((uint8_t *)dst) + stride;
+		while (hh--) {
+			c1 = *(uint16_t *)src;		/* FIXME: le16_to_cpu() ? */
+			src += 2;
+			*(uint32_t *)dst1 = c1 << 16 | c1;
+			dst2 = dst1 + 4;		/* 2 16bit pixels */
+			if (w - 2 > 0) {
+				hw = (w - 1) >> 1;
+				while (hw--) {
+					c2 = *(uint16_t *)src;	/* FIXME: le16_to_cpu() ? */
+					src += 2;
+					c3 = bl16_c7_avg_col(c1, c2) & 0xffff;
+					*(uint32_t *)dst2 = c2 << 16 | c3;
+					dst2 += 4;	/* 2 16bit pixels */
+					c1 = c2;
+				}
+			}
+			dst1 += 2 * stride;	/* start of 2nd next line */
+		}
+
+	}
+	memcpy(dst, dst + stride, stride);
+	dst1 = ((uint8_t *)dst) + (2 * stride);
+	if (h - 2 > 0) {
+		hh = (h - 1) >> 1;
+		while (hh--) {
+			hw = w;
+			while (hw--) {
+				c1 = *(uint16_t *)(dst1 + stride);
+				c2 = *(uint16_t *)(dst1 - stride);
+				c3 = bl16_c7_avg_col(c1, c2) & 0xffff;
+				*(uint16_t *)dst1 = c3;
+				dst1 += 2;	/* 1 16bit pixel */
+			}
+			dst1 += stride;
+		}
+	}
+}
+
+static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db2,
+			   uint16_t *tbl1, uint16_t *tbl2, uint16_t w,
+			   uint32_t stride, uint8_t blksize, struct sanctx *ctx)
+{
+	uint16_t o2, c[2];
+	int32_t mvofs;
+	uint32_t ofs;
+	int8_t *pglyph;
+	uint8_t opc;
+	int i, j;
+
+	opc = *src++;
+	switch (opc) {
+	case 0xff:
+		if (blksize == 2) {
+			*(uint16_t *)(dst + 0      + 0) = le16_to_cpu(ua16(src));
+			src += 2;
+			*(uint16_t *)(dst + 0      + 2) = le16_to_cpu(ua16(src));
+			src += 2;
+			*(uint16_t *)(dst + stride + 0) = le16_to_cpu(ua16(src));
+			src += 2;
+			*(uint16_t *)(dst + stride + 2) = le16_to_cpu(ua16(src));
+			src += 2;
+		} else {
+		blksize >>= 1;
+		src = bl16_block(src, dst, db1, db2, tbl1, tbl2, w, stride, blksize, ctx);
+		src = bl16_block(src, dst + (blksize * 2), db1 + (blksize * 2),
+				 db2 + (blksize * 2), tbl1, tbl2, w, stride, blksize, ctx);
+		dst += stride * blksize;
+		db1 += stride * blksize;
+		db2 += stride * blksize;
+		src = bl16_block(src, dst, db1, db2, tbl1, tbl2, w, stride, blksize, ctx);
+		src = bl16_block(src, dst + (blksize * 2), db1 + (blksize * 2),
+				 db2 + (blksize * 2), tbl1, tbl2, w, stride, blksize, ctx);
+		}
+		break;
+	case 0xfe:
+		/* fill a block with a color value from the stream */
+		c[0] = le16_to_cpu(ua16(src));
+		src += 2;
+		for (i = 0; i < blksize; i++) {
+			ofs = i * stride;
+			for (j = 0; j < blksize; j++) {
+				*(uint16_t *)(dst + ofs + j * 2) = c[0];
+			}
+		}
+		break;
+	case 0xfd:
+		/* fill a block using tbl2 color, index from next byte */
+		c[0] = tbl2[*src++];
+		for (i = 0; i < blksize; i++) {
+			ofs = i * stride;
+			for (j = 0; j < blksize; j++) {
+				*(uint16_t *)(dst + ofs + j * 2) = c[0];
+			}
+		}
+		break;
+	case 0xfc:
+	case 0xfb:
+	case 0xfa:
+	case 0xf9:
+		/* fill a block using tbl1 color */
+		c[0] = tbl1[(opc - 0xf9)];
+		for (i = 0; i < blksize; i++) {
+			ofs = i * stride;
+			for (j = 0; j < blksize; j++) {
+				*(uint16_t *)(dst + ofs + j * 2) = c[0];
+			}
+		}
+		break;
+	case 0xf8:
+		if (blksize == 2) {
+			*(uint16_t *)(dst + 0      + 0) = le16_to_cpu(ua16(src));
+			src += 2;
+			*(uint16_t *)(dst + 0      + 2) = le16_to_cpu(ua16(src));
+			src += 2;
+			*(uint16_t *)(dst + stride + 0) = le16_to_cpu(ua16(src));
+			src += 2;
+			*(uint16_t *)(dst + stride + 2) = le16_to_cpu(ua16(src));
+			src += 2;
+		} else {
+			opc = *src++;
+			c[0] = le16_to_cpu(ua16(src));
+			src += 2;
+			c[1] = le16_to_cpu(ua16(src));
+			src += 2;
+			pglyph = (blksize == 8) ? ctx->c47_glyph8x8[opc] : ctx->c47_glyph4x4[opc];
+			for (i = 0; i < blksize; i++) {
+				for (j = 0; j < blksize; j++) {
+					*(uint16_t *)(dst + (i * stride) + (j * 2)) = c[!*pglyph++];
+				}
+			}
+		}
+		break;
+	case 0xf7:
+		if (blksize == 2) {
+			ofs = le32_to_cpu(ua32(src));
+			src += 4;
+			*(uint16_t *)(dst + 0      + 0) = tbl2[ofs & 0xff];
+			ofs >>= 8;
+			*(uint16_t *)(dst + 0      + 2) = tbl2[ofs & 0xff];
+			ofs >>= 8;
+			*(uint16_t *)(dst + stride + 0) = tbl2[ofs & 0xff];
+			ofs >>= 8;
+			*(uint16_t *)(dst + stride + 2) = tbl2[ofs & 0xff];
+		} else {
+			opc = *src++;
+			c[0] = tbl2[*src++];
+			c[1] = tbl2[*src++];
+			pglyph = (blksize == 8) ? ctx->c47_glyph8x8[opc] : ctx->c47_glyph4x4[opc];
+			for (i = 0; i < blksize; i++) {
+				for (j = 0; j < blksize; j++) {
+					*(uint16_t *)(dst + (i * stride) + (j * 2)) = c[!*pglyph++];
+				}
+			}
+		}
+		break;
+	case 0xf6:	/* copy from db1 at same spot */
+		for (i = 0; i < blksize; i++) {
+			ofs = i * stride;
+			for (j = 0; j < blksize; j++) {
+				/* dst and src are at least 16bit aligned */
+				*(uint16_t *)(dst + ofs + j * 2) = *(uint16_t *)(db1 + ofs + j * 2);
+			}
+		}
+		break;
+	case 0xf5:	/* copy from db2, mvec from source */
+		o2 = le16_to_cpu(ua16(src));
+		src += 2;
+		/* mvofs = ((o2 % w) * 2) + ((o2 / w) * stride); */
+		mvofs = o2 * 2;  /* since stride = w*2 */
+		for (i = 0; i < blksize; i++) {
+			ofs = i * stride;
+			for (j = 0; j < blksize; j++) {
+				*(uint16_t *)(dst + ofs + j * 2) = *(uint16_t *)(db2 + ofs + j * 2 + mvofs);
+			}
+		}
+
+		break;
+	default:
+		/* opc is index into c47 mv table, copy 8x8 block from db2 */
+		mvofs = (c47_mv[opc][0] * 2) + (c47_mv[opc][1] * stride);
+		for (i = 0; i < blksize; i++) {
+			ofs = i * stride;
+			for (j = 0; j < blksize; j++) {
+				*(uint16_t *)(dst + ofs + j * 2) = *(uint16_t *)(db2 + ofs + j * 2 + mvofs);
+			}
+		}
+		break;
+	}
+	return src;
+}
+
+static void bl16_comp2(uint8_t *dst, uint8_t *src, uint16_t w, uint16_t h,
+		       uint8_t *db1, uint8_t *db2, uint16_t *tbl1, uint16_t *tbl2,
+		       struct sanctx *ctx)
+{
+	const uint32_t stride = w * 2;
+	int i, j;
+
+	for (j = 0; j < h; j += 8) {
+		for (i = 0; i < 2 * w; i += 8 * 2) {
+			src = bl16_block(src, dst + i, db1 + i , db2 + i, tbl1,
+					 tbl2, w, stride, 8, ctx);
+		}
+		dst += stride * 8;
+		db1 += stride * 8;
+		db2 += stride * 8;
+	}
+}
+
+static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
+{
+	struct sanrt *rt = &ctx->rt;
+	uint16_t *dst, *db1, *db2, width, height, seq;
+	uint16_t *tbl1, *tbl2, bgc;
+	uint8_t codec, newrot;
+	uint32_t decsize;
+	int i;
+
+	dst = (uint16_t *)rt->buf0;
+	db1 = (uint16_t *)rt->buf1;
+	db2 = (uint16_t *)rt->buf2;
+
+	width  = le16_to_cpu(*(uint16_t *)(src + 8));
+	height = le16_to_cpu(*(uint16_t *)(src + 12));
+	seq    = le16_to_cpu(*(uint16_t *)(src + 16));
+	codec  = src[18];
+	newrot = src[19];
+	tbl1 = (uint16_t *)(src + 24);
+	bgc = le16_to_cpu(*(uint16_t *)(src + 32));
+	decsize = le32_to_cpu(*(uint32_t *)(src + 36));
+	tbl2 = (uint16_t *)(src + 40);
+
+	if (seq == 0) {
+		rt->lastseq = -1;
+		for (i = 0; i < width * height; i++) {
+			*db1++ = bgc;
+			*db2++ = bgc;
+		}
+		db1 = (uint16_t *)rt->buf1;
+		db2 = (uint16_t *)rt->buf2;
+	}
+
+	src += 0x230;
+	switch (codec) {
+	case 0: for (i = 0; i < width * height; i++, src += 2)
+			*dst++ = le16_to_cpu(*(uint16_t *)src);
+		break;
+	case 1: bl16_comp1(dst, src, width, height); break;
+	case 2: if (seq == rt->lastseq + 1)
+			bl16_comp2((uint8_t *)dst, src, width, height,
+				   (uint8_t *)db1, (uint8_t *)db2, tbl1, tbl2, ctx);
+		break;
+	case 3:	memcpy(dst, db1, rt->fbsize); break;
+	case 4: memcpy(dst, db2, rt->fbsize); break;
+	case 5: codec47_comp5(src, (uint8_t *)dst, decsize); break;
+	case 6: bl16_comp6(dst, src, width, height, tbl2); break;
+	case 7: bl16_comp7(dst, src, width, height, tbl2); break;
+	case 8: bl16_comp8(dst, src, decsize, tbl2); break;
+	}
+
+	rt->vbuf = rt->buf0;
+	rt->have_frame = 1;
+	rt->palette = nullptr;
+	if (seq == rt->lastseq + 1)
+		c47_swap_bufs(ctx, newrot);
+	rt->lastseq = seq;
+}
+
 static void handle_NPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	read_palette(ctx, src);
@@ -2874,6 +3250,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case PVOC: /* fallthrough */
 		case PSD2: /* fallthrough */
 		case PSAD: handle_PSAD(ctx, csz, src); break;
+		case WAVE: break;
+		case BL16: handle_BL16(ctx, csz, src); break;
 		default:   ret = 0;		/* unknown chunk, ignore */
 		}
 
@@ -2920,6 +3298,16 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	}
 
 	return ret;
+}
+
+static int vima_init(struct sanctx *ctx)
+{
+	return 0;
+}
+
+static int bl16_init(struct sanctx *ctx)
+{
+	return 0;
 }
 
 static int handle_AHDR(struct sanctx *ctx, uint32_t size)
@@ -2971,6 +3359,87 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 
 	free(ahbuf);
 	return 0;
+}
+
+static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
+{
+	struct sanrt *rt = &ctx->rt;
+	uint32_t c[2], sz;
+	uint8_t *src, *sb;
+	int ret;
+
+	/* even the odds */
+	if (csz & 1)
+		csz += 1;
+
+	src = malloc(csz);
+	if (!src)
+		return 50;
+	if (read_source(ctx, src, csz)) {
+		free(src);
+		return 51;
+	}
+
+	rt->version = 3;	/* HACK */
+	rt->FRMEcnt = le32_to_cpu(ua32(src + 2));
+	rt->frmw = le16_to_cpu(*(uint16_t *)(src + 8));
+	rt->frmh = le16_to_cpu(*(uint16_t *)(src + 10));
+	rt->framedur = le32_to_cpu(ua32(src + 14));
+	rt->pitch = 2 * rt->frmw;	/* 16bit colors */
+	free(src);
+	/* there's now >1kB of data left, no idea what it's for.
+	 * at the end there should be FLHD
+	 */
+	if (read_source(ctx, c, 8)) {
+		return 52;
+	}
+	if (c[0] != le32_to_cpu(FLHD)) {
+		return 53;
+	}
+	sz = be32_to_cpu(c[1]);
+	src = malloc(sz);
+	if (!src)
+		return 54;
+	if (read_source(ctx, src, sz)) {
+		free(src);
+		return 55;
+	}
+
+	/* FLHD has again a subchunks for video and audio format.
+	 * we're only interested in the audio format, video was
+	 * already specified in the SHDR.
+	 */
+	ret = 0;
+	sb = src;
+	while ((sz > 7) && (ret == 0)) {
+		c[0] = le32_to_cpu(ua32(src + 0));
+		c[1] = be32_to_cpu(ua32(src + 4));
+		src += 8;
+		sz -= 8;
+		if (c[1] > sz)
+			break;
+		switch (c[0]) {
+		case BL16: break;
+		case WAVE: rt->samplerate = le32_to_cpu(ua32(src + 0));
+			   rt->audchans   = le32_to_cpu(ua32(src + 4));
+			   c[1] = 12;
+			   break;
+		default:   ret = 56;
+		}
+		if (c[1] & 1)
+			c[1]++;
+
+		sz -= c[1];
+		src += c[1];
+	}
+	free(sb);
+
+	if (ret == 0)
+		ret = vima_init(ctx);
+	if (ret == 0)
+		ret = bl16_init(ctx);
+
+	return ret;
 }
 
 static void sandec_free_memories(struct sanctx *ctx)
@@ -3128,7 +3597,7 @@ int sandec_open(void *sanctx, struct sanio *io)
 	/* impossible value in case a FOBJ with param1 == 0 comes first */
 	ctx->c4tblparam = 0xffff;
 
-	/* files can either start with "ANIM____AHDR___" or
+	/* files can either start with "ANIM____AHDR___", "SANM____SHDR____" or
 	 * "SAUD____", the latter are not supported yet.
 	 */
 	ret = read_source(ctx, &c[0], 4 * 2);
@@ -3136,17 +3605,15 @@ int sandec_open(void *sanctx, struct sanio *io)
 		ret = 5;
 		goto out;
 	}
-	if (c[0] == ANIM) {
+	if ((c[0] == ANIM) || (c[0] == SANM)) {
 		ret = read_source(ctx, &c[0], 4 * 2);
-		if (ret) {
-			ret = 6;
-			goto out;
-		}
-		if (c[0] != AHDR) {
+		if (c[0] == AHDR) {
+			ret = handle_AHDR(ctx, be32_to_cpu(c[1]));
+		} else if (c[0] == SHDR) {
+			ret = handle_SHDR(ctx, be32_to_cpu(c[1]));
+		} else {
 			ret = 7;
-			goto out;
 		}
-		ret = handle_AHDR(ctx, be32_to_cpu(c[1]));
 
 	} else if (c[0] == SAUD) {
 		uint32_t csz = be32_to_cpu(c[1]);

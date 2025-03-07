@@ -135,7 +135,7 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 		p->drp = NULL;
 	}
 
-	sur = SDL_CreateRGBSurfaceWithFormatFrom(vdata, w, h, 8, pitch,
+	sur = SDL_CreateRGBSurfaceWithFormatFrom(vdata, w, h, imgpal ? 8 : 16, pitch,
 			 imgpal ? SDL_PIXELFORMAT_INDEX8 : SDL_PIXELFORMAT_RGB565);
 	if (!sur) {
 		p->err = 1101;

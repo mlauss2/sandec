@@ -26,6 +26,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - Decodes almost all SMUSHv1/v2 (8bit-paletted) video codecs
   - frame interpolation for codec47/48 videos (default on).
   - missing codecs 31/32 (RA1 for SEGA), due to no samples available.
+  - BL16 video is implemented, but still buggy.
 - Audio decoding
   - OK for COMI/Outlaws/MotS/SotE
   - acceptable for RA1/RA2/Full Throttle/The Dig
@@ -62,5 +63,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
 # Dev Notes
 - look at RA1 palette code
 - add the codec4/5 block smoothing code
+- BL16 mvecs are somtimes wrong
 
-20250228
+20250307
