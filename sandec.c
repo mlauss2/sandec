@@ -1596,6 +1596,8 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 			/* post processing to smooth out block borders a bit.
 			 * ASSAULT.EXE 121e8 - 12242 for the (c4t&0x80)==0 case.
 			 */
+			if (j == 0 || i == 0)
+				continue;		/* skip on left/top border */
 			if (c4t & 0x80) {
 				for (k = 0; k < 4; k++)
 					*(dst + dstoff) = ((*(dst + dstoff) + *(dst + dstoff - p)) >> 1) | 0x80;
