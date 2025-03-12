@@ -1550,20 +1550,21 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 			uint8_t param, uint16_t param2, int c5)
 {
 	const uint32_t maxpxo = ctx->rt.fbsize;
-	const uint16_t pitch = ctx->rt.pitch;
-	uint8_t mask, bits, idx, *gs;
+	const uint16_t p = ctx->rt.pitch;
+	uint8_t mask, bits, idx, *gs, c4t;
 	int32_t dstoff, dstoff2;
 	int i, j, k, l, bit;
 
+	c4t = ctx->c4tblparam & 0xff;
 	if (param2 > 0) {
-		c4_5_param2(ctx, src, param2, ctx->c4tblparam & 0xff);
+		c4_5_param2(ctx, src, param2, c4t);
 		src += param2 * 8;
 	}
 
 	for (j = 0; j < w; j += 4) {
 		mask = bits = 0;
 		for (i = 0; i < h; i += 4) {
-			dstoff = ((top + i) * pitch) + left + j;	/* curr. block offset */
+			dstoff = ((top + i) * p) + left + j;	/* curr. block offset */
 			if (param2 > 0) {
 				if (bits == 0) {
 					mask = *src++;
@@ -1583,11 +1584,30 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 
 			/* find the 4x4 block in the table and render it */
 			for (k = 0; k < 4; k++) {
-				dstoff2 = dstoff + (k * pitch);
-				for (l = 0; l < 4; l++, gs++) {
-					if ((dstoff2 + l) >= 0 && (dstoff2 + l) < maxpxo)
-						*(dst + dstoff2 + l) = *gs;
+				dstoff2 = dstoff + (k * p);
+				for (l = 0; l < 4; l++) {
+					if ((dstoff2 >= 0) && (dstoff2 < maxpxo))
+						*(dst + dstoff2) = *gs;
+					gs++;
+					dstoff2++;
 				}
+			}
+
+			/* post processing to smooth out block borders a bit.
+			 * ASSAULT.EXE 121e8 - 12242 for the (c4t&0x80)==0 case.
+			 */
+			if (c4t & 0x80) {
+				for (k = 0; k < 4; k++)
+					*(dst + dstoff) = ((*(dst + dstoff) + *(dst + dstoff - p)) >> 1) | 0x80;
+				*(dst + dstoff + 1 * p) = (*(dst + dstoff + 1 * p) + *(dst + dstoff + 1 * p - 1)) >> 1 | 0x80;
+				*(dst + dstoff + 2 * p) = (*(dst + dstoff + 2 * p) + *(dst + dstoff + 2 * p - 1)) >> 1 | 0x80;
+				*(dst + dstoff + 3 * p) = (*(dst + dstoff + 3 * p) + *(dst + dstoff + 3 * p - 1)) >> 1 | 0x80;
+			} else {
+				for (k = 0; k < 4; k++)
+					*(dst + dstoff) = ((*(dst + dstoff) + *(dst + dstoff - p)) >> 1) & 0x7f;
+				*(dst + dstoff + 1 * p) = (*(dst + dstoff + 1 * p) + *(dst + dstoff + 1 * p - 1)) >> 1;
+				*(dst + dstoff + 2 * p) = (*(dst + dstoff + 2 * p) + *(dst + dstoff + 2 * p - 1)) >> 1;
+				*(dst + dstoff + 3 * p) = (*(dst + dstoff + 3 * p) + *(dst + dstoff + 3 * p - 1)) >> 1;
 			}
 		}
 	}
