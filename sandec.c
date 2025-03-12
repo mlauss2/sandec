@@ -1545,74 +1545,9 @@ static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	}
 }
 
-static void codec5_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-		        uint16_t h, int16_t top, int16_t left, uint32_t size,
-			uint8_t param, uint16_t param2)
-{
-	const uint32_t maxpxo = ctx->rt.fbsize;
-	const uint16_t pitch = ctx->rt.pitch;
-	uint8_t mask, bits, idx, *gs;
-	int32_t dstoff, dstoff2;
-	int i, j, k, l, bit;
-
-	if (param2 > 0) {
-		c4_5_param2(ctx, src, param2, ctx->c4tblparam);
-		src += param2 * 8;
-	}
-
-	for (j = 0; j < w; j += 4) {
-		mask = bits = 0;
-		for (i = 0; i < h; i += 4) {
-			dstoff = ((top + i) * pitch) + left + j;	/* curr. block offset */
-			if (param2 != 0) {
-				if (bits == 0) {
-					mask = *src++;
-					bits = 8;
-				}
-				bit = !!(mask & 0x80);
-				mask <<= 1;
-				bits -= 1;
-			} else {
-				bit = 0;
-			}
-
-			/* find the 4x4 block in the table and render it */
-			idx = *src++;
-			gs = &(ctx->c4tbl[bit][idx][0]);
-			for (k = 0; k < 4; k++) {
-				dstoff2 = dstoff + (k * pitch);
-				for (l = 0; l < 4; l++, gs++) {
-					if (((dstoff2 + l) >= 0) && ((dstoff2 + l) < maxpxo))
-						*(dst + dstoff2 + l) = *gs;
-				}
-			}
-		}
-	}
-}
-
-static void codec5(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-		   uint16_t h, int16_t top, int16_t left, uint32_t size,
-		   uint8_t param, uint16_t param2)
-{
-	if (ctx->c4tblparam != param)
-		c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
-	ctx->c4tblparam = param;
-	codec5_main(ctx, dst, src, w, h, top, left, size, param, param2);
-}
-
-static void codec34(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-		    uint16_t h, int16_t top, int16_t left, uint32_t size,
-		    uint8_t param, uint16_t param2)
-{
-	if (ctx->c4tblparam != (param + 0x100))
-		c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
-	ctx->c4tblparam = param + 0x100;
-	codec5_main(ctx, dst, src, w, h, top, left, size, param, param2);
-}
-
 static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 			uint16_t h, int16_t top, int16_t left, uint32_t size,
-			uint8_t param, uint16_t param2)
+			uint8_t param, uint16_t param2, int c5)
 {
 	const uint32_t maxpxo = ctx->rt.fbsize;
 	const uint16_t pitch = ctx->rt.pitch;
@@ -1621,7 +1556,7 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 	int i, j, k, l, bit;
 
 	if (param2 > 0) {
-		c4_5_param2(ctx, src, param2, ctx->c4tblparam);
+		c4_5_param2(ctx, src, param2, ctx->c4tblparam & 0xff);
 		src += param2 * 8;
 	}
 
@@ -1642,7 +1577,7 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 			}
 
 			idx = *src++;
-			if (!bit && idx == 0x80)
+			if (!bit && idx == 0x80 && !c5)
 				continue;
 			gs = &(ctx->c4tbl[bit][idx][0]);
 
@@ -1660,22 +1595,22 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 
 static void codec33(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t top, int16_t left, uint32_t size,
-		    uint8_t param, uint16_t param2)
+		    uint8_t param, uint16_t param2, int c5)
 {
 	if (ctx->c4tblparam != (param + 0x100))
 		c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
 	ctx->c4tblparam = param + 0x100;
-	codec4_main(ctx, dst, src, w, h, top, left, size, param, param2);
+	codec4_main(ctx, dst, src, w, h, top, left, size, param, param2, c5);
 }
 
 static void codec4(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		   uint16_t h, int16_t top, int16_t left, uint32_t size,
-		   uint8_t param, uint16_t param2)
+		   uint8_t param, uint16_t param2, int c5)
 {
 	if (ctx->c4tblparam != param)
 		c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
 	ctx->c4tblparam = param;
-	codec4_main(ctx, dst, src, w, h, top, left, size, param, param2);
+	codec4_main(ctx, dst, src, w, h, top, left, size, param, param2, c5);
 }
 
 static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w,
@@ -1871,14 +1806,14 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	case 1:
 	case 3:   codec1(ctx, rt->vbuf, src, w, h, top, left, size, (codec == 1)); break;
 	case 2:   codec2(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
-	case 4:   codec4(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
-	case 5:   codec5(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
+	case 4:
+	case 5:   codec4(ctx, rt->vbuf, src, w, h, top, left, size, param, param2, codec == 5); break;
 	case 20: codec20(ctx, rt->vbuf, src, w, h, top, left, size); break;
 	case 44:
 	case 21: codec21(ctx, rt->vbuf, src, w, h, top ,left, size, param); break;
 	case 23: codec23(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
-	case 33: codec33(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
-	case 34: codec34(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
+	case 33:
+	case 34: codec33(ctx, rt->vbuf, src, w, h, top, left, size, param, param2, codec == 34); break;
 	case 37:ret = codec37(ctx, rt->vbuf, src, w, h, top, left); break;
 	case 45: codec45(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
 	case 47: codec47(ctx, rt->vbuf, src, w, h); break;
