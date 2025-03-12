@@ -646,9 +646,6 @@ static void c4_5_param2(struct sanctx *ctx, uint8_t *src, uint16_t cnt,
 	uint8_t c, *dst;
 	uint32_t loop;
 
-	if (cnt > 255)
-		return;
-
 	/* ASSALT13.EXE 11bd0 - 11c16 */
 	loop = cnt << 2;
 	dst = (uint8_t *)&(ctx->c4tbl[1]);
