@@ -2063,8 +2063,8 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		c[0] = tbl2[*src++];
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
-			for (j = 0; j < blksize; j++) {
-				*(uint16_t *)(dst + ofs + j * 2) = c[0];
+			for (j = 0; j < blksize * 2; j += 2) {
+				*(uint16_t *)(dst + ofs + j) = c[0];
 			}
 		}
 		break;
@@ -2076,8 +2076,8 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		c[0] = tbl1[(opc - 0xf9)];
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
-			for (j = 0; j < blksize; j++) {
-				*(uint16_t *)(dst + ofs + j * 2) = c[0];
+			for (j = 0; j < blksize * 2; j += 2) {
+				*(uint16_t *)(dst + ofs + j) = c[0];
 			}
 		}
 		break;
@@ -2093,37 +2093,34 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 			src += 2;
 		} else {
 			opc = *src++;
-			c[0] = le16_to_cpu(ua16(src));
-			src += 2;
 			c[1] = le16_to_cpu(ua16(src));
+			src += 2;
+			c[0] = le16_to_cpu(ua16(src));
 			src += 2;
 			pglyph = (blksize == 8) ? ctx->c47_glyph8x8[opc] : ctx->c47_glyph4x4[opc];
 			for (i = 0; i < blksize; i++) {
-				for (j = 0; j < blksize; j++) {
-					*(uint16_t *)(dst + (i * stride) + (j * 2)) = c[!*pglyph++];
+				ofs = i * stride;
+				for (j = 0; j < blksize * 2; j += 2) {
+					*(uint16_t *)(dst + ofs + j) = c[!!(*pglyph++)];
 				}
 			}
 		}
 		break;
 	case 0xf7:
 		if (blksize == 2) {
-			ofs = le32_to_cpu(ua32(src));
-			src += 4;
-			*(uint16_t *)(dst + 0      + 0) = tbl2[ofs & 0xff];
-			ofs >>= 8;
-			*(uint16_t *)(dst + 0      + 2) = tbl2[ofs & 0xff];
-			ofs >>= 8;
-			*(uint16_t *)(dst + stride + 0) = tbl2[ofs & 0xff];
-			ofs >>= 8;
-			*(uint16_t *)(dst + stride + 2) = tbl2[ofs & 0xff];
+			*(uint16_t *)(dst + 0      + 0) = tbl2[*src++];
+			*(uint16_t *)(dst + 0      + 2) = tbl2[*src++];
+			*(uint16_t *)(dst + stride + 0) = tbl2[*src++];
+			*(uint16_t *)(dst + stride + 2) = tbl2[*src++];
 		} else {
 			opc = *src++;
-			c[0] = tbl2[*src++];
 			c[1] = tbl2[*src++];
+			c[0] = tbl2[*src++];
 			pglyph = (blksize == 8) ? ctx->c47_glyph8x8[opc] : ctx->c47_glyph4x4[opc];
 			for (i = 0; i < blksize; i++) {
-				for (j = 0; j < blksize; j++) {
-					*(uint16_t *)(dst + (i * stride) + (j * 2)) = c[!*pglyph++];
+				ofs = i * stride;
+				for (j = 0; j < blksize * 2; j += 2) {
+					*(uint16_t *)(dst + ofs + j) = c[!!(*pglyph++)];
 				}
 			}
 		}
@@ -2131,9 +2128,9 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 	case 0xf6:	/* copy from db1 at same spot */
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
-			for (j = 0; j < blksize; j++) {
+			for (j = 0; j < blksize * 2; j += 2) {
 				/* dst and src are at least 16bit aligned */
-				*(uint16_t *)(dst + ofs + j * 2) = *(uint16_t *)(db1 + ofs + j * 2);
+				*(uint16_t *)(dst + ofs + j) = *(uint16_t *)(db1 + ofs + j);
 			}
 		}
 		break;
@@ -2155,8 +2152,8 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		mvofs = (c47_mv[opc][0] * 2) + (c47_mv[opc][1] * stride);
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
-			for (j = 0; j < blksize; j++) {
-				*(uint16_t *)(dst + ofs + j * 2) = *(uint16_t *)(db2 + ofs + j * 2 + mvofs);
+			for (j = 0; j < blksize * 2; j += 2) {
+				*(uint16_t *)(dst + ofs + j) = *(uint16_t *)(db2 + ofs + j + mvofs);
 			}
 		}
 		break;
@@ -2170,6 +2167,9 @@ static void bl16_comp2(uint8_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 {
 	const uint32_t stride = w * 2;
 	int i, j;
+
+	h = (h + 7) & ~7;
+	w = (w + 7) & ~7;
 
 	for (j = 0; j < h; j += 8) {
 		for (i = 0; i < 2 * w; i += 8 * 2) {
@@ -2225,8 +2225,8 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			bl16_comp2((uint8_t *)dst, src, width, height,
 				   (uint8_t *)db1, (uint8_t *)db2, tbl1, tbl2, ctx);
 		break;
-	case 3:	memcpy(dst, db1, width * height * 2); break;
-	case 4: memcpy(dst, db2, width * height * 2); break;
+	case 3:	memcpy(dst, db2, width * height * 2); break;
+	case 4: memcpy(dst, db1, width * height * 2); break;
 	case 5: codec47_comp5(src, (uint8_t *)dst, decsize); break;
 	case 6: bl16_comp6(dst, src, width, height, tbl2); break;
 	case 7: bl16_comp7(dst, src, width, height, tbl2); break;
