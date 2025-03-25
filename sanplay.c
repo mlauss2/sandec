@@ -1,22 +1,22 @@
 /*
- * SDL2-based SAN video player.
+ * SDL3-based SAN video player.
  *
  * (c) 2024-2025 Manuel Lauss <manuel.lauss@gmail.com>
  */
 
 #include <stdio.h>
 #include "sandec.h"
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_video.h>
-#include <SDL2/SDL_audio.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_render.h>
+#include <SDL3/SDL_audio.h>
 
 struct playpriv {
 	FILE *fhdl;
 	SDL_Renderer *ren;
 	SDL_Window *win;
-	SDL_AudioDeviceID aud;
-	SDL_Rect dr;
-	SDL_Rect *drp;
+	SDL_AudioStream *as;
+	SDL_FRect dr;
+	SDL_FRect *drp;
 
 	uint16_t pxw;
 	uint16_t pxh;
@@ -36,15 +36,17 @@ struct playpriv {
 	int texsmooth;
 };
 
+static const SDL_ScaleMode smodes[2] = { SDL_SCALEMODE_NEAREST, SDL_SCALEMODE_LINEAR };
+
 /* this can be called multiple times per "sandec_decode_next_frame()",
  * so buffer needs to be dynamically expanded. */
 static void queue_audio(void *ctx, unsigned char *adata, uint32_t size)
 {
 	struct playpriv *p = (struct playpriv *)ctx;
-	if (p->err || p->sm == 2 || !p->aud)
+	if (p->err || p->sm == 2 || !p->as)
 		return;
 
-	SDL_QueueAudio(p->aud, adata, size);
+	SDL_PutAudioStreamData(p->as, adata, size);
 }
 
 /* this is called once per "sandec_decode_next_frame()" */
@@ -56,21 +58,21 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 	SDL_Palette *pal;
 	SDL_Surface *sur;
 	SDL_Texture *tex;
-	int ret, nw, nh, fw, fh, xd, yd;
+	int ret, nw, nh;
 
 	if (p->err || p->sm == 2)
 		return;
 
 	if (!p->win) {
-		ret = SDL_CreateWindowAndRenderer(w, h, SDL_WINDOW_RESIZABLE, &p->win, &p->ren);
-		if (ret) {
+		ret = SDL_CreateWindowAndRenderer("SAN/ANIM Player", w, h, SDL_WINDOW_RESIZABLE, &p->win, &p->ren);
+		if (!ret) {
 			p->win = NULL;
 			p->ren = NULL;
 			p->err = 1100;
 			return;
 		}
-		SDL_SetRenderDrawColor(p->ren, 0, 0, 0, 0);
-		SDL_SetWindowTitle(p->win, "SAN/ANIM Player");
+		SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
+		SDL_SetRenderLogicalPresentation(p->ren, w, h, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 		p->winw = w;
 		p->winh = h;
 		if (p->nextmult == 0)
@@ -82,38 +84,16 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 		p->winw = w;
 		p->winh = h;
 		if (p->nextmult == 0)
-			p->nextmult = p->fullscreen ? -1 : p->prevmult;
+			p->nextmult = p->fullscreen ? 0 : p->prevmult;
 	}
 
 	if (p->nextmult < 0) {
 		p->nextmult = 0;
 		if (!p->fullscreen) {
-			SDL_SetWindowFullscreen(p->win, SDL_WINDOW_FULLSCREEN_DESKTOP);
 			p->fullscreen = 1;
-			p->rcc = 3;
-			SDL_GetWindowSize(p->win, &fw, &fh);
-			xd = (fw * 1024) / w;
-			yd = (fh * 1024) / h;
-			if (xd == yd) {
-				p->drp = NULL;
-			} else  if (xd >= yd) {
-				p->dr.h = fh;
-				p->dr.y = 0;
-				p->dr.w = (w * fh) / h;
-				p->dr.x = (fw - p->dr.w) / 2;
-				p->drp = &p->dr;
-			} else {
-				p->dr.w = fw;
-				p->dr.x = 0;
-				p->dr.h = (h * fw) / w;
-				p->dr.y = (fh - p->dr.h) / 2;
-				p->drp = &p->dr;
-			}
-
 		} else {
-			SDL_SetWindowFullscreen(p->win, 0);
-			p->nextmult = p->prevmult;
 			p->fullscreen = 0;
+			p->nextmult = p->prevmult;
 		}
 	}
 
@@ -132,27 +112,26 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 			p->winw = nw;
 			p->winh = nh;
 		}
-		p->drp = NULL;
 	}
 
-	sur = SDL_CreateRGBSurfaceWithFormatFrom(vdata, w, h, imgpal ? 8 : 16, pitch,
-			 imgpal ? SDL_PIXELFORMAT_INDEX8 : SDL_PIXELFORMAT_RGB565);
+	sur = SDL_CreateSurfaceFrom(w, h, imgpal ? SDL_PIXELFORMAT_INDEX8 : SDL_PIXELFORMAT_RGB565,
+				    vdata, pitch);
 	if (!sur) {
 		p->err = 1101;
 		return;
 	}
 
 	if (imgpal) {
-		pal = SDL_AllocPalette(256);
+		pal = SDL_CreatePalette(256);
 		if (!pal) {
-			SDL_FreeSurface(sur);
+			SDL_DestroySurface(sur);
 			p->err = 1102;
 			return;
 		}
 		memcpy(pal->colors, imgpal, 256 * sizeof(uint32_t));
 		ret = SDL_SetSurfacePalette(sur, pal);
-		if (ret) {
-			SDL_FreeSurface(sur);
+		if (!ret) {
+			SDL_DestroySurface(sur);
 			p->err = 1103;
 			return;
 		}
@@ -163,21 +142,15 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 		p->err = 1104;
 		return;
 	}
+	SDL_SetTextureScaleMode(tex, smodes[p->texsmooth]);
 
-	/* clear all render buffers, otherwise there will be a copy of the last
-	 * windowed image at the top left.  Unfortunately no way to clear them
-	 * all with a single call, so have to flip a few times to get them all.
-	 */
-	if (p->fullscreen && p->rcc--)
-		SDL_RenderClear(p->ren);
-
-	ret = SDL_RenderCopy(p->ren, tex, NULL, p->drp);
-	if (ret) {
-		p->err = 1003;
+	ret = SDL_RenderTexture(p->ren, tex, NULL, NULL);
+	if (!ret) {
+		p->err = 1105;
 		return;
 	}
 	SDL_DestroyTexture(tex);
-	SDL_FreeSurface(sur);
+	SDL_DestroySurface(sur);
 	p->vbufsize = size;
 	p->pxw = w;
 	p->pxh = h;
@@ -198,8 +171,8 @@ static int render_frame(struct playpriv *p)
 
 static void exit_sdl(struct playpriv *p)
 {
-	if (p->aud)
-		SDL_CloseAudioDevice(p->aud);
+	if (p->as)
+		SDL_DestroyAudioStream(p->as);
 	if (p->ren)
 		SDL_DestroyRenderer(p->ren);
 	if (p->win)
@@ -209,29 +182,23 @@ static void exit_sdl(struct playpriv *p)
 
 static int init_sdl(struct playpriv *p)
 {
-	SDL_AudioSpec specin, specout;
-	SDL_AudioDeviceID ad;
-	int ret;
+	SDL_AudioSpec spec;
+	SDL_AudioStream *as;
 
-	ret = SDL_Init(SDL_INIT_TIMER | SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_EVENTS);
-	if (ret)
-		return 1081;
+	if (!SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO | SDL_INIT_EVENTS))
+		return 1000;
 
 	SDL_SetHint(SDL_HINT_APP_NAME, "SAN/ANIM Player");
-	p->texsmooth = 2;
+	p->texsmooth = 1;
 	p->prevmult = 1;
-	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
-	specin.freq = 22050;
-	specin.format = AUDIO_S16;
-	specin.channels = 2;
-	specin.userdata = p;
-	specin.callback = NULL;
-	specin.samples = 4096 / 2 / 2;
 
-	ad = SDL_OpenAudioDevice(NULL, 0, &specin, &specout, 0);
-	p->aud = ad;
-	if (ad)
-		SDL_PauseAudioDevice(ad, 0);
+	spec.freq = 22050;
+	spec.format = SDL_AUDIO_S16LE;
+	spec.channels = 2;
+	as = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
+	p->as = as;
+	if (as)
+		SDL_ResumeAudioStreamDevice(as);
 
 	return 0;
 }
@@ -348,52 +315,53 @@ int main(int a, char **argv)
 			ret = sandec_decode_next_frame(sanctx);
 		} while (ret == SANDEC_OK && speedmode == 2);
 
-		pp.next_disp_us = SDL_GetTicks64() * 1000;
+		pp.next_disp_us = SDL_GetTicks() * 1000;
 		while (running && ret == SANDEC_OK) {
 			while (0 != SDL_PollEvent(&e) && running) {
-				if (e.type == SDL_QUIT)
+				if (e.type == SDL_EVENT_QUIT)
 					running = 0;
-				else if (e.type == SDL_KEYDOWN) {
+				else if ((e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN) ||
+					 (e.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN))
+					/* act on the fullscreen state change on next frame */
+					pp.nextmult = -1;
+				else if (e.type == SDL_EVENT_KEY_DOWN) {
 					SDL_KeyboardEvent *ke = (SDL_KeyboardEvent *)&e;
-					if (ke->state != SDL_PRESSED || ke->repeat != 0)
+					if (!ke->down || ke->repeat != 0)
 						break;
 
-					if (ke->keysym.scancode == SDL_SCANCODE_SPACE && speedmode < 1) {
+					if (ke->scancode == SDL_SCANCODE_SPACE && speedmode < 1) {
 						paused ^= 1;
-						if (!paused)
-							pp.next_disp_us += (SDL_GetTicks64() - ptick) * 1000;
-						if (pp.aud)
-							SDL_PauseAudioDevice(pp.aud, paused);
-						if (paused)
-							ptick = SDL_GetTicks64();
-					} else if (ke->keysym.scancode == SDL_SCANCODE_N) {
+						if (!paused) {
+							pp.next_disp_us += (SDL_GetTicks() - ptick) * 1000;
+							SDL_ResumeAudioStreamDevice(pp.as);
+						} else {
+							SDL_PauseAudioStreamDevice(pp.as);
+							ptick = SDL_GetTicks();
+						}
+					} else if (ke->scancode == SDL_SCANCODE_N) {
 						running = 0;	/* end current video */
-						if (pp.aud)
-							SDL_ClearQueuedAudio(pp.aud);
-					} else if (ke->keysym.scancode == SDL_SCANCODE_P) {
+						if (pp.as)
+							SDL_ClearAudioStream(pp.as);
+					} else if (ke->scancode == SDL_SCANCODE_P) {
 						autopause ^= 1;
-					} else if (ke->keysym.scancode == SDL_SCANCODE_Q) {
+					} else if (ke->scancode == SDL_SCANCODE_Q) {
 						running = 0;
-						if (pp.aud)
-							SDL_ClearQueuedAudio(pp.aud);
+						if (pp.as)
+							SDL_ClearAudioStream(pp.as);
 						a = 1;		/* no more files to play */
-					} else if (ke->keysym.scancode == SDL_SCANCODE_F) {
-						pp.nextmult = -1;
-					} else if ((ke->keysym.scancode >= SDL_SCANCODE_1) &&
-						   (ke->keysym.scancode <= SDL_SCANCODE_6)) {
-						pp.nextmult = ke->keysym.scancode - SDL_SCANCODE_1 + 1;
-					} else if (ke->keysym.scancode == SDL_SCANCODE_I) {
+					} else if (ke->scancode == SDL_SCANCODE_F) {
+						/* queue fullscreen state change with SDL. Per SDL Documentation,
+						 * this may be denied by the windowing system, otherwise a
+						 * window state change event will be triggered.
+						 */
+						SDL_SetWindowFullscreen(pp.win, !pp.fullscreen);
+					} else if ((ke->scancode >= SDL_SCANCODE_1) &&
+						   (ke->scancode <= SDL_SCANCODE_6)) {
+						pp.nextmult = ke->scancode - SDL_SCANCODE_1 + 1;
+					} else if (ke->scancode == SDL_SCANCODE_I) {
 						sio.flags ^= SANDEC_FLAG_DO_FRAME_INTERPOLATION;
-					} else if (ke->keysym.scancode == SDL_SCANCODE_S) {
-						pp.texsmooth += 1;
-						if (pp.texsmooth >= 3)
-							pp.texsmooth = 0;
-						if (pp.texsmooth == 0)
-							SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
-						else if (pp.texsmooth == 1)
-							SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-						else
-							SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
+					} else if (ke->scancode == SDL_SCANCODE_S) {
+						pp.texsmooth ^= 1;
 					}
 				}
 			}
@@ -402,28 +370,28 @@ int main(int a, char **argv)
 
 				if (parserdone) {
 					if (speedmode) {
-						if (pp.aud)
-							SDL_ClearQueuedAudio(pp.aud);
+						if (pp.as)
+							SDL_ClearAudioStream(pp.as);
 						running = 0;
-					} else if (!pp.aud || (0 == SDL_GetQueuedAudioSize(pp.aud))) {
+					} else if (!pp.as || (0 == SDL_GetAudioStreamQueued(pp.as))) {
 						running = 0;
 					} else {
 						continue;
 					}
 				}
 
-				t1 = SDL_GetTicks64();
+				t1 = SDL_GetTicks();
 				delt = pp.next_disp_us - (ren * 1000) - (t1 * 1000);
 				if (running && ((delt <= 0) || speedmode == 1)) {
 					ret = render_frame(&pp);
 					if (ret)
 						goto err;
-					t2 = SDL_GetTicks64();
+					t2 = SDL_GetTicks();
 					ren = (t2 - t1);
 
-					t1 = SDL_GetTicks64();
+					t1 = SDL_GetTicks();
 					ret = sandec_decode_next_frame(sanctx);
-					t2 = SDL_GetTicks64();
+					t2 = SDL_GetTicks();
 					dec = (t2 - t1);
 err:
 					if (ret == SANDEC_DONE) {
@@ -439,8 +407,9 @@ err:
 					}
 					if (autopause) {
 						paused = 1;
-						SDL_PauseAudioDevice(pp.aud, paused);
-						ptick = SDL_GetTicks64();
+						if (pp.as)
+							SDL_PauseAudioStreamDevice(pp.as);
+						ptick = SDL_GetTicks();
 					}
 				} else if (delt > 5000) {
 					SDL_Delay(5);
@@ -451,8 +420,8 @@ err:
 		fclose(pp.fhdl);
 
 		/* let remaining audio finish playback: mainly for .SAD audio files */
-		if (ret == SANDEC_DONE && pp.aud && speedmode < 2)
-			while (0 != SDL_GetQueuedAudioSize(pp.aud))
+		if (ret == SANDEC_DONE && pp.as && speedmode < 2)
+			while (0 != SDL_GetAudioStreamQueued(pp.as))
 				SDL_Delay(10);
 
 		if (verbose)

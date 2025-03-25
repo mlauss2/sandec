@@ -1,6 +1,6 @@
 Single-file A/V decoder library for LucasArts SAN/SMUSH movie files (originally
 intended only to play "Outlaws" videos, since they are awesome),
-with an SDL2-based player application to demonstrate library use.
+with an SDL3-based player application to demonstrate library use.
 
 Can also play game movies from Curse of Monkey Island, Shadows of the Empire,
 Mysteries of the Sith, The Dig, Full Throttle,  Rebel Assault II and Rebel Assault I.
@@ -42,7 +42,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - q  to quit
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
   - i  to toggle frame interpolation on codec47/48 on/off
-  - s  to cycle between SDL2 texture smoothing (off/linear/best).
+  - s  to cycle between SDL3 texture smoothing (off/linear).
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
@@ -50,7 +50,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - Bl16 Video / VIMA Audio
 
 # Build:
-- Have SDL2
+- Have SDL3
 - run "make"
 
 # Use:
@@ -64,4 +64,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - look at RA1 palette code
 - BL16 mvecs are somtimes wrong
 
-20250312
+20250325
