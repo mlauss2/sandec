@@ -449,6 +449,12 @@ err:
 		}
 
 		fclose(pp.fhdl);
+
+		/* let remaining audio finish playback: mainly for .SAD audio files */
+		if (ret == SANDEC_DONE && pp.aud && speedmode < 2)
+			while (0 != SDL_GetQueuedAudioSize(pp.aud))
+				SDL_Delay(10);
+
 		if (verbose)
 			printf("\n%u/%u  %d\n", sandec_get_currframe(sanctx), fc, ret);
 	}
