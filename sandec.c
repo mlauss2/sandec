@@ -2343,7 +2343,7 @@ static void aud_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
 	int f, i, fast;
 
 	f = atrk->flags;
-	if (!f & AUD_INUSE)
+	if (!(f & AUD_INUSE))
 		return;
 
 	/* calculate expected space requirements to determine if the wrptr
