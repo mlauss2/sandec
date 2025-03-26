@@ -193,6 +193,10 @@ out:
 
 static int do_img_flip(struct playpriv *p)
 {
+	/* frame timer expired but no new image was posted */
+	if (!p->newimg)
+		return 0;
+
 	if (p->lastimg) {
 		SDL_DestroySurface(p->lastimg);
 		p->lastimg = NULL;
