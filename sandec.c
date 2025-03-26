@@ -1846,8 +1846,13 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		 * but only content in the 320x200 upper left area.
 		 */
 		if (rt->version < 2) {
-			rt->frmw = 320;
-			rt->frmh = 200;
+			if (ctx->io->flags & SANDEC_FLAG_ANIMv1_FULL_FRAME) {
+				rt->frmw = 384;
+				rt->frmh = 242;
+			} else {
+				rt->frmw = 320;
+				rt->frmh = 200;
+			}
 		}
 	}
 

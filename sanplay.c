@@ -413,6 +413,8 @@ int main(int a, char **argv)
 							break;
 					} else if (ke->scancode == SDL_SCANCODE_I) {
 						sio.flags ^= SANDEC_FLAG_DO_FRAME_INTERPOLATION;
+					} else if (ke->scancode == SDL_SCANCODE_L) {
+						sio.flags ^= SANDEC_FLAG_ANIMv1_FULL_FRAME;
 					} else if (ke->scancode == SDL_SCANCODE_S) {
 						pp.texsmooth ^= 1;
 						ret = render_frame(&pp);

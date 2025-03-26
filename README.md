@@ -40,6 +40,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - n     to play next video in list
   - .     to advance by 1 frame and pause
   - q     to quit
+  - l     to toggle ANIMv1 (RA1) viewport size: Most videos have 320x200 content, but some gameplay videos have content on the full 384x242 buffer.
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
   - i  to toggle frame interpolation on codec47/48 on/off
   - s  to cycle between SDL3 texture smoothing (off/linear).
