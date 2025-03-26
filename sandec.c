@@ -113,6 +113,8 @@ SZ_AUDTMPBUF1)
 #define GLYPH_COORD_VECT_SIZE 16
 #define NGLYPHS 256
 
+/* maximum volume. This is the maximum found in PSAD/iMUS streams */
+#define AUD_VOL_MAX	127
 
 /* PSAD/iMUS multistream audio track */
 #define AUD_INUSE		(1 << 0)
@@ -137,6 +139,8 @@ struct sanatrk {
 	uint8_t pd[4];		/* unused bytes from prev. datablock	*/
 	uint16_t trkid;		/* ID of this track			*/
 	int32_t dataleft;	/* SAUD data left until track ends	*/
+	uint8_t vol;		/* PSAD/iMUS stream volume		*/
+	int8_t pan;		/* PSAD stream pan			*/
 };
 
 /* internal context: per-file */
@@ -2542,17 +2546,57 @@ static void aud_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
 	}
 }
 
-static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes)
+static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
+		       uint8_t vol1, int8_t pan1, uint8_t vol2, int8_t pan2)
 {
 	int16_t *src1 = (int16_t *)s1;
 	int16_t *src2 = (int16_t *)s2;
 	int16_t *dst = (int16_t *)ds1;
 	int d1, d2, d3;
 
-	while (bytes > 1) {
-		d1 = (*src1++) + 32768;	/* s16 sample to u16 */
-		d2 = (*src2++) + 32768;
+	while (bytes > 3) {
+		/* LEFT SAMPLE */
+		d1 = src1 ? (*src1++) : 0;
+		d2 = src2 ? (*src2++) : 0;
 		bytes -= 2;
+
+		if (pan1 <= 0)
+			d1 = (d1 * vol1) / AUD_VOL_MAX;
+		else
+			d1 = ((d1 * (AUD_VOL_MAX - pan1) / AUD_VOL_MAX) * vol1) / AUD_VOL_MAX;
+
+		if (pan2 <= 0)
+			d2 = (d2 * vol2) / AUD_VOL_MAX;
+		else
+			d2 = ((d2 * (AUD_VOL_MAX - pan2) / AUD_VOL_MAX) * vol2) / AUD_VOL_MAX;
+
+		d1 = d1 + 32768;	/* s16 sample to u16 */
+		d2 = d2 + 32768;
+
+		if (d1 < 32768 && d2 < 32768) {
+			d3 = (d1 * d2) / 32768;
+		} else {
+			d3 = (2 * (d1 + d2)) - ((d1 * d2) / 32768) - 65536;
+		}
+		*dst++ = (d3 - 32768);	/* mixed u16 back to s16 and write */
+
+		/* RIGHT SAMPLE */
+		d1 = src1 ? (*src1++) : 0;
+		d2 = src2 ? (*src2++) : 0;
+		bytes -= 2;
+
+		if (pan1 >= 0)
+			d1 = (d1 * vol1) / AUD_VOL_MAX;
+		else
+			d1 = ((d1 * (AUD_VOL_MAX + pan1) / AUD_VOL_MAX) * vol1) / AUD_VOL_MAX;
+
+		if (pan2 >= 0)
+			d2 = (d2 * vol2) / AUD_VOL_MAX;
+		else
+			d2 = ((d2 * (AUD_VOL_MAX + pan2) / AUD_VOL_MAX) * vol2) / AUD_VOL_MAX;
+
+		d1 = d1 + 32768;		/* s16 sample to u16 */
+		d2 = d2 + 32768;
 
 		if (d1 < 32768 && d2 < 32768) {
 			d3 = (d1 * d2) / 32768;
@@ -2602,25 +2646,35 @@ static void iact_buffer_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			      uint16_t trkid, uint16_t uid)
 {
 	uint32_t cid, csz, mapsz;
-	uint16_t rate, bits, chnl;
+	uint16_t rate, bits, chnl, vol;
 	struct sanatrk *atrk;
 
+	vol = AUD_VOL_MAX;
 	if (uid == 1)
 		trkid += 100;
 	else if (uid == 2)
 		trkid += 200;
 	else if (uid == 3)
 		trkid += 300;
-	else if ((uid >= 100) && (uid <= 163))
+	else if ((uid >= 100) && (uid <= 163)) {
 		trkid += 400;
-	else if ((uid >= 200) && (uid <= 263))
+		vol = uid * 2 - 200;
+	} else if ((uid >= 200) && (uid <= 263)) {
 		trkid += 500;
-	else if ((uid >= 300) && (uid <= 363))
+		vol = uid * 2 - 400;
+	} else if ((uid >= 300) && (uid <= 363)) {
 		trkid += 600;
+		vol = uid * 2 - 600;
+	}
 
 	atrk = aud_find_trk(ctx, trkid, 0);
 	if (!atrk)
 		return;
+
+	if (vol > AUD_VOL_MAX)
+		vol = AUD_VOL_MAX;
+	atrk->vol = vol;
+	atrk->pan = 0;
 
 	/*
 	 * read header of new track. NOTE: subchunks aren't 16bit aligned!
@@ -2820,20 +2874,24 @@ _aud_mix_again:
 			return;
 
 		if (step == 0) {
-			aptr = atrk1->data + atrk1->rdptr;
+			aud_mixs16(dstptr, atrk1->data + atrk1->rdptr, NULL,
+				   minlen1, atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
 			dstlen += minlen1;
 			aud_atrk_consume(rt, atrk1, minlen1);
 		} else {
 			toend1 = ATRK_MAXWP - atrk1->rdptr;
 			if (minlen1 <= toend1) {
-				memcpy(dstptr, atrk1->data + atrk1->rdptr, minlen1);
+				aud_mixs16(dstptr, atrk1->data + atrk1->rdptr, NULL,
+					   minlen1, atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
 				aud_atrk_consume(rt, atrk1, minlen1);
 			} else {
 				todo = minlen1;
-				memcpy(dstptr, atrk1->data + atrk1->rdptr, toend1);
+				aud_mixs16(dstptr, atrk1->data + atrk1->rdptr, NULL,
+					   toend1, atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
 				aud_atrk_consume(rt, atrk1, toend1);
 				todo -= toend1;
-				memcpy(dstptr + toend1, atrk1->data + atrk1->rdptr, todo);
+				aud_mixs16(dstptr + toend1, atrk1->data + atrk1->rdptr, NULL,
+					   todo, atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
 				aud_atrk_consume(rt, atrk1, todo);
 			}
 			dstlen += minlen1;
@@ -2851,7 +2909,8 @@ _aud_mix_again:
 		toend2 = ATRK_MAXWP - atrk2->rdptr;
 		if (minlen1 <= toend1 && minlen1 <= toend2) {
 			/* best case: both tracks don't wrap around */
-			aud_mixs16(dstptr, src1, src2, minlen1);
+			aud_mixs16(dstptr, src1, src2, minlen1,
+				   atrk1->vol, atrk1->pan, atrk2->vol, atrk2->pan);
 			aud_atrk_consume(rt, atrk1, minlen1);
 			aud_atrk_consume(rt, atrk2, minlen1);
 		} else {
@@ -2859,7 +2918,8 @@ _aud_mix_again:
 			todo = minlen1;
 			/* read till the first wraps around */
 			ml2 = _min(toend1, toend2);
-			aud_mixs16(dstptr, src1, src2, ml2);
+			aud_mixs16(dstptr, src1, src2, ml2,
+				   atrk1->vol, atrk1->pan, atrk2->vol, atrk2->pan);
 			aud_atrk_consume(rt, atrk1, ml2);
 			aud_atrk_consume(rt, atrk2, ml2);
 			src1 = atrk1->data + atrk1->rdptr;
@@ -2874,7 +2934,8 @@ _aud_mix_again:
 			else
 				l3 = _min(todo, toend1);
 
-			aud_mixs16(dstptr + ml2, src1, src2, l3);
+			aud_mixs16(dstptr + ml2, src1, src2, l3,
+				   atrk1->vol, atrk1->pan, atrk2->vol, atrk2->pan);
 			aud_atrk_consume(rt, atrk1, l3);
 			aud_atrk_consume(rt, atrk2, l3);
 			src1 = atrk1->data + atrk1->rdptr;
@@ -2882,7 +2943,8 @@ _aud_mix_again:
 			todo -= l3;
 			/* now the rest */
 			if (todo) {
-				aud_mixs16(dstptr + ml2 + l3, src1, src2, todo);
+				aud_mixs16(dstptr + ml2 + l3, src1, src2, todo,
+					   atrk1->vol, atrk1->pan, atrk2->vol, atrk2->pan);
 				aud_atrk_consume(rt, atrk1, todo);
 				aud_atrk_consume(rt, atrk2, todo);
 			}
@@ -2905,15 +2967,18 @@ _aud_mix_again:
 			src2 = dstptr;
 			toend1 = ATRK_MAXWP - atrk1->rdptr;
 			if (minlen1 <= toend1) {
-				aud_mixs16(dstptr, src1, src2, minlen1);
+				aud_mixs16(dstptr, src1, src2, minlen1,
+					   atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
 				aud_atrk_consume(rt, atrk1, minlen1);
 			} else {
 				todo = minlen1;
-				aud_mixs16(dstptr, src1, src2, toend1);
+				aud_mixs16(dstptr, src1, src2, toend1,
+					   atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
 				aud_atrk_consume(rt, atrk1, toend1);
 				todo -= toend1;
 				src1 = atrk1->data + atrk1->rdptr;
-				aud_mixs16(dstptr + toend1, src1, src2 + toend1, todo);
+				aud_mixs16(dstptr + toend1, src1, src2 + toend1, todo,
+					   atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
 				aud_atrk_consume(rt, atrk1, todo);
 			}
 			--mixable;
@@ -2962,8 +3027,6 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			iact_audio_scaled(ctx, size - 18, src + 18);
 		} else {
 			/* imuse-type */
-			if (!ctx->rt.audfragsize)
-				ctx->rt.audfragsize = 7352;
 			iact_buffer_imuse(ctx, size - 18, src + 18, p[4], p[3]);
 		}
 	}
@@ -3029,7 +3092,7 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
-	uint32_t t1, csz, tid, idx;
+	uint32_t t1, csz, tid, idx, vol, pan;
 	struct sanatrk *atrk;
 
 	if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
@@ -3047,11 +3110,27 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	if (rt->psadhdr == 1) {
 		tid = be32_to_cpu(ua32(src + 0));
 		idx = be32_to_cpu(ua32(src + 4));
+		vol = AUD_VOL_MAX;	/* maximum */
+		pan = 0;		/* centered */
 		src += 12;
 		size -= 12;
 	} else {
 		tid = le16_to_cpu(ua16(src + 0));
 		idx = le16_to_cpu(ua16(src + 2));
+		vol = src[8];
+
+		if (vol > AUD_VOL_MAX)
+			vol = AUD_VOL_MAX;
+
+		/* RA2 mono sound supposed to be played on both channels.
+		 * used for the music mostly. Set pan to zero since the source
+		 * is expanded to both channels if necessary when read.
+		 */
+		if (src[9] == 0x80)
+			pan = 0;
+		else
+			pan = (int8_t)src[9];
+
 		src += 10;
 		size -= 10;
 	}
@@ -3070,6 +3149,8 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		if (!atrk)
 			return;
 
+		atrk->pan = pan;
+		atrk->vol = vol;
 		if (size > atrk->dataleft)
 			size = atrk->dataleft;
 		aud_read_pcmsrc(ctx, atrk, size, src);
