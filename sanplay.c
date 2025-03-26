@@ -15,6 +15,7 @@ struct playpriv {
 	SDL_Renderer *ren;
 	SDL_Window *win;
 	SDL_Surface *lastimg;
+	SDL_Surface *newimg;
 	SDL_AudioStream *as;
 
 	uint16_t pxw;
@@ -45,7 +46,6 @@ static void queue_audio(void *ctx, unsigned char *adata, uint32_t size)
 		return;
 
 	SDL_PutAudioStreamData(p->as, adata, size);
-	SDL_FlushAudioStream(p->as);
 }
 
 /* this is called once per "sandec_decode_next_frame()" */
@@ -61,14 +61,15 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 	if (p->err || p->sm == 2)
 		return;
 
-	if (p->lastimg) {
-		SDL_DestroySurface(p->lastimg);
-		p->lastimg = NULL;
+	if (p->newimg) {
+		p->err = 1105;
+		return;
 	}
+
 	sur = SDL_CreateSurfaceFrom(w, h, imgpal ? SDL_PIXELFORMAT_INDEX8 : SDL_PIXELFORMAT_RGB565,
 				    vdata, pitch);
 	if (!sur) {
-		p->err = 1101;
+		p->err = 1106;
 		return;
 	}
 
@@ -76,18 +77,18 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 		pal = SDL_CreatePalette(256);
 		if (!pal) {
 			SDL_DestroySurface(sur);
-			p->err = 1102;
+			p->err = 1107;
 			return;
 		}
 		memcpy(pal->colors, imgpal, 256 * sizeof(uint32_t));
 		ret = SDL_SetSurfacePalette(sur, pal);
 		if (!ret) {
 			SDL_DestroySurface(sur);
-			p->err = 1103;
+			p->err = 1108;
 			return;
 		}
 	}
-	p->lastimg = sur;
+	p->newimg = sur;
 	p->vbufsize = size;
 	p->pxw = w;
 	p->pxh = h;
@@ -188,6 +189,17 @@ static int render_frame(struct playpriv *p)
 
 out:
 	return p->err;
+}
+
+static int do_img_flip(struct playpriv *p)
+{
+	if (p->lastimg) {
+		SDL_DestroySurface(p->lastimg);
+		p->lastimg = NULL;
+	}
+	p->lastimg = p->newimg;
+	p->newimg = NULL;
+	return render_frame(p);
 }
 
 static void exit_sdl(struct playpriv *p)
@@ -354,7 +366,12 @@ int main(int a, char **argv)
 						break;
 
 					if (ke->scancode == SDL_SCANCODE_SPACE && speedmode < 1) {
-						paused ^= 1;
+						if (paused && autopause) {
+							paused = 0;
+							autopause = 0;
+						} else
+							paused ^= 1;
+
 						if (!paused) {
 							pp.next_disp_us += (SDL_GetTicks() - ptick) * 1000;
 							SDL_ResumeAudioStreamDevice(pp.as);
@@ -366,8 +383,13 @@ int main(int a, char **argv)
 						running = 0;	/* end current video */
 						if (pp.as)
 							SDL_ClearAudioStream(pp.as);
-					} else if (ke->scancode == SDL_SCANCODE_P) {
-						autopause ^= 1;
+					} else if (ke->scancode == SDL_SCANCODE_PERIOD) {
+						autopause = 1;
+						if (paused) {
+							paused = 0;
+							pp.next_disp_us += (SDL_GetTicks() - ptick) * 1000;
+							SDL_ResumeAudioStreamDevice(pp.as);
+						}
 					} else if (ke->scancode == SDL_SCANCODE_Q) {
 						running = 0;
 						if (pp.as)
@@ -413,7 +435,7 @@ int main(int a, char **argv)
 				t1 = SDL_GetTicks();
 				delt = pp.next_disp_us - (ren * 1000) - (t1 * 1000);
 				if (running && ((delt <= 0) || speedmode == 1)) {
-					ret = render_frame(&pp);
+					ret = do_img_flip(&pp);
 					if (ret)
 						goto err;
 					t2 = SDL_GetTicks();
@@ -426,6 +448,7 @@ int main(int a, char **argv)
 err:
 					if (ret == SANDEC_DONE) {
 						parserdone = 1;
+						SDL_FlushAudioStream(pp.as);
 						ret = 0;
 					} else if (ret != 0) {
 						running = 0;
