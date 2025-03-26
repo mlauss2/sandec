@@ -21,12 +21,12 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Rebel Assault II
     - few sound issues
   - Rebel Assault I
-    - palette issues resulting in wrong colors and black squares in some videos.
     - sound issues in a lot of videos.
-- Decodes almost all SMUSHv1/v2 (8bit-paletted) video codecs
-  - frame interpolation for codec47/48 videos (default on).
+- Video decoding
+  - Handles all 8-bit codecs found in LucasArts DOS/Windows titles
   - missing codecs 31/32 (RA1 for SEGA), due to no samples available.
   - BL16 video is implemented, but still buggy.
+  - frame interpolation for codec47/48 videos (default on).
 - Audio decoding
   - OK for COMI/Outlaws/MotS/SotE
   - acceptable for RA1/RA2/Full Throttle/The Dig
@@ -35,11 +35,11 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - very good A/V sync in player
   - Outlaws IN_SHB.SAN (Level 1 Intro) the sound of the shovel hitting the ground perfectly matches the video (at around 5 minutes).
 - player keyboard controls:
-  - space  pause/unpause
-  - f  to toggle fullscreen/windowed
-  - n  to play next video in list
-  - p  to toggle pause-at-every-frame
-  - q  to quit
+  - space to pause/unpause
+  - f     to toggle fullscreen/windowed
+  - n     to play next video in list
+  - .     to advance by 1 frame and pause
+  - q     to quit
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
   - i  to toggle frame interpolation on codec47/48 on/off
   - s  to cycle between SDL3 texture smoothing (off/linear).
@@ -61,7 +61,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
 # Dev Notes
-- look at RA1 palette code
 - BL16 mvecs are somtimes wrong
 
-20250325
+20250326
