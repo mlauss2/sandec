@@ -2838,7 +2838,7 @@ static void aud_atrk_consume(struct sanrt *rt, struct sanatrk *atrk, uint32_t by
  *	no -> we're done, queue audio buffer, wait for next frame with more
  *		track data.
  */
-static void aud_mix_tracks(struct sanctx *ctx)
+static int aud_mix_tracks(struct sanctx *ctx)
 {
 	struct sanrt *rt = &ctx->rt;
 	struct sanatrk *atrk1, *atrk2;
@@ -2873,7 +2873,7 @@ _aud_mix_again:
 	if ((mixable == 1) && (minlen1 != ~0)){
 		atrk1 = aud_get_mixable(rt);
 		if (!atrk1)
-			return;
+			return 0;
 
 		if (step == 0) {
 			aud_mixs16(dstptr, atrk1->data + atrk1->rdptr, NULL,
@@ -3010,6 +3010,7 @@ done:
 	aud_reset_mixable(rt);
 	if (dstlen)
 		ctx->io->queue_audio(ctx->io->userctx, aptr, dstlen);
+	return (dstlen != 0);
 }
 
 static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
@@ -3531,7 +3532,7 @@ int sandec_decode_next_frame(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
 	uint32_t c[2];
-	int ret;
+	int ret, b;
 
 	if (!ctx)
 		return 1;
@@ -3553,8 +3554,9 @@ int sandec_decode_next_frame(void *sanctx)
 	if (ret) {
 		if (ctx->rt.currframe >= ctx->rt.FRMEcnt) {
 			ret = SANDEC_DONE;	/* seems we reached file end */
-			while ((ctx->rt.acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)))
-				aud_mix_tracks(ctx);
+			b = 1;
+			while (b && (ctx->rt.acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)))
+				b = aud_mix_tracks(ctx);
 		}
 		goto out;
 	}
