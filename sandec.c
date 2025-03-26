@@ -2631,6 +2631,8 @@ static struct sanatrk *aud_find_trk(struct sanctx *ctx, uint16_t trkid, int fail
 		atrk->pdcnt = 0;
 		atrk->trkid = trkid;
 		atrk->dataleft = 0;
+		atrk->vol = AUD_VOL_MAX;
+		atrk->pan = 0;
 		return atrk;
 	}
 	return NULL;
@@ -3052,6 +3054,8 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		atrk->flags = 0;
 		atrk->pdcnt = 0;
 		atrk->trkid = tid;
+		atrk->vol = AUD_VOL_MAX;
+		atrk->pan = 0;
 	}
 
 	rate = ctx->rt.samplerate;

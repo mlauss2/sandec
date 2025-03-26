@@ -173,7 +173,7 @@ static int render_frame(struct playpriv *p)
 	}
 
 	tex = SDL_CreateTextureFromSurface(p->ren, p->lastimg);
-	if (!ret) {
+	if (!tex) {
 		p->err = 1103;
 		goto out;
 	}
@@ -477,9 +477,11 @@ err:
 		fclose(pp.fhdl);
 
 		/* let remaining audio finish playback: mainly for .SAD audio files */
-		if (ret == SANDEC_DONE && pp.as && speedmode < 2)
+		if (ret == SANDEC_DONE && pp.as && speedmode < 2) {
+			SDL_FlushAudioStream(pp.as);
 			while (0 != SDL_GetAudioStreamQueued(pp.as))
 				SDL_Delay(10);
+		}
 
 		if (verbose || ret > SANDEC_OK)
 			printf("\n%u/%u  %d\n", sandec_get_currframe(sanctx), fc, ret);
