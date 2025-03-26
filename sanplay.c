@@ -14,9 +14,8 @@ struct playpriv {
 	FILE *fhdl;
 	SDL_Renderer *ren;
 	SDL_Window *win;
+	SDL_Surface *lastimg;
 	SDL_AudioStream *as;
-	SDL_FRect dr;
-	SDL_FRect *drp;
 
 	uint16_t pxw;
 	uint16_t pxh;
@@ -29,7 +28,6 @@ struct playpriv {
 	uint16_t subid;
 	int err;
 	int fullscreen;
-	int rcc;
 	int nextmult;
 	int prevmult;
 	int sm;
@@ -47,6 +45,7 @@ static void queue_audio(void *ctx, unsigned char *adata, uint32_t size)
 		return;
 
 	SDL_PutAudioStreamData(p->as, adata, size);
+	SDL_FlushAudioStream(p->as);
 }
 
 /* this is called once per "sandec_decode_next_frame()" */
@@ -57,63 +56,15 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 	struct playpriv *p = (struct playpriv *)ctx;
 	SDL_Palette *pal;
 	SDL_Surface *sur;
-	SDL_Texture *tex;
-	int ret, nw, nh;
+	int ret;
 
 	if (p->err || p->sm == 2)
 		return;
 
-	if (!p->win) {
-		ret = SDL_CreateWindowAndRenderer("SAN/ANIM Player", w, h, SDL_WINDOW_RESIZABLE, &p->win, &p->ren);
-		if (!ret) {
-			p->win = NULL;
-			p->ren = NULL;
-			p->err = 1100;
-			return;
-		}
-		SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
-		SDL_SetRenderLogicalPresentation(p->ren, w, h, SDL_LOGICAL_PRESENTATION_LETTERBOX);
-		p->winw = w;
-		p->winh = h;
-		if (p->nextmult == 0)
-			p->nextmult = 1;
+	if (p->lastimg) {
+		SDL_DestroySurface(p->lastimg);
+		p->lastimg = NULL;
 	}
-
-	if (p->winw < w || p->winh < h) {
-		SDL_SetWindowSize(p->win, w, h);
-		p->winw = w;
-		p->winh = h;
-		if (p->nextmult == 0)
-			p->nextmult = p->fullscreen ? 0 : p->prevmult;
-	}
-
-	if (p->nextmult < 0) {
-		p->nextmult = 0;
-		if (!p->fullscreen) {
-			p->fullscreen = 1;
-		} else {
-			p->fullscreen = 0;
-			p->nextmult = p->prevmult;
-		}
-	}
-
-	if (p->nextmult > 0) {
-		p->prevmult = p->nextmult;
-		nw = w * p->nextmult;
-		nh = h * p->nextmult;
-		p->nextmult = 0;
-		if (p->fullscreen) {
-			SDL_SetWindowFullscreen(p->win, 0);
-			p->fullscreen = 0;
-		}
-
-		if ((p->winw != nw) || (p->winh != nh)) {
-			SDL_SetWindowSize(p->win, nw, nh);
-			p->winw = nw;
-			p->winh = nh;
-		}
-	}
-
 	sur = SDL_CreateSurfaceFrom(w, h, imgpal ? SDL_PIXELFORMAT_INDEX8 : SDL_PIXELFORMAT_RGB565,
 				    vdata, pitch);
 	if (!sur) {
@@ -136,21 +87,7 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 			return;
 		}
 	}
-
-	tex = SDL_CreateTextureFromSurface(p->ren, sur);
-	if (!tex) {
-		p->err = 1104;
-		return;
-	}
-	SDL_SetTextureScaleMode(tex, smodes[p->texsmooth]);
-
-	ret = SDL_RenderTexture(p->ren, tex, NULL, NULL);
-	if (!ret) {
-		p->err = 1105;
-		return;
-	}
-	SDL_DestroyTexture(tex);
-	SDL_DestroySurface(sur);
+	p->lastimg = sur;
 	p->vbufsize = size;
 	p->pxw = w;
 	p->pxh = h;
@@ -159,14 +96,98 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 	p->next_disp_us += frame_duration_us;
 }
 
+/* render the current surface to a window */
 static int render_frame(struct playpriv *p)
 {
+	SDL_Texture *tex;
+	int ret, nw, nh;
+
 	if (p->err)
 		return p->err;
 
+	if (p->sm == 2)
+		return 0;
+
+	if (p->pxw < 1 || p->pxh < 0) {
+		p->err = 1100;
+		goto out;
+	}
+
+	if (!p->win) {
+		ret = SDL_CreateWindowAndRenderer("SAN/ANIM Player", p->pxw, p->pxh, SDL_WINDOW_RESIZABLE, &p->win, &p->ren);
+		if (!ret) {
+			p->win = NULL;
+			p->ren = NULL;
+			p->err = 1101;
+			goto out;
+		}
+		SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
+		SDL_SetRenderLogicalPresentation(p->ren, p->pxw, p->pxh, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+		p->winw = p->pxw;
+		p->winh = p->pxh;
+		if (p->nextmult == 0)
+			p->nextmult = 1;
+	}
+
+	if (p->winw < p->pxw || p->winh < p->pxh) {
+		SDL_SetWindowSize(p->win, p->pxw, p->pxh);
+		p->winw = p->pxw;
+		p->winh = p->pxh;
+		if (p->nextmult == 0)
+			p->nextmult = p->fullscreen ? 0 : p->prevmult;
+	}
+
+	if (p->nextmult < 0) {
+		p->nextmult = 0;
+		if (!p->fullscreen) {
+			p->fullscreen = 1;
+		} else {
+			p->fullscreen = 0;
+			p->nextmult = p->prevmult;
+		}
+	}
+
+	if (p->nextmult > 0) {
+		p->prevmult = p->nextmult;
+		nw = p->pxw * p->nextmult;
+		nh = p->pxh * p->nextmult;
+		p->nextmult = 0;
+		if (p->fullscreen) {
+			SDL_SetWindowFullscreen(p->win, 0);
+			p->fullscreen = 0;
+			/* SetWindowFullscreen() will trigger an event when done */
+			return 0;
+		}
+
+		if ((p->winw != nw) || (p->winh != nh)) {
+			SDL_SetWindowSize(p->win, nw, nh);
+			p->winw = nw;
+			p->winh = nh;
+		}
+	}
+
+	if (!p->ren || !p->lastimg) {
+		p->err = 1102;
+		goto out;
+	}
+
+	tex = SDL_CreateTextureFromSurface(p->ren, p->lastimg);
+	if (!ret) {
+		p->err = 1103;
+		goto out;
+	}
+
+	SDL_SetTextureScaleMode(tex, smodes[p->texsmooth]);
+	ret = SDL_RenderTexture(p->ren, tex, NULL, NULL);
+	SDL_DestroyTexture(tex);
+	if (!ret) {
+		p->err = 1104;
+		goto out;
+	}
 	SDL_RenderPresent(p->ren);
 
-	return 0;
+out:
+	return p->err;
 }
 
 static void exit_sdl(struct playpriv *p)
@@ -321,10 +342,13 @@ int main(int a, char **argv)
 				if (e.type == SDL_EVENT_QUIT)
 					running = 0;
 				else if ((e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN) ||
-					 (e.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN))
+					 (e.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN)) {
 					/* act on the fullscreen state change on next frame */
 					pp.nextmult = -1;
-				else if (e.type == SDL_EVENT_KEY_DOWN) {
+					ret = render_frame(&pp);
+					if (ret)
+						break;
+				} else if (e.type == SDL_EVENT_KEY_DOWN) {
 					SDL_KeyboardEvent *ke = (SDL_KeyboardEvent *)&e;
 					if (!ke->down || ke->repeat != 0)
 						break;
@@ -358,15 +382,21 @@ int main(int a, char **argv)
 					} else if ((ke->scancode >= SDL_SCANCODE_1) &&
 						   (ke->scancode <= SDL_SCANCODE_6)) {
 						pp.nextmult = ke->scancode - SDL_SCANCODE_1 + 1;
+						ret = render_frame(&pp);
+						if (ret)
+							break;
 					} else if (ke->scancode == SDL_SCANCODE_I) {
 						sio.flags ^= SANDEC_FLAG_DO_FRAME_INTERPOLATION;
 					} else if (ke->scancode == SDL_SCANCODE_S) {
 						pp.texsmooth ^= 1;
+						ret = render_frame(&pp);
+						if (ret)
+							break;
 					}
 				}
 			}
 
-			if (!paused) {
+			if (!paused && ret == SANDEC_OK) {
 
 				if (parserdone) {
 					if (speedmode) {
@@ -424,7 +454,7 @@ err:
 			while (0 != SDL_GetAudioStreamQueued(pp.as))
 				SDL_Delay(10);
 
-		if (verbose)
+		if (verbose || ret > SANDEC_OK)
 			printf("\n%u/%u  %d\n", sandec_get_currframe(sanctx), fc, ret);
 	}
 
