@@ -32,6 +32,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - acceptable for RA1/RA2/Full Throttle/The Dig
     - source is 11kHz/8bit/mono, but very crudely upsampled to 22kHz/16bit/stereo
     - volume/pan flags are currently ignored
+  - OK for SANM title (VIMA)
 - very good A/V sync in player
   - Outlaws IN_SHB.SAN (Level 1 Intro) the sound of the shovel hitting the ground perfectly matches the video (at around 5 minutes).
 - player keyboard controls:
@@ -48,7 +49,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - BE targets are untested, there are probably issues with the audio format and palette.
 
 # What does **not** yet work:
-- Bl16 Video / VIMA Audio
+- Bl16 Video
 
 # Build:
 - Have SDL3
@@ -64,4 +65,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
 # Dev Notes
 - BL16 mvecs are somtimes wrong
 
-20250326
+20250327

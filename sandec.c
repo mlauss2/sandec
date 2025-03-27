@@ -200,7 +200,72 @@ struct sanctx {
 	uint8_t c45tbl1[768];
 	uint8_t c45tbl2[0x8000];
 	uint16_t c4tblparam;
+	uint16_t vima_pred_tbl[5786];
 };
+
+/* VIMA data tables */
+static const uint8_t vima_size_table[] = {
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+	6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+	7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
+};
+
+static const int8_t vima_itbl1[] = {
+	-1, 4, -1, 4
+};
+
+static const int8_t vima_itbl2[] = {
+	-1, -1, 2, 6, -1, -1, 2, 6
+};
+
+static const int8_t vima_itbl3[] = {
+	-1, -1, -1, -1, 1, 2, 4, 6, -1, -1, -1, -1, 1, 2, 4, 6
+};
+
+static const int8_t vima_itbl4[] = {
+	-1, -1, -1, -1, -1, -1, -1, -1, 1,  1,  1,  2,  2,  4,  5,  6,
+	-1, -1, -1, -1, -1, -1, -1, -1, 1,  1,  1,  2,  2,  4,  5,  6
+};
+
+static const int8_t vima_itbl5[] = {
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	1,  1,  1,  1,  1,  2,  2,  2,  2,  4,  4,  4,  5,  5,  6,  6,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	1,  1,  1,  1,  1,  2,  2,  2,  2,  4,  4,  4,  5,  5,  6,  6
+};
+
+static const int8_t vima_itbl6[] = {
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  2,
+	2,  2,  4,  4,  4,  4,  4,  4,  5,  5,  5,  5,  6,  6,  6,  6,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+	1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  2,  2,  2,  2,  2,  2,
+	2,  2,  4,  4,  4,  4,  4,  4,  5,  5,  5,  5,  6,  6,  6,  6
+};
+
+static const int8_t *const vima_itbls[] = {
+	vima_itbl1,  vima_itbl2,  vima_itbl3, vima_itbl4, vima_itbl5, vima_itbl6
+};
+
+/* adpcm standard step table */
+#define ADPCM_STEP_COUNT 89
+const int16_t adpcm_step_table[ADPCM_STEP_COUNT] = {
+	7,     8,     9,    10,    11,    12,    13,    14,    16,    17,
+	19,    21,    23,    25,    28,    31,    34,    37,    41,    45,
+	50,    55,    60,    66,    73,    80,    88,    97,   107,   118,
+	130,   143,   157,   173,   190,   209,   230,   253,   279,   307,
+	337,   371,   408,   449,   494,   544,   598,   658,   724,   796,
+	876,   963,  1060,  1166,  1282,  1411,  1552,  1707,  1878,  2066,
+	2272,  2499,  2749,  3024,  3327,  3660,  4026,  4428,  4871,  5358,
+	5894,  6484,  7132,  7845,  8630,  9493, 10442, 11487, 12635, 13899,
+	15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
+};
+
 
 /* Codec37/Codec48 motion vectors */
 static const int8_t c37_mv[3][510] = {
@@ -3170,6 +3235,112 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
+static void handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
+{
+	int i, j, v1, data, ch, inbits, numbits, bitsize;
+	int  hibit, lobits, tblidx, idx2, delt;
+	int16_t startdata[2], *dst;
+	uint8_t startpos[2];
+	uint32_t samples;
+
+	if (size < 16)
+		return;
+
+	samples = be32_to_cpu(ua32(src));
+	src += 4;
+	size -= 4;
+	if ((int32_t)samples < 0) {
+		samples = be32_to_cpu(ua32(src + 4));
+		src += 8;
+		size -= 8;
+	}
+
+	ch = 1;
+	startpos[0] = *src++;
+	size--;
+	if (startpos[0] & 0x80) {
+		startpos[0] = ~startpos[0];
+		ch = 2;
+	}
+
+	startdata[0] = be16_to_cpu(ua16(src));
+	src += 2;
+	size -= 2 ;
+	if (ch > 1) {
+		startpos[1] = *src++;
+		size--;
+		startdata[1] = be16_to_cpu(ua16(src));
+		src += 2;
+		size -= 2;
+	}
+
+	inbits = be16_to_cpu(ua16(src));
+	src += 2;
+	size -= 2;
+	numbits = 0;
+
+	/* starting after atmpbuf1 there's at least 1MB */
+	memset(ctx->rt.atmpbuf1, 0, samples * 2 * ch);
+	for (i = 0; i < ch; i++) {
+		dst = (int16_t *)ctx->rt.atmpbuf1 + i;
+		tblidx = startpos[i];
+		data = startdata[i];
+
+		for (j = 0; j < samples; j++) {
+			bitsize = vima_size_table[tblidx];
+			numbits += bitsize;
+			hibit = 1 << (bitsize - 1);
+			lobits = hibit - 1;
+			v1 = (inbits >> (16 - numbits)) & (hibit | lobits);
+
+			if (numbits > 7) {
+				inbits = ((inbits & 0xff) << 8) | *src++;
+				numbits -= 8;
+				size--;
+			}
+
+			if (v1 & hibit)
+				v1 ^= hibit;
+			else
+				hibit = 0;
+
+			if (v1 == lobits) {
+				data = ((int16_t)(inbits << numbits) & 0xffffff00);
+				inbits = ((inbits & 0xff) << 8) | *src++;
+				data |= ((inbits >> (8 - numbits)) & 0xff);
+				inbits = ((inbits & 0xff) << 8) | *src++;
+				size -= 2;
+			} else {
+				idx2 = (v1 << (7 - bitsize)) | (tblidx << 6);
+				delt = ctx->vima_pred_tbl[idx2];
+
+				if (v1)
+					delt += (adpcm_step_table[tblidx] >> (bitsize - 1));
+				if (hibit)
+					delt = -delt;
+
+				data += delt;
+				if (data < -0x8000)
+					data = -0x8000;
+				else if (data > 0x7fff)
+					data = 0x7fff;
+			}
+
+			*((uint16_t *)dst) = data;
+			dst += ch;
+
+			tblidx += vima_itbls[bitsize - 2][v1];
+			if (tblidx < 0)
+				tblidx = 0;
+			else if (tblidx > (ADPCM_STEP_COUNT - 1))
+				tblidx = ADPCM_STEP_COUNT - 1;
+
+		}
+	}
+
+	ctx->io->queue_audio(ctx->io->userctx, ctx->rt.atmpbuf1, samples * 2 * ch);
+}
+
 /* subtitles: index of message in the Outlaws LOCAL.MSG file, 10000 - 12001.
  * As long as subid is set to non-zero, the subtitle needs to be overlaid
  * over the image.  The chunk also provides hints about where to place
@@ -3276,7 +3447,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case PVOC: /* fallthrough */
 		case PSD2: /* fallthrough */
 		case PSAD: handle_PSAD(ctx, csz, src); break;
-		case WAVE: break;
+		case WAVE: handle_VIMA(ctx, csz, src); break;
 		case BL16: handle_BL16(ctx, csz, src); break;
 		default:   ret = 0;		/* unknown chunk, ignore */
 		}
@@ -3326,14 +3497,22 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	return ret;
 }
 
-static int vima_init(struct sanctx *ctx)
+static void vima_init(struct sanctx *ctx)
 {
-	return 0;
-}
+	int i, j, k, l, m, n;
 
-static int bl16_init(struct sanctx *ctx)
-{
-	return 0;
+	for (i = 0; i < 64; i++) {
+		for (j = 0, k = i; j < ADPCM_STEP_COUNT; j++, k += 64) {
+			n = 0;
+			l = adpcm_step_table[j];
+			for (m = 32; m != 0; m >>= 1) {
+				if (i & m)
+					n += l;
+				l >>= 1;
+			}
+			ctx->vima_pred_tbl[k] = n;
+		}
+	}
 }
 
 static int handle_AHDR(struct sanctx *ctx, uint32_t size)
@@ -3460,10 +3639,7 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 	}
 	free(sb);
 
-	if (ret == 0)
-		ret = vima_init(ctx);
-	if (ret == 0)
-		ret = bl16_init(ctx);
+	vima_init(ctx);
 
 	return ret;
 }
