@@ -2070,11 +2070,9 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 			   uint16_t *tbl1, uint16_t *tbl2, uint16_t w,
 			   uint32_t stride, uint8_t blksize, struct sanctx *ctx)
 {
-	uint16_t o2, c[2];
-	int32_t mvofs;
-	uint32_t ofs;
-	int8_t *pglyph;
-	uint8_t opc;
+	uint8_t opc, *pglyph;
+	int32_t mvofs, ofs;
+	uint16_t c[2];
 	int i, j;
 
 	opc = *src++;
@@ -2190,7 +2188,7 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		}
 		break;
 	case 0xf5:	/* copy from db2, mvec from source */
-		o2 = le16_to_cpu(ua16(src));
+		int16_t o2 = le16_to_cpu((int16_t)ua16(src));
 		src += 2;
 		/* mvofs = ((o2 % w) * 2) + ((o2 / w) * stride); */
 		mvofs = o2 * 2;  /* since stride = w*2 */

@@ -3,7 +3,8 @@ intended only to play "Outlaws" videos, since they are awesome),
 with an SDL3-based player application to demonstrate library use.
 
 Can also play game movies from Curse of Monkey Island, Shadows of the Empire,
-Mysteries of the Sith, The Dig, Full Throttle,  Rebel Assault II and Rebel Assault I.
+Mysteries of the Sith, The Dig, Full Throttle, Rebel Assault II, Rebel Assault,
+X-Wing Alliance.
 
 If you find this useful, I'd be very happy if you dropped me a line!
 
@@ -22,10 +23,13 @@ If you find this useful, I'd be very happy if you dropped me a line!
     - few sound issues
   - Rebel Assault I
     - sound issues in a lot of videos.
+- Can successfully parse .SNM videos from the following LucasArts titles:
+  - X-Wing Alliance
+  - Indiana Jones and the Infernal Machine, except for jonesopn_8.snm
 - Video decoding
   - Handles all 8-bit codecs found in LucasArts DOS/Windows titles
   - missing codecs 31/32 (RA1 for SEGA), due to no samples available.
-  - BL16 video is implemented, but still buggy.
+  - BL16 video is implemented. Works with all XWA videos.
   - frame interpolation for codec47/48 videos (default on).
 - Audio decoding
   - OK for COMI/Outlaws/MotS/SotE
@@ -49,7 +53,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - BE targets are untested, there are probably issues with the audio format and palette.
 
 # What does **not** yet work:
-- Bl16 Video
+- Bl16 Video has issues with Infernal Machine "jonesopn_8.snm".
 
 # Build:
 - Have SDL3
@@ -65,4 +69,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
 # Dev Notes
 - BL16 mvecs are somtimes wrong
 
-20250327
+20250328
