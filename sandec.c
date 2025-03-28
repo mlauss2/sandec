@@ -2070,9 +2070,11 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 			   uint16_t *tbl1, uint16_t *tbl2, uint16_t w,
 			   uint32_t stride, uint8_t blksize, struct sanctx *ctx)
 {
-	uint8_t opc, *pglyph;
 	int32_t mvofs, ofs;
+	int8_t *pglyph;
 	uint16_t c[2];
+	uint8_t opc;
+	int16_t o2;
 	int i, j;
 
 	opc = *src++;
@@ -2088,16 +2090,17 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 			*(uint16_t *)(dst + stride + 2) = le16_to_cpu(ua16(src));
 			src += 2;
 		} else {
-		blksize >>= 1;
-		src = bl16_block(src, dst, db1, db2, tbl1, tbl2, w, stride, blksize, ctx);
-		src = bl16_block(src, dst + (blksize * 2), db1 + (blksize * 2),
-				 db2 + (blksize * 2), tbl1, tbl2, w, stride, blksize, ctx);
-		dst += stride * blksize;
-		db1 += stride * blksize;
-		db2 += stride * blksize;
-		src = bl16_block(src, dst, db1, db2, tbl1, tbl2, w, stride, blksize, ctx);
-		src = bl16_block(src, dst + (blksize * 2), db1 + (blksize * 2),
-				 db2 + (blksize * 2), tbl1, tbl2, w, stride, blksize, ctx);
+			src = bl16_block(src, dst, db1, db2, tbl1, tbl2,
+					 w, stride, blksize >> 1, ctx);
+			src = bl16_block(src, dst + blksize, db1 + blksize, db2 + blksize,
+					 tbl1, tbl2, w, stride, blksize >> 1, ctx);
+			dst += stride * (blksize >> 1);
+			db1 += stride * (blksize >> 1);
+			db2 += stride * (blksize >> 1);
+			src = bl16_block(src, dst, db1, db2, tbl1, tbl2,
+					 w, stride, blksize >> 1, ctx);
+			src = bl16_block(src, dst + blksize, db1 + blksize, db2 + blksize,
+					 tbl1, tbl2, w, stride, blksize >> 1, ctx);
 		}
 		break;
 	case 0xfe:
@@ -2107,17 +2110,17 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
 			for (j = 0; j < blksize; j++) {
-				*(uint16_t *)(dst + ofs + j * 2) = c[0];
+				*(uint16_t *)(dst + ofs + j*2) = c[0];
 			}
 		}
 		break;
 	case 0xfd:
 		/* fill a block using tbl2 color, index from next byte */
-		c[0] = tbl2[*src++];
+		c[0] = le16_to_cpu(tbl2[*src++]);
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
-			for (j = 0; j < blksize * 2; j += 2) {
-				*(uint16_t *)(dst + ofs + j) = c[0];
+			for (j = 0; j < blksize; j++) {
+				*(uint16_t *)(dst + ofs + j*2) = c[0];
 			}
 		}
 		break;
@@ -2126,11 +2129,11 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 	case 0xfa:
 	case 0xf9:
 		/* fill a block using tbl1 color */
-		c[0] = tbl1[(opc - 0xf9)];
+		c[0] = le16_to_cpu(tbl1[(opc - 0xf9)]);
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
-			for (j = 0; j < blksize * 2; j += 2) {
-				*(uint16_t *)(dst + ofs + j) = c[0];
+			for (j = 0; j < blksize; j++) {
+				*(uint16_t *)(dst + ofs + j*2) = c[0];
 			}
 		}
 		break;
@@ -2153,27 +2156,27 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 			pglyph = (blksize == 8) ? ctx->c47_glyph8x8[opc] : ctx->c47_glyph4x4[opc];
 			for (i = 0; i < blksize; i++) {
 				ofs = i * stride;
-				for (j = 0; j < blksize * 2; j += 2) {
-					*(uint16_t *)(dst + ofs + j) = c[!!(*pglyph++)];
+				for (j = 0; j < blksize; j++) {
+					*(uint16_t *)(dst + ofs + j*2) = c[!!(*pglyph++)];
 				}
 			}
 		}
 		break;
 	case 0xf7:
 		if (blksize == 2) {
-			*(uint16_t *)(dst + 0      + 0) = tbl2[*src++];
-			*(uint16_t *)(dst + 0      + 2) = tbl2[*src++];
-			*(uint16_t *)(dst + stride + 0) = tbl2[*src++];
-			*(uint16_t *)(dst + stride + 2) = tbl2[*src++];
+			*(uint16_t *)(dst + 0      + 0) = le16_to_cpu(tbl2[*src++]);
+			*(uint16_t *)(dst + 0      + 2) = le16_to_cpu(tbl2[*src++]);
+			*(uint16_t *)(dst + stride + 0) = le16_to_cpu(tbl2[*src++]);
+			*(uint16_t *)(dst + stride + 2) = le16_to_cpu(tbl2[*src++]);
 		} else {
 			opc = *src++;
-			c[1] = tbl2[*src++];
-			c[0] = tbl2[*src++];
+			c[1] = le16_to_cpu(tbl2[*src++]);
+			c[0] = le16_to_cpu(tbl2[*src++]);
 			pglyph = (blksize == 8) ? ctx->c47_glyph8x8[opc] : ctx->c47_glyph4x4[opc];
 			for (i = 0; i < blksize; i++) {
 				ofs = i * stride;
-				for (j = 0; j < blksize * 2; j += 2) {
-					*(uint16_t *)(dst + ofs + j) = c[!!(*pglyph++)];
+				for (j = 0; j < blksize; j++) {
+					*(uint16_t *)(dst + ofs + j*2) = c[!!(*pglyph++)];
 				}
 			}
 		}
@@ -2181,21 +2184,19 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 	case 0xf6:	/* copy from db1 at same spot */
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
-			for (j = 0; j < blksize * 2; j += 2) {
-				/* dst and src are at least 16bit aligned */
-				*(uint16_t *)(dst + ofs + j) = *(uint16_t *)(db1 + ofs + j);
+			for (j = 0; j < blksize; j++) {
+				*(uint16_t *)(dst + ofs + j*2) = *(uint16_t *)(db1 + ofs + j*2);
 			}
 		}
 		break;
 	case 0xf5:	/* copy from db2, mvec from source */
-		int16_t o2 = le16_to_cpu((int16_t)ua16(src));
+		o2 = le16_to_cpu((int16_t)ua16(src));
 		src += 2;
-		/* mvofs = ((o2 % w) * 2) + ((o2 / w) * stride); */
 		mvofs = o2 * 2;  /* since stride = w*2 */
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
 			for (j = 0; j < blksize; j++) {
-				*(uint16_t *)(dst + ofs + j * 2) = *(uint16_t *)(db2 + ofs + j * 2 + mvofs);
+				*(uint16_t *)(dst + ofs + j*2) = *(uint16_t *)(db2 + ofs + j*2 + mvofs);
 			}
 		}
 
@@ -2205,8 +2206,8 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		mvofs = (c47_mv[opc][0] * 2) + (c47_mv[opc][1] * stride);
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
-			for (j = 0; j < blksize * 2; j += 2) {
-				*(uint16_t *)(dst + ofs + j) = *(uint16_t *)(db2 + ofs + j + mvofs);
+			for (j = 0; j < blksize; j++) {
+				*(uint16_t *)(dst + ofs + j*2) = *(uint16_t *)(db2 + ofs + j*2 + mvofs);
 			}
 		}
 		break;
