@@ -94,6 +94,7 @@ static inline uint32_t ua32(uint8_t *p)
 #define FLHD	0x44484c46
 #define BL16	0x36316c42
 #define WAVE	0x65766157
+#define ANNO	0x4f4e4e41
 
 /* maximum image size */
 #define VID_MAXX	800
@@ -3730,6 +3731,7 @@ int sandec_decode_next_frame(void *sanctx)
 		return SANDEC_OK;
 	}
 
+again:
 	ret = read_source(ctx, c, 8);
 	if (ret) {
 		if (ctx->rt.currframe >= ctx->rt.FRMEcnt) {
@@ -3745,6 +3747,19 @@ int sandec_decode_next_frame(void *sanctx)
 	if (c[0] == FRME) {
 		/* default case */
 		ret = handle_FRME(ctx, c[1]);
+	} else if (c[0] == ANNO) {
+		/* some annotation, found esp. in Grim Fandango files. just skip it */
+		uint8_t buf[128], rs;
+		while (c[1] > 0) {
+			rs = c[1] >= 128 ? 128 : c[1];
+			ret = read_source(ctx, buf, rs);
+			if (ret) {
+				ret = 11;
+				goto out;
+			}
+			c[1] -= rs;
+		}
+		goto again;
 	} else if (ctx->rt.acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)) {
 		aud_mix_tracks(ctx);
 	} else {

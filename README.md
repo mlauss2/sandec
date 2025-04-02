@@ -26,6 +26,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - Can successfully parse .SNM videos from the following LucasArts titles:
   - X-Wing Alliance
   - Indiana Jones and the Infernal Machine, except for jonesopn_8.snm
+  - Grim Fandango
 - Video decoding
   - Handles all 8-bit codecs found in LucasArts DOS/Windows titles
   - missing codecs 31/32 (RA1 for SEGA), due to no samples available.
@@ -35,7 +36,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - OK for COMI/Outlaws/MotS/SotE
   - acceptable for RA1/RA2/Full Throttle/The Dig
     - source is 11kHz/8bit/mono, but very crudely upsampled to 22kHz/16bit/stereo
-    - volume/pan flags are currently ignored
   - OK for SANM title (VIMA)
 - very good A/V sync in player
   - Outlaws IN_SHB.SAN (Level 1 Intro) the sound of the shovel hitting the ground perfectly matches the video (at around 5 minutes).
@@ -69,4 +69,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
 # Dev Notes
 - BL16 mvecs are somtimes wrong
 
-20250328
+20250402
