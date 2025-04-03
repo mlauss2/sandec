@@ -20,25 +20,22 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Full Throttle
   - The Dig
   - Rebel Assault II
-    - few sound issues
   - Rebel Assault I
-    - sound issues in a lot of videos.
 - Can successfully parse .SNM videos from the following LucasArts titles:
   - X-Wing Alliance
-  - Indiana Jones and the Infernal Machine, except for jonesopn_8.snm
+  - Indiana Jones and the Infernal Machine
   - Grim Fandango
 - Video decoding
   - Handles all 8-bit codecs found in LucasArts DOS/Windows titles
   - missing codecs 31/32 (RA1 for SEGA), due to no samples available.
   - BL16 video is implemented. Works with all XWA videos.
+    - except for Infernal Machine "jonesopn_8.snm": this one seems to use invalid motion vectors a lot.
   - frame interpolation for codec47/48 videos (default on).
 - Audio decoding
-  - OK for COMI/Outlaws/MotS/SotE
-  - acceptable for RA1/RA2/Full Throttle/The Dig
-    - source is 11kHz/8bit/mono, but very crudely upsampled to 22kHz/16bit/stereo
-  - OK for SANM title (VIMA)
-- very good A/V sync in player
-  - Outlaws IN_SHB.SAN (Level 1 Intro) the sound of the shovel hitting the ground perfectly matches the video (at around 5 minutes).
+  - audio ouput for all by the decoder is 22kHz/16bit/2ch.
+    - all sources with lower quality are crudely upsampled.
+  - RA1/RA2 background music does not loop.
+  - RA1 player speech is both genders simultaneously: the game engine filtered them using the SKIP chunks, which are not implemented (yet).
 - player keyboard controls:
   - space to pause/unpause
   - f     to toggle fullscreen/windowed
@@ -52,9 +49,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
-# What does **not** yet work:
-- Bl16 Video has issues with Infernal Machine "jonesopn_8.snm".
-
 # Build:
 - Have SDL3
 - run "make"
@@ -67,6 +61,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
 # Dev Notes
-- BL16 mvecs are somtimes wrong
+- BL16 jonesopn_8.snm:  lots of invalid motion vectors which point outside the buffer area.  Since the videos however work in the engine there is something missing wrt. delta buffer offset handling.
 
-20250402
+20250403
