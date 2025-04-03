@@ -772,7 +772,7 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 	 * white/gray/.. space backgrounds, at least until the next NPAL.
 	 */
 	if (rt->version < 2)
-		rt->palette[0] = 0;
+		rt->palette[0] = 0xff << 24;
 }
 
 static void interpolate_frame(uint8_t *dst, const uint8_t *sr1, const uint8_t *srs,
