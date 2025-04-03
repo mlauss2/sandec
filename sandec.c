@@ -1940,12 +1940,12 @@ static void bl16_comp8(uint16_t *dst, uint8_t *src, uint32_t left, uint16_t *tbl
 		if (rlen > left)
 			rlen = left;
 		if (opc & 1) {
-			col = tbl2[*src++];		/* le16_to_cpu() ? */
+			col = le16_to_cpu(tbl2[*src++]);
 			for (j = 0; j < rlen; j++)
 				*dst++ = col;
 		} else {
 			for (j = 0; j < rlen; j++)
-				*dst++ = tbl2[*src++];	/* le16_to_cpu() ? */
+				*dst++ = le16_to_cpu(tbl2[*src++]);
 		}
 		left -= rlen;
 	}
@@ -1974,12 +1974,12 @@ static void bl16_comp7(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 		dst1 = (uint8_t *)(dst + (w * 2));
 		do {
 			dst2 = dst1 + 4;
-			c1 = tbl2[*src++];
+			c1 = le16_to_cpu(tbl2[*src++]);
 			*(uint32_t *)dst1 = (c1 << 16 | c1);
 			if (w - 2 > 0) {
 				hw = (w - 1) >> 1;
 				do {
-					c2 = tbl2[*src++];
+					c2 = le16_to_cpu(tbl2[*src++]);
 					c3 = bl16_c7_avg_col(c1, c2) & 0xffff;
 					*(uint32_t *)dst2 = c2 << 16 | c3;
 					dst2 += 4;
@@ -2015,7 +2015,7 @@ static void bl16_comp6(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 {
 	int i;
 	for (i = 0; i < w * h; i++) {
-		*dst++ = tbl2[*src++];
+		*dst++ = le16_to_cpu(tbl2[*src++]);
 	}
 }
 
