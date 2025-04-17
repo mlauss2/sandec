@@ -280,7 +280,7 @@ int main(int a, char **argv)
 	sio.userctx = &pp;
 	sio.queue_audio = queue_audio;
 	sio.queue_video = queue_video;
-	sio.flags = SANDEC_FLAG_DO_FRAME_INTERPOLATION;
+	sio.flags = 0;
 
 	speedmode = 0;
 
@@ -300,8 +300,6 @@ int main(int a, char **argv)
 				case 's': sio.flags |= SANDEC_FLAG_NO_AUDIO; break;
 				}
 				c++;
-				if (speedmode == 2)
-					sio.flags &= ~SANDEC_FLAG_DO_FRAME_INTERPOLATION;
 			}
 			continue;
 		} else {
