@@ -1815,15 +1815,11 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			rt->frmw = 320;
 			rt->frmh = 200;
 		} else {
-			/* don't know (yet) */
-			if ((left == 0) && (top == 0) && (w >= 320) && (h >= 200)
-			    && !(w & 1) && !(h & 1))
-				rt->have_vdims = 1; /* *looks* legit */
-
+			/* detect RA2 424x260 */
 			wr = w + left;
 			hr = h + top;
 			if ((wr == 424) && (hr == 260))
-				rt->have_vdims = 1;	/* RA2 frame size */
+				rt->have_vdims = 1;
 
 			rt->pitch = wr;
 			rt->frmw = wr;
