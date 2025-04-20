@@ -1815,10 +1815,11 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			rt->frmw = 320;
 			rt->frmh = 200;
 		} else {
-			/* detect RA2 424x260 */
+			/* detect RA2 424x260, or codec20 at 0/0 */
 			wr = w + left;
 			hr = h + top;
-			if ((wr == 424) && (hr == 260))
+			if (((wr == 424) && (hr == 260)) ||
+			    ((left == 0) && (top == 0) && (codec == 20) && (w > 3) && (h > 3)))
 				rt->have_vdims = 1;
 
 			rt->pitch = wr;
