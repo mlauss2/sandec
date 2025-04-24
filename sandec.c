@@ -851,8 +851,8 @@ static void codec47_comp1(uint8_t *src, uint8_t *dst_in, uint8_t *itbl, uint16_t
 }
 
 static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
-			      uint8_t *p1, uint8_t *p2, uint16_t w,
-			      uint8_t *coltbl, uint16_t size)
+			      uint8_t *p1, uint8_t *p2, const uint16_t w,
+			      const uint8_t *coltbl, uint16_t size)
 {
 	uint8_t opc, col[2], c;
 	uint16_t i, j;
@@ -896,7 +896,7 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 				for (j = 0; j < size; j++)
 					*(dst + (i * w) + j) = *(p1 + (i * w) + j);
 			break;
-		default:
+		default:	/* fill a block with color from the codebook */
 			c = coltbl[opc & 7];
 			for (i = 0; i < size; i++)
 				for (j = 0; j < size; j++)
@@ -912,7 +912,7 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 }
 
 static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
-			  uint16_t w, uint16_t h, uint8_t *coltbl)
+			  const uint16_t w, const uint16_t h, const uint8_t *coltbl)
 {
 	uint8_t *b1 = ctx->rt.buf1, *b2 = ctx->rt.buf2;
 	unsigned int i, j;
@@ -968,7 +968,7 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 
 static void codec47(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, uint16_t h)
 {
-	uint8_t *insrc = src, comp, newrot, flag;
+	uint8_t *coltbl, comp, newrot, flag;
 	uint32_t decsize;
 	uint16_t seq;
 
@@ -976,6 +976,7 @@ static void codec47(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, 
 	comp =   src[2];
 	newrot = src[3];
 	flag =   src[4];
+	coltbl = src + 8;	/* codebook 8 colors */
 	decsize  = le32_to_cpu(ua32(src + 14));	/* decoded (raw frame) size */
 	if (decsize > ctx->rt.fbsize)
 		decsize = ctx->rt.fbsize;
@@ -995,7 +996,7 @@ static void codec47(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, 
 	case 0:	memcpy(dst, src, w * h); break;
 	case 1:	codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h); break;
 	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
-			codec47_comp2(ctx, src, dst, w, h, insrc + 8);
+			codec47_comp2(ctx, src, dst, w, h, coltbl);
 		}
 		break;
 	case 3:	memcpy(dst, ctx->rt.buf2, ctx->rt.fbsize); break;
