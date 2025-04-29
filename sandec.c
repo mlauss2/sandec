@@ -148,7 +148,8 @@ struct sanatrk {
 struct sanrt {
 	uint32_t frmebufsz;	/* 4 size of buffer below		*/
 	uint8_t *fcache;	/* 8 one cached FRME object		*/
-	uint8_t *buf0;		/* 8 current front buffer		*/
+	uint8_t *fbuf;		/* 8 current front buffer		*/
+	uint8_t *buf0;		/* 8 c37/47/48 front buffer		*/
 	uint8_t *buf1;		/* 8 c47 delta buffer 1			*/
 	uint8_t *buf2;		/* 8 c47 delta buffer 2			*/
 	uint8_t *buf3;		/* 8 STOR buffer			*/
@@ -966,9 +967,9 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 	ctx->rt.have_itable = 1;
 }
 
-static void codec47(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, uint16_t h)
+static uint8_t* codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 {
-	uint8_t *coltbl, comp, newrot, flag;
+	uint8_t *coltbl, comp, newrot, flag, *dst;
 	uint32_t decsize;
 	uint16_t seq;
 
@@ -992,6 +993,7 @@ static void codec47(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, 
 		src += 0x8080;
 	}
 
+	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0:	memcpy(dst, src, w * h); break;
 	case 1:	codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h); break;
@@ -1011,6 +1013,8 @@ static void codec47(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, 
 	ctx->rt.lastseq = seq;
 	if (seq > 1)
 		ctx->rt.can_ipol = 1;
+
+	return dst;	/* return our front buffer */
 }
 
 /******************************************************************************/
@@ -1154,15 +1158,15 @@ static void codec48_comp3(uint8_t *src, uint8_t *dst, uint8_t *db,
 	}
 }
 
-static int codec48(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, uint16_t h)
+static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 {
 	uint32_t pktsize, decsize;
-	uint8_t comp, flag;
+	uint8_t comp, flag, *dst;
 	uint16_t seq;
 
 	comp =	src[0];		/* subcodec */
 	if (src[1] != 1)	/* mvec table variant, always 1 with MotS */
-		return 22;
+		return (uint8_t *)-22;
 
 	seq = le16_to_cpu(*(uint16_t*)(src + 2));
 
@@ -1191,6 +1195,7 @@ static int codec48(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, u
 		src += 0x8080;
 	}
 
+	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0:	memcpy(dst, src, pktsize); break;
 	case 2: codec47_comp5(src, dst, decsize); break;
@@ -1204,7 +1209,7 @@ static int codec48(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, u
 	ctx->rt.lastseq = seq;
 	c47_swap_bufs(ctx, 1);	/* swap 0 and 2 */
 
-	return 0;
+	return dst;	/* return our front buffer */
 }
 
 /******************************************************************************/
@@ -1328,17 +1333,16 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 	}
 }
 
-static int codec37(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, uint16_t h,
-		   uint16_t top, uint16_t left)
+static uint8_t* codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
 {
-	uint8_t comp, mvidx, flag, *dsti, *db;
+	uint8_t comp, mvidx, flag, *dst, *db;
 	uint32_t decsize;
 	uint16_t seq;
 
 	comp = src[0];
 	mvidx = src[1];
 	if (mvidx > 2)
-		return 21;
+		return (uint8_t *)(-21);
 	seq = le16_to_cpu(*(uint16_t *)(src + 2));
 	decsize = le32_to_cpu(ua32(src + 4));
 	flag = src[12];
@@ -1349,39 +1353,29 @@ static int codec37(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, u
 	if (comp == 0 || comp == 2)
 		memset(ctx->rt.buf2, 0, decsize);
 
-	/* Codec37's  buffers are private, no other codec must touch them.
-	 * Therefore we operate on buf1/buf2 rather than buf0/buf2, since
-	 * buf0 is also touched by default by other codecs, and this results
-	 * in unexpected image issues.
-	 * Unlike c47, buffers need to be pre-rotated.
-	 */
 	if ((comp == 1 || comp == 3 || comp == 4)
 	    && ((seq & 1) || !(flag & 1))) {
-		void *tmp = ctx->rt.buf1;
-		ctx->rt.buf1 = ctx->rt.buf2;
+		void *tmp = ctx->rt.buf0;
+		ctx->rt.buf0 = ctx->rt.buf2;
 		ctx->rt.buf2 = tmp;
 	}
 
 	src += 16;
-	dsti = ctx->rt.buf1 + (top * w) + left;
-	db = ctx->rt.buf2 + (top * w) + left;
+	dst = ctx->rt.buf0;
+	db = ctx->rt.buf2;
 
 	switch (comp) {
-	case 0: memcpy(dsti, src, decsize); break;
-	case 1: codec37_comp1(src, dsti, db, w, h, mvidx); break;
-	case 2: codec47_comp5(src, dsti, decsize); break;
+	case 0: memcpy(dst, src, decsize); break;
+	case 1: codec37_comp1(src, dst, db, w, h, mvidx); break;
+	case 2: codec47_comp5(src, dst, decsize); break;
 	case 3: /* fallthrough */
-	case 4: codec37_comp3(src, dsti, db, w, h, mvidx, flag & 4, comp == 4); break;
+	case 4: codec37_comp3(src, dst, db, w, h, mvidx, flag & 4, comp == 4); break;
 	default: break;
 	}
 
-	/* copy the final image to buf0 in case another codec needs to operate
-	 * on it.
-	 */
-	memcpy(dst, dsti, ctx->rt.fbsize);
 	ctx->rt.lastseq = seq;
 
-	return 0;
+	return dst;
 }
 
 /******************************************************************************/
@@ -1588,7 +1582,7 @@ static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		memcpy(dst, src, size);
 	} else {
 		/* eh need to go line by line */
-		while (h-- && size > 0) {
+		while (h-- && size >= w) {
 			memcpy(dst, src, w);
 			dst += pitch;
 			src += w;
@@ -1760,9 +1754,9 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
 	uint16_t w, h, wr, hr, param2;
-	uint8_t codec, param;
+	uint8_t codec, param, *dst;
 	int16_t left, top;
-	int ret;
+	int ret, fsc;
 
 	codec = src[0];
 	param = src[1];
@@ -1786,26 +1780,12 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			return 0;
 	}
 
-	/* disable left/top for codec37/47/48 videos.  Except for SotE, none use
-	 * it, and SotE uses it as a hack to get "widescreen" aspect, i.e. it's
-	 * just a black bar of 60 pixels heigth at the top.
-	 */
-	if (codec == 37 || codec == 47 || codec == 48)
-		left = top = 0;
+	/* codecs with their own front buffers */
+	fsc = (codec == 37 || codec == 47 || codec == 48);
 
 	/* decide on a buffer size */
 	if (!rt->have_vdims) {
-		if (codec == 37 || codec == 47 || codec == 48) {
-			/* these codecs work on whole frames, trust their dimensions.
-			 * some FT videos have SANM version 0/1 instead 2 though
-			 */
-			rt->have_vdims = 1;
-			wr = w;
-			hr = h;
-			rt->pitch = w;
-			rt->frmw = w;
-			rt->frmh = h;
-		} else  if (rt->version < 2) {
+		if (rt->version < 2) {
 			/* RA1: 384x242 internal buffer, 320x200 display */
 			wr = 384;
 			hr = 242;
@@ -1816,12 +1796,24 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			rt->frmw = 320;
 			rt->frmh = 200;
 		} else {
-			/* detect RA2 424x260, or codec20 at 0/0 */
+			/* detect common resolutions */
 			wr = w + left;
 			hr = h + top;
-			if (((wr == 424) && (hr == 260)) ||
-			    ((left == 0) && (top == 0) && (codec == 20) && (w > 3) && (h > 3)))
+			if ((w == 640) && (h == 272) && (codec == 47)) {
+				/* special case SotE: it has top=60 to achieve
+				 * centered video in the 640x480 game window.
+				 * We don't need that here though.
+				 */
+				left = top = 0;
+				wr = w;
+				hr = h;
 				rt->have_vdims = 1;
+			} else if (((wr == 424) && (hr == 260)) ||	/* RA2 */
+				   ((wr == 320) && (hr == 200)) ||	/* FT/DIG/.. */
+				   ((wr == 640) && (hr == 480)) ||	/* COMI/OL/.. */
+				   ((left == 0) && (top == 0) && (codec == 20) && (w > 3) && (h > 3))) {
+				rt->have_vdims = 1;
+			}
 
 			rt->pitch = wr;
 			rt->frmw = wr;
@@ -1834,28 +1826,28 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		}
 	}
 
-	/* default image buffer is buf0 */
-	rt->vbuf = rt->buf0;
+	/* for codecs 1-34,44: default write to the front buffer */
+	dst = rt->fbuf;
+	rt->vbuf = dst;
 
 	/* When it's the very first FOBJ in a FRME, and it's not one of the
 	 * full-frame codecs, the frontbuffer needs to be cleared first.
 	 */
-	if (!rt->have_frame && rt->fbsize && codec != 37 && codec != 47 && codec != 48) {
-		memset(rt->vbuf, 0, rt->fbsize);
+	if (!rt->have_frame && rt->fbsize && !fsc) {
+		memset(dst, 0, rt->fbsize);
 	}
 
-	if (rt->to_store == 2 ||
-	    (rt->to_store != 0 && (codec == 37 || codec == 47 || codec == 48))) {
+	if (rt->to_store == 2 || (rt->to_store != 0 && fsc)) {
 		/* decode the image and change it to a FOBJ with codec20.
 		 * Used sometimes in RA1 only; RA2+ had this feature removed.
 		 * We can however use it for codecs37/47/48 since they work on
-		 * the full buffer and don't modify existing images like the
+		 * their own buffers and don't modify existing images like the
 		 * other codecs can do.
 		 */
 		*(uint32_t *)(rt->buf3 + 0) = rt->fbsize;/* block size in host endian */
 		memcpy(rt->buf3 + 4, src, 14);		/* FOBJ header		*/
 		*( uint8_t *)(rt->buf3 + 4) = 20;	/* set to codec20	*/
-		rt->vbuf = rt->buf3 + 4 + 14;		/* image data here	*/
+		dst = rt->buf3 + 4 + 14;		/* write image data here*/
 	} else if (rt->to_store == 1) {
 		/* copy the FOBJ whole (all SAN versions), and render it normally
 		 * to the default front buffer.
@@ -1875,23 +1867,27 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	switch (codec) {
 	case 1:
-	case 3:   codec1(ctx, rt->vbuf, src, w, h, top, left, size, (codec == 1)); break;
-	case 2:   codec2(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
+	case 3:   codec1(ctx, dst, src, w, h, top, left, size, (codec == 1)); break;
+	case 2:   codec2(ctx, dst, src, w, h, top, left, size, param, param2); break;
 	case 4:
-	case 5:   codec4(ctx, rt->vbuf, src, w, h, top, left, size, param, param2, codec == 5); break;
-	case 20: codec20(ctx, rt->vbuf, src, w, h, top, left, size); break;
+	case 5:   codec4(ctx, dst, src, w, h, top, left, size, param, param2, codec == 5); break;
+	case 20: codec20(ctx, dst, src, w, h, top, left, size); break;
 	case 44:
-	case 21: codec21(ctx, rt->vbuf, src, w, h, top ,left, size, param); break;
-	case 23: codec23(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
+	case 21: codec21(ctx, dst, src, w, h, top ,left, size, param); break;
+	case 23: codec23(ctx, dst, src, w, h, top, left, size, param, param2); break;
 	case 33:
-	case 34: codec33(ctx, rt->vbuf, src, w, h, top, left, size, param, param2, codec == 34); break;
-	case 37:ret = codec37(ctx, rt->vbuf, src, w, h, top, left); break;
-	case 45: codec45(ctx, rt->vbuf, src, w, h, top, left, size, param, param2); break;
-	case 47: codec47(ctx, rt->vbuf, src, w, h); break;
-	case 48:ret = codec48(ctx, rt->vbuf, src, w, h); break;
+	case 34: codec33(ctx, dst, src, w, h, top, left, size, param, param2, codec == 34); break;
+	case 45: codec45(ctx, dst, src, w, h, top, left, size, param, param2); break;
+	case 37: dst = codec37(ctx, src, w, h); break;
+	case 47: dst = codec47(ctx, src, w, h); break;
+	case 48: dst = codec48(ctx, src, w, h); break;
 	default: ret = 18;
 	}
-	
+
+	/* dst is negative in case there was an error with codec37/47/48 */
+	if (fsc && ((intptr_t)(dst) < 0))
+		ret = -((int)(intptr_t)dst);
+
 	if (ret == 0) {
 		/* the decoding-STOR was done, but we still need to put the image
 		 * to the front buffer now.
@@ -1901,6 +1897,34 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			ret = handle_FOBJ(ctx, *(uint32_t *)rt->buf3, rt->buf3 + 4);
 			if (ret)
 				return ret;
+		}
+
+		/* handle full-screen codec images composed onto existing images */
+		if (fsc) {
+			if ((rt->bufw == w) && (rt->bufh == h)) {
+				/* canvas has same size as decoded image.  If this is a
+				 * codec47/48 video, we display the result buffer
+				 * immediately; for codec37 we need to copy it to
+				 * the front buffer for further modifications by other
+				 * FOBJs (RA2, FT, Dig).
+				 */
+				if (codec != 37)
+					rt->vbuf = dst;
+				else
+					memcpy(rt->fbuf, dst, w * h);
+			} else {
+				/* canvas is larger than the decoded image. copy the
+				 * visible parts onto the canvas at left/top offsets.
+				 */
+				int i, k, l;
+				k = _min(rt->bufh, h);
+				l = _min(rt->bufw, w);
+				for (i = 0; i < k; i++) {
+					uint8_t *dst2 = rt->fbuf + ((top + i) * rt->pitch) + left;
+					const uint8_t *src2 = dst + (i * w);
+					memcpy(dst2, src2, l);
+				}
+			}
 		}
 
 		ctx->rt.have_frame = 1;
@@ -3669,10 +3693,10 @@ static int sandec_alloc_memories(struct sanctx *ctx)
 	 */
 	vmem = 2 * VID_MAXX * (VID_MAXY + 64);
 
-	/* 6 video buffers: front, prev1, prev2, STOR/FTCH, prev full frame,
+	/* 7 video buffers: front, fsc main, prev1, prev2, STOR/FTCH, prev full frame,
 	 * interpolated frame.
 	 */
-	mem += vmem * 6;
+	mem += vmem * 7;
 
 	/* allocate memory for work buffers */
 	m = (uint8_t *)malloc(mem);
@@ -3692,12 +3716,13 @@ static int sandec_alloc_memories(struct sanctx *ctx)
 	}
 
 	/* set up video buffers */
-	rt->buf0 = m;			/* front buffer			*/
+	rt->fbuf = m;			/* front buffer			*/
+	rt->buf0 = rt->fbuf + vmem;	/* codec37/47/48 main buffer	*/
 	rt->buf3 = rt->buf0 + vmem;	/* STOR buffer			*/
 	rt->buf4 = rt->buf3 + vmem;	/* interpolation last frame buf */
 	rt->buf5 = rt->buf4 + vmem;	/* interpolated frame buffer	*/
-	rt->buf1 = rt->buf5 + vmem;	/* delta buf 2 (c47), c37 main  */
-	rt->buf2 = rt->buf1 + vmem;	/* delta buf 1 (c47/48)		*/
+	rt->buf1 = rt->buf5 + vmem;	/* delta buf 2 (c47),   	*/
+	rt->buf2 = rt->buf1 + vmem;	/* delta buf 1 (c37/47/48)	*/
 	rt->buf1 += (32 * VID_MAXX);	/* db1 guard band top		*/
 	rt->buf2 += (32 * VID_MAXX);
 

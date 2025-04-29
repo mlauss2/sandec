@@ -21,6 +21,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - The Dig
   - Rebel Assault II
   - Rebel Assault I
+  - Star Wars: Making Magic
 - Can successfully parse .SNM videos from the following LucasArts titles:
   - X-Wing Alliance
   - Indiana Jones and the Infernal Machine
@@ -49,6 +50,12 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
+# What does not work:
+- Mortimer and the Riddles of the Medallion
+  - Most videos play, but issues with transparency and objects with only half width/height.
+- Star Wars: Making Magic
+  - lots of artifacts in the codec48 videos.
+
 # Build:
 - Have SDL3
 - run "make"
@@ -63,4 +70,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
 # Dev Notes
 - BL16 jonesopn_8.snm:  lots of invalid motion vectors which point outside the buffer area.  Since the videos however work in the engine there is something missing wrt. delta buffer offset handling.
 
-20250403
+20250429
