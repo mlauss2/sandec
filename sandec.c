@@ -1916,13 +1916,36 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 				/* canvas is larger than the decoded image. copy the
 				 * visible parts onto the canvas at left/top offsets.
 				 */
-				int i, k, l;
-				k = _min(rt->bufh, h);
-				l = _min(rt->bufw, w);
-				for (i = 0; i < k; i++) {
-					uint8_t *dst2 = rt->fbuf + ((top + i) * rt->pitch) + left;
-					const uint8_t *src2 = dst + (i * w);
-					memcpy(dst2, src2, l);
+				if ((left == 0) && (top == 0) && (codec == 37) &&
+				    (w * 2 == rt->bufw) && (h * 2 == rt->bufh)) {
+					/* This is "Mortimer and the Riddle of
+					 *  the Medallion", which requires some
+					 * codec37 images to be scaled by 2 in
+					 * both directions.
+					 */
+					int i, j;
+					uint8_t *fbuf = rt->fbuf;
+					for (i = 0; i < h; i++) {
+						for (j = 0; j < w; j++) {
+							*(fbuf + 0) = *dst;
+							*(fbuf + 1) = *dst;
+							*(fbuf + rt->pitch + 0) = *dst;
+							*(fbuf + rt->pitch + 1) = *dst;
+							dst++;
+							fbuf += 2;
+						}
+						fbuf += rt->pitch;
+					}
+				} else {
+					/* no upscaling, just copying */
+					int i, k, l;
+					k = _min(rt->bufh, h);
+					l = _min(rt->bufw, w);
+					for (i = 0; i < k; i++) {
+						uint8_t *dst2 = rt->fbuf + ((top + i) * rt->pitch) + left;
+						const uint8_t *src2 = dst + (i * w);
+						memcpy(dst2, src2, l);
+					}
 				}
 			}
 		}
