@@ -1,16 +1,16 @@
 /*
- * A/V decoder for LucasArts Outlaws ".SAN" and ".NUT" video files.
- *  SMUSH Video codecs 1/47/48 with 8-bit palletized 640x480 video,
- *  IACT scaled audio in 22,05kHz 16bit Stereo Little-endian format.
+ * A/V decoder for LucasArts SMUSH ANM/NUT/SAN/SNM files.
  *
  * Written in 2024-2025 by Manuel Lauss <manuel.lauss@gmail.com>
  *
- * Codec algorithms (Video, Audio, Palette) liberally taken from FFmpeg,
- * ScummVM, and by looking at the various game EXEs with Ghidra.
- * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob/HEAD:/libavcodec/sanm.c
- * https://github.com/scummvm/scummvm/blob/master/engines/scumm/smush/smush_player.cpp
- * https://github.com/clone2727/smushplay/blob/master/codec47.cpp
- * https://github.com/clone2727/smushplay/blob/master/codec48.cpp
+ * Some codec algorithms (Video, Audio, Palette) liberally taken
+ *  from FFmpeg, ScummVM and smushplay projects:
+ *  https://git.ffmpeg.org/gitweb/ffmpeg.git/blob/HEAD:/libavcodec/sanm.c
+ *  https://github.com/scummvm/scummvm/blob/master/engines/scumm/smush/smush_player.cpp
+ *  https://github.com/clone2727/smushplay/blob/master/codec47.cpp
+ *  https://github.com/clone2727/smushplay/blob/master/codec48.cpp
+ *
+ * Others were reversed from the various game executables.
  *
  * SPDX-License-Identifier: LGPL-2.1-only
  */
@@ -1177,6 +1177,16 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	decsize = le32_to_cpu(ua32(src + 4));
 	pktsize = le32_to_cpu(ua32(src + 8));
 	flag =	src[12];
+	/* known flag values:
+	 * 0x01: skip decoding of comp3 if sequence number is odd and 0x10 is not set.
+	 * 0x02: if set: copy result line by line, stop a line when a certain color is found.
+	 *       this is only used in "Making Magic"; in MotS setting this bit does not
+	 *       blit the result to the front buffer (i.e. previous frame is kept).
+	 * 0x08: interpolation table data (0x8080 bytes) follows after the header.
+	 * 0x10: interpolate a frame using the 2 buffers and interpolation table, i.e.
+	 *        do not blit the current main buffer to destination, but rather create
+	 *        an intermediate frame using the interpolation table.  Seems to be unused.
+	 */
 
 	if (decsize > ctx->rt.fbsize)
 		decsize = ctx->rt.fbsize;
@@ -3740,12 +3750,12 @@ static int sandec_alloc_memories(struct sanctx *ctx)
 
 	/* set up video buffers */
 	rt->fbuf = m;			/* front buffer			*/
-	rt->buf0 = rt->fbuf + vmem;	/* codec37/47/48 main buffer	*/
+	rt->buf0 = rt->fbuf + vmem;	/* codec37/47/48/bl16 main buf	*/
 	rt->buf3 = rt->buf0 + vmem;	/* STOR buffer			*/
 	rt->buf4 = rt->buf3 + vmem;	/* interpolation last frame buf */
 	rt->buf5 = rt->buf4 + vmem;	/* interpolated frame buffer	*/
-	rt->buf1 = rt->buf5 + vmem;	/* delta buf 2 (c47),   	*/
-	rt->buf2 = rt->buf1 + vmem;	/* delta buf 1 (c37/47/48)	*/
+	rt->buf1 = rt->buf5 + vmem;	/* delta buf 2 (c47/bl16),	*/
+	rt->buf2 = rt->buf1 + vmem;	/* delta buf 1 (c37/47/48/bl16)	*/
 	rt->buf1 += (32 * VID_MAXX);	/* db1 guard band top		*/
 	rt->buf2 += (32 * VID_MAXX);
 
@@ -3793,6 +3803,7 @@ again:
 	if (c[0] == FRME) {
 		/* default case */
 		ret = handle_FRME(ctx, c[1]);
+
 	} else if (c[0] == ANNO) {
 		/* some annotation, found esp. in Grim Fandango files. just skip it */
 		uint8_t buf[128], rs;
@@ -3806,8 +3817,10 @@ again:
 			c[1] -= rs;
 		}
 		goto again;
+
 	} else if (ctx->rt.acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)) {
 		aud_mix_tracks(ctx);
+
 	} else {
 		ret = 10;
 	}
@@ -3861,7 +3874,7 @@ int sandec_open(void *sanctx, struct sanio *io)
 	ctx->c4tblparam = 0xffff;
 
 	/* files can either start with "ANIM____AHDR___", "SANM____SHDR____" or
-	 * "SAUD____", the latter are not supported yet.
+	 * "SAUD____".
 	 */
 	ret = read_source(ctx, &c[0], 4 * 2);
 	if (ret) {
