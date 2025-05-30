@@ -1758,6 +1758,96 @@ static void codec2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	}
 }
 
+static void codec31(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w,
+		   uint16_t h, int16_t top, int16_t left, uint32_t size)
+{
+	uint8_t *dst, code, col;
+	uint16_t rlen, dlen;
+	int i, j;
+
+	for (i = 0; i < h && size > 1; i++) {
+		dst = dst_in + ((top + i) * ctx->rt.pitch) + left;
+		dlen = le16_to_cpu(ua16(src));
+		src += 2;
+		size -= 2;
+		while (dlen && size) {
+			code = *src++;
+			dlen--;
+			if (--size < 1)
+				return;
+			rlen = (code >> 1) + 1;
+			if (code & 1) {
+				col = *src++;
+				dlen--;
+				size--;
+				for (j = 0; j < rlen; j++) {
+					if (0 != (col & 0xf))
+						*(dst + 0) = 224 + (col & 0xf);
+					if (0 != (col >> 4))
+						*(dst + 1) = 224 + (col >> 4);
+					dst += 2;
+				}
+			} else {
+				for (j = 0; j < rlen && size; j++) {
+					col = *src++;
+					size--;
+					if (0 != (col & 0xf))
+						*(dst + 0) = 224 + (col & 0xf);
+					if (0 != (col >> 4))
+						*(dst + 1) = 224 + (col >> 4);
+					dst += 2;
+				}
+				dlen -= rlen;
+			}
+		}
+	}
+}
+
+
+static void codec32(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w,
+		    uint16_t h, int16_t top, int16_t left, uint32_t size)
+{
+	uint8_t *dst, code, col;
+	uint16_t rlen, dlen;
+	int i, j;
+
+	for (i = 0; i < h && size > 1; i++) {
+		dst = dst_in + ((top + i) * ctx->rt.pitch) + left;
+		dlen = le16_to_cpu(ua16(src));
+		src += 2;
+		size -= 2;
+		while (dlen && size) {
+			code = *src++;
+			dlen--;
+			if (--size < 1)
+				return;
+			rlen = (code >> 1) + 1;
+			if (code & 1) {
+				col = *src++;
+				dlen--;
+				size--;
+				for (j = 0; j < rlen; j++) {
+					*(dst + 0) = 224 + 16 + (col & 0xf);
+					*(dst + 1) = 224 + 16 + (col >> 4);
+					dst += 2;
+				}
+			} else {
+				if (rlen > dlen)
+					rlen = dlen;
+				for (j = 0; j < rlen && size; j++) {
+					col = *src++;
+					size--;
+					*(dst + 0) = 224 + 16 + (col & 0xf);
+					*(dst + 1) = 224 + 16 + (col >> 4);
+					dst += 2;
+				}
+				dlen -= rlen;
+			}
+		}
+	}
+}
+
+
 /******************************************************************************/
 
 static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
@@ -1885,6 +1975,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	case 44:
 	case 21: codec21(ctx, dst, src, w, h, top ,left, size, param); break;
 	case 23: codec23(ctx, dst, src, w, h, top, left, size, param, param2); break;
+	case 31: codec31(ctx, dst, src, w, h, top, left, size); break;
+	case 32: codec32(ctx, dst, src, w, h, top, left, size); break;
 	case 33:
 	case 34: codec33(ctx, dst, src, w, h, top, left, size, param, param2, codec == 34); break;
 	case 45: codec45(ctx, dst, src, w, h, top, left, size, param, param2); break;
