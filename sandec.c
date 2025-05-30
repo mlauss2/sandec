@@ -639,33 +639,28 @@ static void c33_34_tilegen(uint8_t *dst, int8_t param1)
 {
 	int i, j, k, l, m, n, o, p;
 
-	/* ASSALT13.EXE 23802 - 23315 */
-	for (i = 0; i < 8; i++) {			// i = l24
-		for (k = 0; k < 8; k++) { 		// k = bx
-			j = i + param1;			// j = l34/l20
-			l = k + param1;			// l = l28
-			p = (j + k) / 2;
-			j = (j + p) / 2;		// j = l20/l34
-			m = l / 2;			// m = l1c
-			n = (i + param1);		// n = l14
-			o = (k + param1);
+	/* ASSAULT.EXE 1bf7b */
+	for (i = 0; i < 8; i++) {
+		for (k = 0; k < 8; k++) {
+			j = i + param1;
+			l = k + param1;
+			p = (j + l) >> 1;
+			n = (j + p) >> 1;
+			m = (p + l) >> 1;
 
-			*dst++ = p; *dst++ = p; *dst++ = j; *dst++ = n;
-			*dst++ = p; *dst++ = p; *dst++ = j; *dst++ = i;
+			*dst++ = p; *dst++ = p; *dst++ = n; *dst++ = j;
+			*dst++ = p; *dst++ = p; *dst++ = n; *dst++ = j;
 			*dst++ = m; *dst++ = m; *dst++ = p; *dst++ = j;
 			*dst++ = l; *dst++ = l; *dst++ = m; *dst++ = p;
 		}
 	}
 
-	// 2313d - 231b5
-	for (i = 0; i < 8; i++) {			// i = l24
-		// 23145
+	for (i = 0; i < 8; i++) {
 		for (k = 0; k < 8; k++) {
-			// 2314a
-			j = i + param1;			// j = l34
+			j = i + param1;
 			l = k + param1;
-			n = ((j + l) / 2);
-			m = ((l + n) / 2);		// esi/l = l1c
+			n = (j + l) >> 1;
+			m = (l + n) >> 1;
 
 			*dst++ = j; *dst++ = j; *dst++ = j; *dst++ = j;
 			*dst++ = n; *dst++ = n; *dst++ = n; *dst++ = n;
@@ -674,34 +669,27 @@ static void c33_34_tilegen(uint8_t *dst, int8_t param1)
 		}
 	}
 
-	// 231bc - 2326b
-	for (i = 0; i < 8; i++)	{			// i = l24
-		// 231c7
-		for (k = 0; k < 8; k++) {		// k = bx
-			// 231cf
-			j = i + param1;			// j = l34
-			l = k + param1;			// l = esi
-			m = (j + l) / 2;		// m = l28 16bit
-			n = (j + m) / 2;		// n = l34_neu / l20 16bit
-			o = m / 2;			// o = l1c 16bit
-			p = j & 0xff;			// p = l14
+	for (i = 0; i < 8; i++)	{
+		for (k = 0; k < 8; k++) {
+			j = i + param1;
+			l = k + param1;
+			m = (j + l) >> 1;
+			n = (j + m) >> 1;
+			o = (l + m) >> 1;
 
-			*dst++ = p; *dst++ = p; *dst++ = n; *dst++ = m;
-			*dst++ = p; *dst++ = p; *dst++ = n; *dst++ = m;
+			*dst++ = j; *dst++ = j; *dst++ = n; *dst++ = m;
+			*dst++ = j; *dst++ = j; *dst++ = n; *dst++ = m;
 			*dst++ = n; *dst++ = n; *dst++ = m; *dst++ = o;
 			*dst++ = m; *dst++ = m; *dst++ = o; *dst++ = l;
 		}
 	}
 
-	// 2326c - 23306
-	for (i = 0; i < 8; i++) {			// i = l24
-		// 23277
-		for (k = 0; k < 8; k++) {		// k = bx
-			// 2327c
-			j = i + param1;			// j = dx / l18
-			l = k + param1;			// l = esi / l14
-			m = (j + l) / 2;		// m = dx / edi
-			n = m / 2;			// n = esi / l1c
+	for (i = 0; i < 8; i++) {
+		for (k = 0; k < 8; k++) {
+			j = i + param1;
+			l = k + param1;
+			m = (j + l) >> 1;
+			n = (l + m) >> 1;
 
 			*dst++ = j; *dst++ = m; *dst++ = n; *dst++ = l;
 			*dst++ = j; *dst++ = m; *dst++ = n; *dst++ = l;

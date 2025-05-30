@@ -55,8 +55,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Most videos play, but issues with transparency and objects with only half width/height.
 - Star Wars: Making Magic
   - lots of artifacts in the codec48 videos.
-- Rebel Assault 1 SEGA-CD
-  - codec33/34 tilegen is buggy.
 
 # Build:
 - Have SDL3
