@@ -28,7 +28,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Grim Fandango
 - Video decoding
   - Handles all 8-bit codecs found in LucasArts DOS/Windows titles
-  - missing codecs 31/32 (RA1 for SEGA), due to no samples available.
   - BL16 video is implemented. Works with all XWA videos.
     - except for Infernal Machine "jonesopn_8.snm": this one seems to use invalid motion vectors a lot.
   - frame interpolation for codec47/48 videos (default on).
