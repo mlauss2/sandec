@@ -1389,22 +1389,23 @@ static void codec45(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, 
 	int i, b1, b2, xd, xsize, ysize;
 
 	/* RA2 32b00 */
-	if (src[4] != 1)
+	if ((size < 5) || (src[4] != 1))
 		return;
 
 	t1 = *(uint16_t *)(src + 2);
 	if (t1 == 0) {
-
+		if (size < 0x300)
+			return;
 		memcpy(tbl1, src + 6, 0x300);
 		src += 0x306;
 		size -= 0x306;
 		i = 1;
-		do {
+		while ((size > 1) && (i < 0x8000)) {
 			b2 = *src++;
 			memset(tbl2 + i, *src++, b2);
 			i += b2;
 			size -= 2;
-		} while (i < 0x8000);
+		}
 	}
 	if (!dst)
 		return;
@@ -1438,7 +1439,7 @@ static void codec45(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, 
 				w2 = *(tbl1 + c1 + 1) + *(tbl1 + c2 + 1);
 				w3 = *(tbl1 + c1 + 2) + *(tbl1 + c2 + 2);
 				c1 = *(dst - pitch) * 3;
-				c1 = *(dst + pitch) * 3;
+				c2 = *(dst + pitch) * 3;
 				w1 += *(tbl1 + c1 + 0) + *(tbl1 + c2 + 0);
 				w2 += *(tbl1 + c1 + 1) + *(tbl1 + c2 + 1);
 				w3 += *(tbl1 + c1 + 2) + *(tbl1 + c2 + 2);
