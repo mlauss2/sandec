@@ -20,17 +20,19 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Full Throttle
   - The Dig
   - Rebel Assault II
-  - Rebel Assault I (DOS/3DO, SEGA-CD)
+  - Rebel Assault I (DOS, 3DO and SEGA-CD versions)
   - Star Wars: Making Magic
 - Can successfully parse .SNM videos from the following LucasArts titles:
   - X-Wing Alliance
   - Indiana Jones and the Infernal Machine
   - Grim Fandango
+  - Force Commander
+    - you need to unzip the .znm files first to play them.
 - Video decoding
   - Handles all 8-bit codecs found in LucasArts DOS/Windows titles
-  - BL16 video is implemented. Works with all XWA videos.
-    - except for Infernal Machine "jonesopn_8.snm": this one seems to use invalid motion vectors a lot.
-  - frame interpolation for codec47/48 videos (default on).
+  - BL16 video in .snm/.znm files.
+  - frame interpolation for codec47/48 videos
+    - default off as it generates a lot of ghosting, but some scenes look noticeably smoother.
 - Audio decoding
   - audio ouput for all by the decoder is 22kHz/16bit/2ch.
     - all sources with lower quality are crudely upsampled.
@@ -45,7 +47,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - l     to toggle ANIMv1 (RA1) viewport size: Most videos have 320x200 content, but some gameplay videos have content on the full 384x242 buffer.
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
   - i  to toggle frame interpolation on codec47/48 on/off
-  - s  to cycle between SDL3 texture smoothing (off/linear).
+  - s  to cycle between SDL3 texture smoothing (off/pixelized and smoothed).
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
@@ -54,6 +56,9 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Most videos play, but issues with transparency and objects with only half width/height.
 - Star Wars: Making Magic
   - lots of artifacts in the codec48 videos.
+  - audio is 44.1kHz
+- Indiana Jones and the Infernal Machine:
+  - lots of artifacts in the 640x480 jonesopn_8.snm video only.
 
 # Build:
 - Have SDL3
@@ -69,4 +74,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
 # Dev Notes
 - BL16 jonesopn_8.snm:  lots of invalid motion vectors which point outside the buffer area.  Since the videos however work in the engine there is something missing wrt. delta buffer offset handling.
 
-20250530
+20250810
