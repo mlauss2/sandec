@@ -3230,7 +3230,7 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		xsize -= 8;
 		size -= 8;
 		if (cid == STRK) {
-			if (csz >= 14)
+			if (csz == 14)
 				rate = be16_to_cpu(*(uint16_t *)(src + 12));
 
 			if (rate == 22050 || rate == 22222)
