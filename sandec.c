@@ -2058,7 +2058,7 @@ static inline uint16_t bl16_c7_avg_col(uint16_t c1, uint16_t c2)
 static void bl16_comp7(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 		       uint16_t *tbl2)
 {
-	uint16_t hh, hw, c1, c2, c3;
+	uint16_t hh, hw, c1, c2;
 	uint8_t *dst1, *dst2;
 
 	if (h > 0) {
@@ -2072,9 +2072,10 @@ static void bl16_comp7(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 				hw = (w - 1) >> 1;
 				do {
 					c2 = le16_to_cpu(tbl2[*src++]);
-					c3 = bl16_c7_avg_col(c1, c2) & 0xffff;
-					*(uint32_t *)dst2 = c2 << 16 | c3;
-					dst2 += 4;
+					*(uint16_t *)dst2 = bl16_c7_avg_col(c1, c2);
+					dst2 += 2;
+					*(uint16_t *)dst2 = c2;
+					dst2 += 2;
 					c1 = c2;
 				} while (--hw != 0);
 			}
@@ -2093,8 +2094,7 @@ static void bl16_comp7(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 			while (hw--) {
 				c1 = *(uint16_t *)(dst1 - (w * 2)); /* above */
 				c2 = *(uint16_t *)(dst1 + (w * 2)); /* below */
-				c3 = bl16_c7_avg_col(c1, c2);
-				*(uint16_t *)dst1 = c3;
+				*(uint16_t *)dst1 = bl16_c7_avg_col(c1, c2);
 				dst1 += 2;		/* 16 bit pixel */
 			}
 		}
@@ -2116,7 +2116,7 @@ static void bl16_comp1(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h)
 {
 	const uint32_t stride = 2 * w;
 	uint8_t *dst1, *dst2;
-	uint16_t hh, hw, c1, c2, c3;
+	uint16_t hh, hw, c1, c2;
 
 	if (h > 0) {
 		hh = (h + 1) >> 1;
@@ -2131,9 +2131,10 @@ static void bl16_comp1(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h)
 				while (hw--) {
 					c2 = *(uint16_t *)src;	/* FIXME: le16_to_cpu() ? */
 					src += 2;
-					c3 = bl16_c7_avg_col(c1, c2) & 0xffff;
-					*(uint32_t *)dst2 = c2 << 16 | c3;
-					dst2 += 4;	/* 2 16bit pixels */
+					*(uint16_t *)dst2 = bl16_c7_avg_col(c1, c2);
+					dst2 += 2;
+					*(uint16_t *)dst2 = c2;
+					dst2 += 2;
 					c1 = c2;
 				}
 			}
@@ -2150,8 +2151,7 @@ static void bl16_comp1(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h)
 			while (hw--) {
 				c1 = *(uint16_t *)(dst1 + stride);
 				c2 = *(uint16_t *)(dst1 - stride);
-				c3 = bl16_c7_avg_col(c1, c2) & 0xffff;
-				*(uint16_t *)dst1 = c3;
+				*(uint16_t *)dst1 = bl16_c7_avg_col(c1, c2);
 				dst1 += 2;	/* 1 16bit pixel */
 			}
 			dst1 += stride;
