@@ -2295,8 +2295,15 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 
 		break;
 	default:
-		/* opc is index into c47 mv table, copy 8x8 block from db2 */
-		mvofs = (c47_mv[opc][0] * 2) + (c47_mv[opc][1] * stride);
+		/* opc is index into c47 mv table, copy 8x8 block from db2.
+		 * IMPORTANT: with width 800, for opc 1-4, the calculation will
+		 * overflow the int16, turning the large negative values into
+		 * large positive values.  This is by design, and exploited by
+		 * the 800x600 jonesopn_8.snm video from "Indiana Jones and
+		 *  the Infernal Machine".
+		 */
+		o2 = (int16_t)(c47_mv[opc][1] * w + c47_mv[opc][0]);
+		mvofs = o2 * 2;
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
 			for (j = 0; j < blksize; j++) {

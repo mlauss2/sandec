@@ -71,7 +71,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -s: no audio (silent)
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-# Dev Notes
-- BL16 jonesopn_8.snm:  lots of invalid motion vectors which point outside the buffer area.  Since the videos however work in the engine there is something missing wrt. delta buffer offset handling.
-
-20250810
+20250813
