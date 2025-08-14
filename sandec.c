@@ -2301,9 +2301,9 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		 * large positive values.  This is by design, and exploited by
 		 * the 800x600 jonesopn_8.snm video from "Indiana Jones and
 		 *  the Infernal Machine".
+		 * tl;dr: the cast to int16_t is essential for this to work!
 		 */
-		o2 = (int16_t)(c47_mv[opc][1] * w + c47_mv[opc][0]);
-		mvofs = o2 * 2;
+		mvofs = (int16_t)(c47_mv[opc][1] * w + c47_mv[opc][0]) * 2;
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
 			for (j = 0; j < blksize; j++) {
