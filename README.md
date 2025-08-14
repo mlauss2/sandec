@@ -22,6 +22,8 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Rebel Assault II
   - Rebel Assault I (DOS, 3DO and SEGA-CD versions)
   - Star Wars: Making Magic
+  - Mortimer and the Riddles of the Medallion
+  - Droidworks
 - Can successfully parse .SNM videos from the following LucasArts titles:
   - X-Wing Alliance
   - Indiana Jones and the Infernal Machine
@@ -32,12 +34,10 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Handles all 8-bit codecs found in LucasArts DOS/Windows titles
   - BL16 video in .snm/.znm files.
   - frame interpolation for codec47/48 videos
-    - default off as it generates a lot of ghosting, but some scenes look noticeably smoother.
+    - default off as it generates a lot of ghosting, but some scenes, esp. zoom-ins and pans, look noticeably smoother.
 - Audio decoding
   - audio ouput for all by the decoder is 22kHz/16bit/2ch.
-    - all sources with lower quality are crudely upsampled.
-  - RA1/RA2 background music does not loop.
-  - RA1 player speech is both genders simultaneously: the game engine filtered them using the SKIP chunks, which are not implemented (yet).
+    - all sources with lower quality are very crudely upsampled.
 - player keyboard controls:
   - space to pause/unpause
   - f     to toggle fullscreen/windowed
@@ -56,9 +56,9 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Most videos play, but issues with transparency and objects with only half width/height.
 - Star Wars: Making Magic
   - lots of artifacts in the codec48 videos.
-  - audio is 44.1kHz
-- Indiana Jones and the Infernal Machine:
-  - lots of artifacts in the 640x480 jonesopn_8.snm video only.
+- Audio
+  - RA1/RA2 background music does not loop.
+  - RA1 player speech is both genders simultaneously: the game engine filtered them using the SKIP chunks, which are not implemented (yet).
 
 # Build:
 - Have SDL3
@@ -71,4 +71,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -s: no audio (silent)
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-20250813
+20250814
