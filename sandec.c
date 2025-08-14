@@ -1729,7 +1729,7 @@ static void codec2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 
 	/* RA2 31a10; but there are no codec2 fobjs in RA2 at all.. */
 	if (param2 != 0 && ctx->rt.version == 2) {
-		codec1(ctx, dst, src, w, h, left, top, size, 1);
+		codec1(ctx, dst, src, w, h, top, left, size, 1);
 		return;
 	}
 
@@ -2061,42 +2061,37 @@ static void bl16_comp7(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 	uint16_t hh, hw, c1, c2;
 	uint8_t *dst1, *dst2;
 
-	if (h > 0) {
-		hh = (h + 1) >> 1;
-		dst1 = (uint8_t *)(dst + (w * 2));
-		do {
-			dst2 = dst1 + 4;
-			c1 = le16_to_cpu(tbl2[*src++]);
-			*(uint32_t *)dst1 = (c1 << 16 | c1);
-			if (w - 2 > 0) {
-				hw = (w - 1) >> 1;
-				do {
-					c2 = le16_to_cpu(tbl2[*src++]);
-					*(uint16_t *)dst2 = bl16_c7_avg_col(c1, c2);
-					dst2 += 2;
-					*(uint16_t *)dst2 = c2;
-					dst2 += 2;
-					c1 = c2;
-				} while (--hw != 0);
-			}
-			dst1 += w * 2;	/* next line */
-		} while (--hh != 0);
+	hh = (h + 1) >> 1;
+	dst1 = (uint8_t *)(dst + (w * 2));
+	while (hh--) {
+		dst2 = dst1 + 4;
+		c1 = le16_to_cpu(tbl2[*src++]);
+		*(uint16_t *)(dst1 + 0) = c1;
+		*(uint16_t *)(dst1 + 2) = c1;
+		hw = (w - 1) >> 1;
+		while (hw--) {
+			c2 = le16_to_cpu(tbl2[*src++]);
+			*(uint16_t *)dst2 = bl16_c7_avg_col(c1, c2);
+			dst2 += 2;
+			*(uint16_t *)dst2 = c2;
+			dst2 += 2;
+			c1 = c2;
+		}
+		dst1 += w * 2;	/* next line */
 	}
 
 	/* top row is a copy of 2nd row */
 	memcpy(dst, dst + w * 2, w * 2);
 
 	dst1 = (uint8_t *)(dst + (w * 4));
-	if (h - 2 > 0) {
-		hh = (h - 1) >> 1;
-		while (hh--) {
-			hw = w;				/* width is pixels! */
-			while (hw--) {
-				c1 = *(uint16_t *)(dst1 - (w * 2)); /* above */
-				c2 = *(uint16_t *)(dst1 + (w * 2)); /* below */
-				*(uint16_t *)dst1 = bl16_c7_avg_col(c1, c2);
-				dst1 += 2;		/* 16 bit pixel */
-			}
+	hh = (h - 1) >> 1;
+	while (hh--) {
+		hw = w;				/* width is pixels! */
+		while (hw--) {
+			c1 = *(uint16_t *)(dst1 - (w * 2)); /* above */
+			c2 = *(uint16_t *)(dst1 + (w * 2)); /* below */
+			*(uint16_t *)dst1 = bl16_c7_avg_col(c1, c2);
+			dst1 += 2;		/* 16 bit pixel */
 		}
 	}
 }
@@ -2122,14 +2117,15 @@ static void bl16_comp1(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h)
 		hh = (h + 1) >> 1;
 		dst1 = ((uint8_t *)dst) + stride;
 		while (hh--) {
-			c1 = *(uint16_t *)src;		/* FIXME: le16_to_cpu() ? */
+			c1 = le16_to_cpu(*(uint16_t *)src);
 			src += 2;
-			*(uint32_t *)dst1 = c1 << 16 | c1;
+			*(uint16_t *)(dst1 + 0) = c1;	/* first 2 pixels in row */
+			*(uint16_t *)(dst1 + 2) = c1;			
 			dst2 = dst1 + 4;		/* 2 16bit pixels */
 			if (w - 2 > 0) {
 				hw = (w - 1) >> 1;
 				while (hw--) {
-					c2 = *(uint16_t *)src;	/* FIXME: le16_to_cpu() ? */
+					c2 = le16_to_cpu(*(uint16_t *)src);
 					src += 2;
 					*(uint16_t *)dst2 = bl16_c7_avg_col(c1, c2);
 					dst2 += 2;
@@ -2301,9 +2297,15 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		 * large positive values.  This is by design, and exploited by
 		 * the 800x600 jonesopn_8.snm video from "Indiana Jones and
 		 *  the Infernal Machine".
-		 * tl;dr: the cast to int16_t is essential for this to work!
+		 * tl;dr: the cast to int16_t is essential for this to work.
+		 * But signed integer overflow is UB according to C standard,
+		 *  so we first calculate an int32_t, cast to an uint16_t (which
+		 *  is not UB) to truncate, then cast to signed int16_t.
 		 */
-		mvofs = (int16_t)(c47_mv[opc][1] * w + c47_mv[opc][0]) * 2;
+		mvofs = (c47_mv[opc][1] * w + c47_mv[opc][0]);	/* not overflowing */
+		uint16_t u16 = (uint16_t)mvofs;			/* truncate, no UB */
+		int16_t i16 = (int16_t)u16;
+		mvofs = i16 * 2;
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
 			for (j = 0; j < blksize; j++) {
