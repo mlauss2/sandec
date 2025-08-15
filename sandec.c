@@ -95,6 +95,7 @@ static inline uint32_t ua32(uint8_t *p)
 #define BL16	0x36316c42
 #define WAVE	0x65766157
 #define ANNO	0x4f4e4e41
+#define IMA4	0x494d4134
 
 /* ANIM maximum image size */
 #define FOBJ_MAXX	640
@@ -268,6 +269,9 @@ const int16_t adpcm_step_table[ADPCM_STEP_COUNT] = {
 	15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
 };
 
+static const int8_t ima4_tab[16] = {
+	-1, -1, -1, -1,  2,  4,  6,  8, -1, -1, -1, -1,  2,  4,  6,  8
+};
 
 /* Codec37/Codec48 motion vectors */
 static const int8_t c37_mv[3][510] = {
@@ -3336,13 +3340,77 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
+static void handle_IMA4(struct sanctx *ctx, uint32_t size, uint8_t *src,
+			uint32_t samples, int ch)
+{
+	int16_t *dst = (int16_t *)ctx->rt.atmpbuf1;
+	int i, j, nibsel, tblidx, adpcm_step, dat, delt;
+	uint8_t in, nib;
+
+	dat = 0;
+	nibsel = 0;
+	in = 0;
+
+	if (size < 3)
+		return;
+	dat = (int16_t)le16_to_cpu(ua16(src));
+	src += 2;
+	tblidx = *src++;
+	size -= 3;
+	i = 0;
+	/* this is IMA ADPCM QT */
+	while ((size > 0) && (i < samples)) {
+
+		if (nibsel == 0) {
+			if (size < 1)
+				break;
+			in = *src++;
+			nib = in >> 4;
+			size--;
+		} else {
+			nib = in & 0x0f;
+
+		}
+		nibsel = !nibsel;
+
+		if (tblidx < 0)
+			tblidx = 0;
+		else if (tblidx > 88)
+			tblidx = 88;
+		adpcm_step = adpcm_step_table[tblidx];
+		tblidx += ima4_tab[nib];
+		delt = adpcm_step >> 3;
+		if (nib & 4)
+			delt += adpcm_step;
+		if (nib & 2)
+			delt += (adpcm_step >> 1);
+		if (nib & 1)
+			delt += (adpcm_step >> 2);
+		if (nib & 8)
+			dat -= delt;
+		else
+			dat += delt;
+
+		if (dat < -0x8000)
+			dat = -0x8000;
+		else if (dat > 0x7fff)
+			dat = 0x7fff;
+
+		for (j = 0; j < ch; j++)
+			*dst++ = dat;
+
+		i++;
+	}
+	ctx->io->queue_audio(ctx->io->userctx, ctx->rt.atmpbuf1, i * 2 * ch);
+}
+
 static void handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	int i, j, v1, data, ch, inbits, numbits, bitsize;
 	int  hibit, lobits, tblidx, idx2, delt;
 	int16_t startdata[2], *dst;
 	uint8_t startpos[2];
-	uint32_t samples;
+	uint32_t samples, sig;
 
 	if (size < 16)
 		return;
@@ -3375,6 +3443,15 @@ static void handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		size -= 2;
 	}
 
+	/* here could be IMA4 */
+	sig = be32_to_cpu(ua32(src));
+	if (sig == IMA4) {
+		src += 4;
+		size -= 4;
+		handle_IMA4(ctx, size, src, samples, ch);
+		return;
+	}
+
 	inbits = be16_to_cpu(ua16(src));
 	src += 2;
 	size -= 2;
@@ -3395,6 +3472,8 @@ static void handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			v1 = (inbits >> (16 - numbits)) & (hibit | lobits);
 
 			if (numbits > 7) {
+				if (!size)
+					break;
 				inbits = ((inbits & 0xff) << 8) | *src++;
 				numbits -= 8;
 				size--;
@@ -3437,6 +3516,8 @@ static void handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 				tblidx = ADPCM_STEP_COUNT - 1;
 
 		}
+		if (!size)
+			break;
 	}
 
 	ctx->io->queue_audio(ctx->io->userctx, ctx->rt.atmpbuf1, samples * 2 * ch);
