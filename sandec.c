@@ -2403,7 +2403,8 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static void handle_NPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	read_palette(ctx, src);
+	if (size >= 768)
+		read_palette(ctx, src);
 }
 
 static inline uint8_t _u8clip(int a)
