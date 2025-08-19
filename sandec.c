@@ -3553,13 +3553,14 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	uint32_t sz;
 	int ret;
 
-	if (size != 12) {
+	if (size == 6) {
 		xoff = le16_to_cpu(*(int16_t *)(src + 2));
 		yoff = le16_to_cpu(*(int16_t *)(src + 4));
-	} else {
+	} else if (size == 12) {
 		xoff = (int16_t)be32_to_cpu(ua32(src + 4));
 		yoff = (int16_t)be32_to_cpu(ua32(src + 8));
-	}
+	} else
+		return 0;
 
 	ret = 0;
 	sz = *(uint32_t *)(vb + 0);
