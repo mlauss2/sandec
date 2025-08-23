@@ -1465,11 +1465,9 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t top, int16_t left, uint16_t size,
 		    uint8_t param, int16_t param2)
 {
-	const uint16_t pitch = ctx->rt.pitch;
-	const uint32_t maxpxo = pitch * ctx->rt.bufh;
-	int skip, i, j, k, pc;
+	const uint16_t mx = ctx->rt.frmw, my = ctx->rt.frmh, p = ctx->rt.pitch;
+	int skip, i, j, ls, pc, y;
 	uint8_t c, lut[256];
-	int32_t pxoff;
 
 	if (ctx->rt.version < 2) {
 		/* RA1 */
@@ -1494,28 +1492,43 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		}
 	}
 
-	if (size < 1)
+	if ((size < 1) || ((top + h) < 0) || (top >= my) || (left + w < 0) || (left >= mx))
 		return;
 
-	for (i = 0; i < h; i++) {
-		pxoff = ((top + i) * pitch) + left;
-		k = le16_to_cpu(ua16(src));
+	if (top < 0) {
+		y = -top;
+		while (y-- && size > 1) {
+			ls = le16_to_cpu(ua16(src));
+			size -= 2;
+			if (size < ls)
+				return;
+			size -= ls;
+			src += 2 + ls;
+		}
+		h += top;
+		top = 0;
+	}
+
+	y = top;
+	for (; (size > 1) && (h > 0) && (y < my); h--, y++) {
+		ls = le16_to_cpu(ua16(src));
 		src += 2;
+		size -= 2;
 		skip = 1;
-		pc = 0;
-		while (k > 0 && pc <= w) {
+		pc = left;
+		while ((size > 0) && (ls > 0) && (pc <= (w + left))) {
 			j = *src++;
+			size--;
+			ls--;
 			if (!skip) {
 				while (j--) {
-					if (pxoff >= 0 && pxoff < maxpxo) {
-						c = *(dst + pxoff);
-						*(dst + pxoff) = lut[c];
+					if ((pc >= 0) && (pc < mx)) {
+						c = *(dst + y * p + pc);
+						*(dst + (y * p) + pc) = lut[c];
 					}
-					pxoff += 1;
-					pc += 1;
+					pc++;
 				}
 			} else {
-				pxoff += j;
 				pc += j;
 			}
 			skip ^= 1;
@@ -1523,49 +1536,48 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	}
 }
 
-static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src1, uint16_t w,
+static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t top, int16_t left, uint16_t size,
 		    uint8_t param)
 {
-	const uint32_t maxoff = ctx->rt.pitch * ctx->rt.bufh;
-	const uint16_t pitch = ctx->rt.pitch;
-	uint8_t c, *nsrc, *src = src1;
-	int i, y, len, skip;
-	uint16_t ls, offs;
-	int32_t dstoff;
+	const uint16_t mx = ctx->rt.frmw, my = ctx->rt.frmh, p = ctx->rt.pitch;
+	int j, y, pc, skip, ls;
+	uint8_t c, *nsrc;
+
+	if ((size < 1) || ((top + h) < 0) || (top >= my) || (left + w < 0) || (left >= mx))
+		return;
 
 	nsrc = src;
-	for (y = 0; y < h; y++) {
-		if (size < 2)
-			break;
-		dstoff = left + ((top + y) * pitch);
+	y = top;
+	for (; (size > 2) && (h > 0) && (y < my); y++, h--) {
 		src = nsrc;
 		ls = le16_to_cpu(ua16(src));
 		src += 2;
 		size -= 2;
-		if (ls > size)
-			break;
 		nsrc = src + ls;
-		len = 0;
+		if (y < 0) {
+			if (ls > size)
+				break;
+			size -= ls;
+			continue;
+		}
 		skip = 1;
-		while (size > 0 && ls > 0 && len <= w) {
-			offs = le16_to_cpu(ua16(src));
+		pc = left;
+		while ((size > 1) && (ls > 1) && (pc <= (w + left))) {
+			j = le16_to_cpu(ua16(src));
 			src += 2;
 			size -= 2;
 			ls -= 2;
-			if (skip) {
-				dstoff += offs;
-				len += offs;
-			} else {
-				for (i = 0; i <= offs; i++) {
+			if (!skip) {
+				while ((size-- > 0) && (ls-- > 0) && (j-- >= 0)) {
 					c = *src++;
-					size--;
-					ls--;
-					if (dstoff >= 0 && dstoff < maxoff)
-						*(dst + dstoff) = c;
-					dstoff++;
-					len++;
+					if ((pc >= 0) && (pc < mx)) {
+						*(dst + (y * p) + pc) = c;
+					}
+					pc++;
 				}
+			} else {
+				pc += j;
 			}
 			skip ^= 1;
 		}
@@ -1598,24 +1610,29 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 			uint16_t h, int16_t top, int16_t left, uint32_t size,
 			uint8_t param, uint16_t param2, int c5)
 {
-	const uint32_t maxpxo = ctx->rt.fbsize;
-	const uint16_t p = ctx->rt.pitch;
+	const uint16_t p = ctx->rt.pitch, mx = ctx->rt.bufw, my = ctx->rt.bufh;
 	uint8_t mask, bits, idx, *gs, c4t;
-	int32_t dstoff, dstoff2;
-	int i, j, k, l, bit;
+	uint32_t dstoff;
+	int i, j, k, l, bit, x, y;
 
 	c4t = ctx->c4tblparam & 0xff;
 	if (param2 > 0) {
+		if (size < param2 * 8)
+			return;
 		c4_5_param2(ctx, src, param2, c4t);
 		src += param2 * 8;
+		size -= param2 * 8;
 	}
 
 	for (j = 0; j < w; j += 4) {
 		mask = bits = 0;
+		x = left + j;
 		for (i = 0; i < h; i += 4) {
-			dstoff = ((top + i) * p) + left + j;	/* curr. block offset */
+			y = top + i;
 			if (param2 > 0) {
 				if (bits == 0) {
+					if (!size--)
+						return;
 					mask = *src++;
 					bits = 8;
 				}
@@ -1626,27 +1643,30 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 				bit = 0;
 			}
 
+			if (!size--)
+				return;
 			idx = *src++;
 			if (!bit && idx == 0x80 && !c5)
 				continue;
-			gs = &(ctx->c4tbl[bit][idx][0]);
 
-			/* find the 4x4 block in the table and render it */
+			if ((y >= my) || ((y + 4) < 0) || ((x + 4) < 0) || (x >= mx))
+				continue;
+			/* render the 4x4 block */
+			gs = &(ctx->c4tbl[bit][idx][0]);
 			for (k = 0; k < 4; k++) {
-				dstoff2 = dstoff + (k * p);
-				for (l = 0; l < 4; l++) {
-					if ((dstoff2 >= 0) && (dstoff2 < maxpxo))
-						*(dst + dstoff2) = *gs;
-					gs++;
-					dstoff2++;
+				for (l = 0; l < 4; l++, gs++) {
+					const int yo = y + k, xo = x + l;
+					if ((yo >= 0) && (yo < my) && (xo >= 0) && (xo < mx))
+						*(dst + yo * p + xo) = *gs;
 				}
 			}
 
 			/* post processing to smooth out block borders a bit.
 			 * ASSAULT.EXE 121e8 - 12242 for the (c4t&0x80)==0 case.
 			 */
-			if (j == 0 || i == 0)
-				continue;		/* skip on left/top border */
+			if (x <= 0 || y <= 0 || x >= mx || y >= my)
+				continue;	/* skip unreachable edges */
+			dstoff = y * p +  x;
 			if (c4t & 0x80) {
 				for (k = 0; k < 4; k++)
 					*(dst + dstoff + k) = ((*(dst + dstoff + k) + *(dst + dstoff + k - p)) >> 1) | 0x80;
@@ -1687,15 +1707,33 @@ static void codec4(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w,
 		   uint16_t h, int16_t top, int16_t left, uint32_t size, int transp)
 {
+	const uint16_t mx = ctx->rt.frmw, my = ctx->rt.frmh;
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
-	int i, j;
+	int i, j, x, y;
 
-	for (i = 0; i < h && size > 1; i++) {
-		dst = dst_in + ((top + i) * ctx->rt.pitch) + left;
+	if (((top + h) < 0) || (top >= my) || (left + w < 0) || (left >= mx))
+		return;
+	if (top < 0) {
+		y = -top;
+		while (y-- && size > 1) {
+			dlen = le16_to_cpu(ua16(src));
+			size -= 2;
+			if (size < dlen)
+				return;
+			size -= dlen;
+			src += 2 + dlen;
+		}
+		h += top;
+		top = 0;
+	}
+
+	y = top;
+	for (i = 0; i < h && size > 1 && y < my; i++, y++) {
 		dlen = le16_to_cpu(ua16(src));
 		src += 2;
 		size -= 2;
+		x = left;
 		while (dlen && size) {
 			code = *src++;
 			dlen--;
@@ -1706,19 +1744,38 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 				col = *src++;
 				dlen--;
 				size--;
-				if (col || !transp)
-					for (j = 0; j < rlen; j++)
-						*(dst + j) = col;
-				dst += rlen;
+				if (x < 0) {
+					int dff = _min(-x, rlen);
+					rlen -= dff;
+					x += dff;
+				}
+				if (rlen && x >= 0 && x < mx) {
+					dst = (uint8_t *)dst_in + y * ctx->rt.pitch + x;
+					if (col || !transp) {
+						for (j = 0; j < rlen; j++)
+							*(dst + j) = col;
+					}
+				}
+				x += rlen;
 			} else {
-				for (j = 0; j < rlen && size; j++) {
+				if (size < rlen)
+					return;
+				if (x < 0) {
+					int dff = _min(-x, rlen);
+					src += dff;
+					size -= dff;
+					dlen -= dff;
+					rlen -= dff;
+					x += dff;
+				}
+				dst = (uint8_t *)dst_in + y * ctx->rt.pitch + x;
+				for (j = 0; j < rlen; j++, x++) {
 					col = *src++;
-					size--;
-					if (col || !transp)
-						*dst = col;
-					dst++;
+					if ((col || !transp) && (x >= 0) && (x < mx))
+						*(dst + j) = col;
 				}
 				dlen -= rlen;
+				size -= rlen;
 			}
 		}
 	}
