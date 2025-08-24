@@ -1710,7 +1710,7 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 	const uint16_t mx = ctx->rt.frmw, my = ctx->rt.frmh;
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
-	int i, j, x, y;
+	int j, x, y;
 
 	if (((top + h) < 0) || (top >= my) || (left + w < 0) || (left >= mx))
 		return;
@@ -1729,7 +1729,7 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 	}
 
 	y = top;
-	for (i = 0; i < h && size > 1 && y < my; i++, y++) {
+	for (; (size > 1) && (h > 0) && (y < my); h--, y++) {
 		dlen = le16_to_cpu(ua16(src));
 		src += 2;
 		size -= 2;
@@ -1749,7 +1749,7 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 					rlen -= dff;
 					x += dff;
 				}
-				if (rlen && x >= 0 && x < mx) {
+				if ((rlen > 0) && (x >= 0) && (x < mx)) {
 					dst = (uint8_t *)dst_in + y * ctx->rt.pitch + x;
 					if (col || !transp) {
 						for (j = 0; j < rlen; j++)
@@ -1808,19 +1808,37 @@ static void codec2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	}
 }
 
-static void codec31(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w,
+static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t top, int16_t left, uint32_t size, uint8_t p1,
 		    int opaque)
 {
-	uint8_t *dst, code, col;
+	const uint16_t mx = ctx->rt.frmw, my = ctx->rt.frmh, p = ctx->rt.pitch;
+	uint8_t code, col;
 	uint16_t rlen, dlen;
-	int i, j;
+	int j, x, y;
 
-	for (i = 0; i < h && size > 1; i++) {
-		dst = dst_in + ((top + i) * ctx->rt.pitch) + left;
+	if (((top + h) < 0) || (top >= my) || (left + w < 0) || (left >= mx))
+		return;
+	if (top < 0) {
+		y = -top;
+		while (y-- && size > 1) {
+			dlen = le16_to_cpu(ua16(src));
+			size -= 2;
+			if (size < dlen)
+				return;
+			size -= dlen;
+			src += 2 + dlen;
+		}
+		h += top;
+		top = 0;
+	}
+
+	y = top;
+	for (; (size > 1) && (h > 0) && (y < my); h--, y++) {
 		dlen = le16_to_cpu(ua16(src));
 		src += 2;
 		size -= 2;
+		x = left;
 		while (dlen && size) {
 			code = *src++;
 			dlen--;
@@ -1831,24 +1849,33 @@ static void codec31(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 				col = *src++;
 				dlen--;
 				size--;
+
 				for (j = 0; j < rlen; j++) {
-					if ((0 != (col & 0xf)) || opaque)
-						*(dst + 0) = p1 + (col & 0xf);
-					if ((0 != (col >> 4)) || opaque)
-						*(dst + 1) = p1 + (col >> 4);
-					dst += 2;
+					uint8_t c1 = col & 0xf;
+					if ((c1 || opaque) && (x >= 0) && (x < mx))
+						*(dst + y * p + x) = p1 + c1;
+					x++;
+					c1 = col >> 4;
+					if ((c1 || opaque) && (x >= 0) && (x < mx))
+						*(dst + y * p + x) = p1 + c1;
+					x++;
 				}
 			} else {
-				for (j = 0; j < rlen && size; j++) {
+				if (size < rlen)
+					rlen = size;
+				for (j = 0; (j < rlen) && (size > 0); j++) {
 					col = *src++;
-					size--;
-					if ((0 != (col & 0xf)) || opaque)
-						*(dst + 0) = p1 + (col & 0xf);
-					if ((0 != (col >> 4)) || opaque)
-						*(dst + 1) = p1 + (col >> 4);
-					dst += 2;
+					uint8_t c1 = col & 0xf;
+					if ((c1 || opaque) && (x >= 0) && (x < mx))
+						*(dst + y * p + x) = p1 + c1;
+					x++;
+					c1 = col >> 4;
+					if ((c1 || opaque) && (x >= 0) && (x < mx))
+						*(dst + y * p + x) = p1 + c1;
+					x++;
 				}
 				dlen -= rlen;
+				size -= rlen;
 			}
 		}
 	}
