@@ -1750,7 +1750,7 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 					x += dff;
 				}
 				if (x + rlen > mx)
-					rlen = x - mx;
+					rlen = mx - x;
 				if (rlen < 1)
 					continue;
 
