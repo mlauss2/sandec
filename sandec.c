@@ -1886,7 +1886,7 @@ static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 
 /******************************************************************************/
 
-static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
+static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t xoff, int16_t yoff)
 {
 	struct sanrt *rt = &ctx->rt;
 	uint16_t w, h, wr, hr, param2;
@@ -2001,6 +2001,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	size -= 14;
 	ret = 0;
 
+	left += xoff;
+	top += yoff;
 	switch (codec) {
 	case 1:
 	case 3:   codec1(ctx, dst, src, w, h, top, left, size, (codec == 1)); break;
@@ -2032,7 +2034,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		 */
 		if (rt->to_store) {
 			rt->to_store = 0;
-			ret = handle_FOBJ(ctx, *(uint32_t *)rt->buf3, rt->buf3 + 4);
+			ret = handle_FOBJ(ctx, *(uint32_t *)rt->buf3, rt->buf3 + 4, 0, 0);
 			if (ret)
 				return ret;
 		}
@@ -3635,8 +3637,8 @@ static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	int16_t xoff, yoff, left, top;
 	uint8_t *vb = ctx->rt.buf3;
+	int16_t xoff, yoff;
 	uint32_t sz;
 	int ret;
 
@@ -3652,17 +3654,7 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	ret = 0;
 	sz = *(uint32_t *)(vb + 0);
 	if (sz > 0 && sz < ctx->rt.fbsize) {
-		/* add FTCH xoff/yoff to the FOBJs left/top offsets */
-		left = le16_to_cpu(*(int16_t *)(vb + 6));
-		top  = le16_to_cpu(*(int16_t *)(vb + 8));
-		*(int16_t *)(vb + 6) = cpu_to_le16(left + xoff);
-		*(int16_t *)(vb + 8) = cpu_to_le16(top  + yoff);
-
-		ret = handle_FOBJ(ctx, sz, vb + 4);
-
-		/* restore the FOBJs left/top values, otherwise we scroll endlessly */
-		*(int16_t *)(vb + 6) = cpu_to_le16(left);
-		*(int16_t *)(vb + 8) = cpu_to_le16(top);
+		ret = handle_FOBJ(ctx, sz, vb + 4, xoff, yoff);
 	}
 	ctx->rt.can_ipol = 0;
 	if (ret == 0)
@@ -3709,7 +3701,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		switch (cid)
 		{
 		case NPAL: handle_NPAL(ctx, csz, src); break;
-		case FOBJ: ret = handle_FOBJ(ctx, csz, src); break;
+		case FOBJ: ret = handle_FOBJ(ctx, csz, src, 0, 0); break;
 		case IACT: handle_IACT(ctx, csz, src); break;
 		case TRES: handle_TRES(ctx, csz, src); break;
 		case STOR: handle_STOR(ctx, csz, src); break;
