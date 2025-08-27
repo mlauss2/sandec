@@ -1749,12 +1749,15 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 					rlen -= dff;
 					x += dff;
 				}
-				if ((rlen > 0) && (x >= 0) && (x < mx)) {
-					dst = (uint8_t *)dst_in + y * ctx->rt.pitch + x;
-					if (col || !transp) {
-						for (j = 0; j < rlen; j++)
-							*(dst + j) = col;
-					}
+				if (x + rlen > mx)
+					rlen = x - mx;
+				if (rlen < 1)
+					continue;
+
+				dst = (uint8_t *)dst_in + (y * ctx->rt.pitch) + x;
+				if (col || !transp) {
+					for (j = 0; j < rlen; j++)
+						*(dst + j) = col;
 				}
 				x += rlen;
 			} else {
@@ -1768,7 +1771,7 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 					rlen -= dff;
 					x += dff;
 				}
-				dst = (uint8_t *)dst_in + y * ctx->rt.pitch + x;
+				dst = (uint8_t *)dst_in + (y * ctx->rt.pitch) + x;
 				for (j = 0; j < rlen; j++, x++) {
 					col = *src++;
 					if ((col || !transp) && (x >= 0) && (x < mx))
