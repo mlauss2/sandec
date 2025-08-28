@@ -1744,6 +1744,8 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 				col = *src++;
 				dlen--;
 				size--;
+				if (x >= mx)
+					continue;
 				if (x < 0) {
 					int dff = _min(-x, rlen);
 					rlen -= dff;
@@ -1763,6 +1765,12 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 			} else {
 				if (size < rlen)
 					return;
+				if (x >= mx) {
+					dlen -= rlen;
+					size -= rlen;
+					src += rlen;
+					continue;
+				}
 				if (x < 0) {
 					int dff = _min(-x, rlen);
 					src += dff;
