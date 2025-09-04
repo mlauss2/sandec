@@ -1486,8 +1486,8 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint8_t param, int16_t param2)
 {
 	const uint16_t mx = ctx->rt.frmw, my = ctx->rt.frmh, p = ctx->rt.pitch;
-	int skip, i, j, ls, pc, y;
-	uint8_t c, lut[256];
+	int skip, i, j, ls, pc, y, wrlen, skip_left;
+	uint8_t lut[256], *d;
 
 	if (ctx->rt.version < 2) {
 		/* RA1 */
@@ -1541,13 +1541,30 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 			size--;
 			ls--;
 			if (!skip) {
-				while (j--) {
-					if ((pc >= 0) && (pc < mx)) {
-						c = *(dst + y * p + pc);
-						*(dst + (y * p) + pc) = lut[c];
-					}
-					pc++;
+				skip_left = (pc < 0) ? -pc : 0;
+				if (skip_left >= j) {
+					pc += j;
+					j = 0;
+				} else {
+					pc += skip_left;
+					j -= skip_left;
 				}
+
+				wrlen = (pc + j > mx) ? (mx - pc) : j;
+
+				if (wrlen > 0) {
+					d = dst + (y * p) + pc;
+					for (i = 0; i < wrlen; i++) {
+						d[i] = lut[d[i]];
+					}
+
+					pc += wrlen;
+					j -= wrlen;
+				}
+
+				if (j > 0)
+					pc += j;
+
 			} else {
 				pc += j;
 			}
