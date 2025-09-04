@@ -97,6 +97,9 @@ static inline uint32_t ua32(uint8_t *p)
 #define ANNO	0x4f4e4e41
 #define IMA4	0x494d4134
 
+/* reasonable maximum size of a FRME */
+#define FRME_MAX_SIZE	(4 << 20)
+
 /* ANIM maximum image size */
 #define FOBJ_MAXX	640
 #define FOBJ_MAXY	480
@@ -727,6 +730,8 @@ static void c4_5_param2(struct sanctx *ctx, uint8_t *src, uint16_t cnt,
 /* allocate memory for a full FRME */
 static int allocfrme(struct sanctx *ctx, uint32_t sz)
 {
+	if (sz > FRME_MAX_SIZE)	/* cap at 4MB */
+		return 99;
 	sz = (sz + 63) & ~63;
 	if (sz > ctx->rt.frmebufsz) {
 		if (ctx->rt.fcache)
@@ -3935,7 +3940,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		 * including chunk ID and chunk size in the stream (usually the first)
 		 * plus 1 byte.
 		 */
-		if ((maxframe > 9) && (maxframe < 4 * 1024 * 1024)) {
+		if ((maxframe > 9) && (maxframe <= FRME_MAX_SIZE)) {
 			if (allocfrme(ctx, maxframe)) {
 				free(ahbuf);
 				return 13;
