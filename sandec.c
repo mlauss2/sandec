@@ -1673,11 +1673,16 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 				continue;
 			/* render the 4x4 block */
 			gs = &(ctx->c4tbl[bit][idx][0]);
-			for (k = 0; k < 4; k++) {
-				for (l = 0; l < 4; l++, gs++) {
-					const int yo = y + k, xo = x + l;
-					if ((yo >= 0) && (yo < my) && (xo >= 0) && (xo < mx))
-						*(dst + yo * p + xo) = *gs;
+			if ((y >= 0) && ((y + 4) < my) && (x >= 0) && ((x + 4) < mx)) {
+				for (k = 0; k < 4; k++, gs += 4)
+					memcpy(dst + x + (y + k) * p, gs, 4);
+			} else {
+				for (k = 0; k < 4; k++) {
+					for (l = 0; l < 4; l++, gs++) {
+						const int yo = y + k, xo = x + l;
+						if ((yo >= 0) && (yo < my) && (xo >= 0) && (xo < mx))
+							*(dst + yo * p + xo) = *gs;
+					}
 				}
 			}
 
