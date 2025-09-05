@@ -1107,6 +1107,8 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 		for (i = 0; i < 8; i += 4) {
 			for (k = 0; k < 8; k += 4) {
 				opc = *src++;
+				if (opc == 255)
+					continue;	/* no mv for this one */
 				mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
 				for (j = 0; j < 4; j++) {
 					ofs = (w * (j + i)) + k;
@@ -1137,6 +1139,8 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 			for (j = 0; j < 8; j += 2) {			/* 4 */
 				ofs = (w * i) + j;
 				opc = *src++;
+				if (opc == 255)
+					continue;
 				mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
 				for (l = 0; l < 2; l++) {
 					*(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
