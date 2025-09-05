@@ -3936,6 +3936,11 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	uint32_t maxframe;
 	uint8_t *ahbuf, fps;
 
+	if (size > 794)
+		return 14;
+	if (size < 774)
+		return 15;
+
 	if (0 != sandec_alloc_memories(ctx, FOBJ_MAXX, FOBJ_MAXY, 0))
 		return 4;
 
@@ -3992,6 +3997,9 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 	uint8_t *src, *sb;
 	int ret;
 
+	if (csz > 4096)
+		return 57;
+
 	/* even the odds */
 	if (csz & 1)
 		csz += 1;
@@ -4024,6 +4032,8 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 		return 53;
 	}
 	sz = be32_to_cpu(c[1]);
+	if (sz > 1024)
+		return 58;
 	src = malloc(sz);
 	if (!src)
 		return 54;
