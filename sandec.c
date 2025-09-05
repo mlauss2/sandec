@@ -925,22 +925,29 @@ static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 	}
 }
 
-static void codec47_comp5(uint8_t *src, uint8_t *dst, uint32_t left)
+static void codec47_comp5(uint8_t *src, uint32_t size, uint8_t *dst, uint32_t left)
 {
 	uint8_t opc, rlen, col, j;
 
-	while (left) {
+	while (left && size) {
 		opc = *src++;
+		size--;
 		rlen = (opc >> 1) + 1;
 		if (rlen > left)
 			rlen = left;
 		if (opc & 1) {
+			if (size < 1)
+				return;
 			col = *src++;
+			size--;
 			for (j = 0; j < rlen; j++)
 				*dst++ = col;
 		} else {
+			if (size < rlen)
+				return;
 			for (j = 0; j < rlen; j++)
 				*dst++ = *src++;
+			size -= rlen;
 		}
 		left -= rlen;
 	}
@@ -964,11 +971,14 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 	ctx->rt.have_itable = 1;
 }
 
-static uint8_t* codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
+static uint8_t* codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint32_t size)
 {
 	uint8_t *coltbl, comp, newrot, flag, *dst;
 	uint32_t decsize;
 	uint16_t seq;
+
+	if (size < 26)
+		return (uint8_t *)(-60);
 
 	seq =    le16_to_cpu(*(uint16_t *)(src + 0));
 	comp =   src[2];
@@ -985,22 +995,32 @@ static uint8_t* codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 		memset(ctx->rt.buf2, src[13], decsize);
 	}
 	src += 26;
+	size -= 26;
 	if (flag & 1) {
+		if (size < 0x8080)
+			return (uint8_t *)(-61);
 		codec47_itable(ctx, src);
 		src += 0x8080;
+		size -= 0x8080;
 	}
 
 	dst = ctx->rt.buf0;
 	switch (comp) {
-	case 0:	memcpy(dst, src, w * h); break;
-	case 1:	codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h); break;
+	case 0:	if (size < w * h)
+			return (uint8_t *)(-62);
+		memcpy(dst, src, w * h);
+		break;
+	case 1:	if (size < ((w * h) / 4))
+			return (uint8_t *)(-63);
+		codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h);
+		break;
 	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
 			codec47_comp2(ctx, src, dst, w, h, coltbl);
 		}
 		break;
 	case 3:	memcpy(dst, ctx->rt.buf2, ctx->rt.fbsize); break;
 	case 4:	memcpy(dst, ctx->rt.buf1, ctx->rt.fbsize); break;
-	case 5:	codec47_comp5(src, dst, decsize); break;
+	case 5:	codec47_comp5(src, size, dst, decsize); break;
 	default: break;
 	}
 
@@ -1170,11 +1190,14 @@ static void codec48_comp3(uint8_t *src, uint8_t *dst, uint8_t *db,
 	}
 }
 
-static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
+static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint32_t size)
 {
 	uint32_t pktsize, decsize;
 	uint8_t comp, flag, *dst;
 	uint16_t seq;
+
+	if (size < 16)
+		return (uint8_t *)(-80);
 
 	comp =	src[0];		/* subcodec */
 	if (src[1] != 1)	/* mvec table variant, always 1 with MotS */
@@ -1212,18 +1235,29 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	}
 
 	src += 16;
+	size -= 16;
 	if (flag & 8) {
+		if (size < 0x8080)
+			return (uint8_t *)(-81);
 		codec47_itable(ctx, src);
 		src += 0x8080;
+		size -= 0x8080;
 	}
 
 	dst = ctx->rt.buf0;
 	switch (comp) {
-	case 0:	memcpy(dst, src, pktsize); break;
-	case 2: codec47_comp5(src, dst, decsize); break;
+	case 0:	if (size < pktsize)
+			return (uint8_t *)(-82);
+		memcpy(dst, src, pktsize);
+		break;
+	case 2: codec47_comp5(src, size, dst, decsize); break;
 	case 3: codec48_comp3(src, dst, ctx->rt.buf2, ctx->rt.c47ipoltbl, w, h); break;
-	case 5: codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h); break;
-	default: break;
+	case 5: if (size < ((w * h) / 4))
+			return (uint8_t *)(-83);
+		codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h);
+		break;
+	default:
+		return dst;
 	}
 
 	if (seq > 1)
@@ -1236,8 +1270,8 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 
 /******************************************************************************/
 
-static void codec37_comp1(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w,
-			  uint16_t h, uint8_t mvidx)
+static void codec37_comp1(uint8_t *src, uint32_t size, uint8_t *dst, uint8_t *db,
+			  uint16_t w, uint16_t h, uint8_t mvidx)
 {
 	uint8_t opc, run, skip;
 	int32_t mvofs, ofs;
@@ -1249,9 +1283,12 @@ static void codec37_comp1(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w,
 	for (i = 0; i < h; i += 4) {
 		for (j = 0; j < w; j += 4) {
 			if (len < 0) {
+				if (size < 1)
+					return;
 				len = (*src) >> 1;
 				run = !!((*src++) & 1);
 				skip = 0;
+				size--;
 			} else {
 				skip = run;
 			}
@@ -1264,12 +1301,26 @@ static void codec37_comp1(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w,
 						ofs = j + (k * w);
 						for (l = 0; l < 4; l++) {
 							if (len < 0) {
+								if (size < 1)
+									return;
 								len = (*src) >> 1;
 								run = !!((*src++) & 1);
-								if (run)
+								size--;
+								if (run && size) {
 									opc = *src++;
+									size--;
+								}
 							}
-							*(dst + ofs + l) = run ? opc : *src++;
+							if (!run){
+								if (size < 1) {
+									return;
+								} else {
+									*(dst + ofs + l) = *src++;
+									size--;
+								}
+							} else {
+								*(dst + ofs + l) = opc;
+							}
 							len--;
 						}
 					}
@@ -1291,7 +1342,7 @@ static void codec37_comp1(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w,
 }
 
 static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, uint16_t h,
-			  uint8_t mvidx, const uint8_t f4, const uint8_t c4)
+			  uint8_t mvidx, const uint8_t f4, const uint8_t c4, uint32_t size)
 {
 	uint8_t opc, c, copycnt;
 	int32_t ofs, mvofs;
@@ -1313,30 +1364,42 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 				continue;
 			}
 
+			if (size < 1)
+				return;
 			opc = *src++;
+			size--;
 			if (opc == 0xff) {
 				/* 4x4 block, per-pixel data from source */
+				if (size < 16)
+					return;
 				for (k = 0; k < 4; k++) {
 					ofs = j + (k * w);
 					for (l = 0; l < 4; l++)
 						*(dst + ofs + l) = *src++;
 				}
+				size -= 16;
 			} else if (f4 && (opc == 0xfe)) {
 				/* 4x4 block, per-line color from source */
+				if (size < 4)
+					return;
 				for (k = 0; k < 4; k++) {
 					c = *src++;
 					ofs = j + (k * w);
 					for (l = 0; l < 4; l++)
 						*(dst + ofs + l) = c;
 				}
+				size -= 4;
 			} else if (f4 && (opc == 0xfd)) {
 				/* 4x4 block, per block color from source */
+				if (size < 1)
+					return;
 				c = *src++;
 				for (k = 0; k < 4; k++) {
 					ofs = j + (k * w);
 					for (l = 0; l < 4; l++)
 						*(dst + ofs + l) = c;
 				}
+				size--;
 			} else {
 				/* 4x4 block copy from prev with MV */
 				mvofs = c37_mv[mvidx][opc*2] + (c37_mv[mvidx][opc*2 + 1] * w);
@@ -1346,8 +1409,12 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 						*(dst + ofs + l) = *(db + ofs + l + mvofs);
 				}
 				/* comp 4 opcode 0 indicates run start */
-				if (c4 && (opc == 0))
+				if (c4 && (opc == 0)) {
+					if (size < 1)
+						return;
 					copycnt = *src++;
+					size--;
+				}
 			}
 		}
 		dst += w * 4;
@@ -1355,11 +1422,14 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 	}
 }
 
-static uint8_t* codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h)
+static uint8_t* codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint32_t size)
 {
 	uint8_t comp, mvidx, flag, *dst, *db;
 	uint32_t decsize;
 	uint16_t seq;
+
+	if (size < 16)
+		return (uint8_t *)(-70);
 
 	comp = src[0];
 	mvidx = src[1];
@@ -1383,15 +1453,19 @@ static uint8_t* codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	}
 
 	src += 16;
+	size -= 16;
 	dst = ctx->rt.buf0;
 	db = ctx->rt.buf2;
 
 	switch (comp) {
-	case 0: memcpy(dst, src, decsize); break;
-	case 1: codec37_comp1(src, dst, db, w, h, mvidx); break;
-	case 2: codec47_comp5(src, dst, decsize); break;
+	case 0: if (size < decsize)
+			return (uint8_t *)(-71);
+		memcpy(dst, src, decsize);
+		break;
+	case 1: codec37_comp1(src, size, dst, db, w, h, mvidx); break;
+	case 2: codec47_comp5(src, size, dst, decsize); break;
 	case 3: /* fallthrough */
-	case 4: codec37_comp3(src, dst, db, w, h, mvidx, flag & 4, comp == 4); break;
+	case 4: codec37_comp3(src, dst, db, w, h, mvidx, flag & 4, comp == 4, size); break;
 	default: break;
 	}
 
@@ -2068,9 +2142,9 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 	case 33:
 	case 34: codec33(ctx, dst, src, w, h, top, left, size, param, param2, codec == 34); break;
 	case 45: codec45(ctx, dst, src, w, h, top, left, size, param, param2); break;
-	case 37: dst = codec37(ctx, src, w, h); break;
-	case 47: dst = codec47(ctx, src, w, h); break;
-	case 48: dst = codec48(ctx, src, w, h); break;
+	case 37: dst = codec37(ctx, src, w, h, size); break;
+	case 47: dst = codec47(ctx, src, w, h, size); break;
+	case 48: dst = codec48(ctx, src, w, h, size); break;
 	default: ret = 18;
 	}
 
@@ -2490,6 +2564,9 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	uint32_t decsize;
 	int i;
 
+	if (size < 0x230)
+		return;
+
 	dst = (uint16_t *)rt->buf0;
 	db1 = (uint16_t *)rt->buf1;
 	db2 = (uint16_t *)rt->buf2;
@@ -2515,6 +2592,7 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 
 	src += 0x230;
+	size -= 0x230;
 	switch (codec) {
 	case 0: for (i = 0; i < width * height; i++, src += 2)
 			*dst++ = le16_to_cpu(*(uint16_t *)src);
@@ -2526,7 +2604,7 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		break;
 	case 3:	memcpy(dst, db2, width * height * 2); break;
 	case 4: memcpy(dst, db1, width * height * 2); break;
-	case 5: codec47_comp5(src, (uint8_t *)dst, decsize); break;
+	case 5: codec47_comp5(src, size, (uint8_t *)dst, decsize); break;
 	case 6: bl16_comp6(dst, src, width, height, tbl2); break;
 	case 7: bl16_comp7(dst, src, width, height, tbl2); break;
 	case 8: bl16_comp8(dst, src, decsize, tbl2); break;
