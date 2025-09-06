@@ -4114,7 +4114,7 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 		return 53;
 	}
 	sz = be32_to_cpu(c[1]);
-	if (sz > 1024)
+	if (sz > 4096)
 		return 58;
 	src = malloc(sz);
 	if (!src)
