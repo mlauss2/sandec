@@ -1383,14 +1383,17 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 				}
 				size -= 16;
 			} else if (f4 && (opc == 0xfe)) {
-				/* 4x4 block, per-line color from source */
+				/* 4x4 block, per-2x2 block color from source */
 				if (size < 4)
 					return;
-				for (k = 0; k < 4; k++) {
-					c = *src++;
-					ofs = j + (k * w);
-					for (l = 0; l < 4; l++)
-						*(dst + ofs + l) = c;
+				for (k = 0; k < 4; k += 2) {
+					for (l = 0; l < 2; l++) {
+						*(dst + j + ((k + l) * w) + 0) = src[0];
+						*(dst + j + ((k + l) * w) + 1) = src[0];
+						*(dst + j + ((k + l) * w) + 2) = src[1];
+						*(dst + j + ((k + l) * w) + 3) = src[1];
+					}
+					src += 2;
 				}
 				size -= 4;
 			} else if (f4 && (opc == 0xfd)) {
