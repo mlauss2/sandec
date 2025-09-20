@@ -1037,39 +1037,25 @@ static uint8_t* codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 /******************************************************************************/
 
 /* scale 4x4 input block to 8x8 output block */
-static void c48_4to8(uint8_t *dst, uint8_t *src, const uint16_t w, const uint8_t *itbl)
+static void c48_4to8(uint8_t *dst, uint8_t *src, uint16_t w)
 {
-	uint8_t p1, p2;
-	uint16_t idx;
-	int i, j;
-
-	for (i = 0; i < 7; i += 2) {		/* y */
-		p1 = *src++;
-		for (j = 0; j < 6; j += 2) {	/* x */
-			p2 = *src++;
-			idx = (p1 <<  8) | p2;
-			*(dst + (i * w) + j + 0) = p1;
-			*(dst + (i * w) + j + 1) = itbl[idx];
-			p1 = p2;
+	uint16_t p;
+	/* dst is always aligned, so we can do at least 16bit stores */
+	for (int i = 0; i < 4; i++) {
+		for (int j = 0; j < 8; j += 2) { /* 1px > 2x2 block */
+			p = *src++;
+			p = (p << 8) | p; /* 1x2 line */
+			*((uint16_t *)(dst + w * 0 + j)) = p;  // 0|0
+			*((uint16_t *)(dst + w * 1 + j)) = p;  // 0|1
 		}
-		*(dst + (i * w) + 6) = p1;
-		*(dst + (i * w) + 7) = p1;
+		dst += w * 2;
 	}
-	for (i = 1; i < 6; i += 2) {
-		for (j = 0; j < 8; j++) {
-			p1 = *(dst + ((i - 1) * w) + j);
-			p2 = *(dst + ((i + 1) * w) + j);
-			idx = (p1 << 8) | p2;
-			*(dst + ((i + 0) * w) + j) = itbl[idx];
-		}
-	}
-	memcpy(dst + (7 * w), dst + (6 * w), 8);
 }
 
 /* process an 8x8 block */
 static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_t w, const uint8_t *itbl)
 {
-	uint8_t opc, c;
+	uint8_t opc, sb[16];
 	int16_t mvofs;
 	uint32_t ofs;
 	int i, j, k, l;
@@ -1077,10 +1063,23 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 	opc = *src++;
 	switch (opc) {
 	case 0xFF:	/* 1x1 -> 8x8 block scale */
-		c = *src++;
-		for (i = 0; i < 8; i++)
-			for (j = 0; j < 8; j++)
-				*(dst + (i * w) + j) = c;
+		sb[15] = *src++;
+		sb[ 7] = itbl[(*(dst - 1*w + 7) << 8) | sb[15]];
+		sb[ 3] = itbl[(*(dst - 1*w + 7) << 8) | sb[ 7]];
+		sb[11] = itbl[(sb[15] << 8)           | sb[ 7]];
+		sb[ 1] = itbl[(*(dst - 0*w - 1) << 8) | sb[ 3]];
+		sb[ 0] = itbl[(*(dst - 0*w - 1) << 8) | sb[ 1]];
+		sb[ 2] = itbl[(sb[ 3] << 8)           | sb[ 1]];
+		sb[ 5] = itbl[(*(dst + 2*w -1) << 8)  | sb[ 7]];
+		sb[ 4] = itbl[(*(dst + 2*w -1) << 8)  | sb[ 5]];
+		sb[ 6] = itbl[(sb[ 7] << 8)           | sb[ 5]];
+		sb[ 9] = itbl[(*(dst + 3*w -1) << 8)  | sb[11]];
+		sb[ 8] = itbl[(*(dst + 3*w -1) << 8)  | sb[ 9]];
+		sb[10] = itbl[(sb[11] << 8)           | sb[ 9]];
+		sb[13] = itbl[(*(dst + 4*w -1) << 8)  | sb[15]];
+		sb[12] = itbl[(*(dst + 4*w -1) << 8)  | sb[13]];
+		sb[14] = itbl[(sb[15] << 8)           | sb[13]];
+		c48_4to8(dst, sb, w);
 		break;
 	case 0xFE:	/* 1x 8x8 copy from deltabuf, 16bit mv from src */
 		mvofs = (int16_t)le16_to_cpu(ua16(src)); src += 2;
@@ -1091,17 +1090,23 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 		}
 		break;
 	case 0xFD:	/* 2x2 -> 8x8 block scale */
-		for (i = 0; i < 2; i++) {
-			uint8_t p1 = *src++;
-			uint8_t p2 = *src++;
-			for (j = 0; j < 4; j++) {
-				for (k = 0; k < 4; k++)
-					*dst++ = p1;
-				for (k = 0; k < 4; k++)
-					*dst++ = p2;
-				dst += w - 8;
-			}
-		}
+		sb[ 5] = *src++;
+		sb[ 7] = *src++;
+		sb[13] = *src++;
+		sb[15] = *src++;
+		sb[ 1] = itbl[(*(dst - 1*w + 3) << 8) | sb[ 5]];
+		sb[ 3] = itbl[(*(dst - 1*w + 7) << 8) | sb[ 7]];
+		sb[11] = itbl[(sb[15] << 8)           | sb[ 7]];
+		sb[ 9] = itbl[(sb[13] << 8)           | sb[ 5]];
+		sb[ 0] = itbl[(*(dst - 0*w - 1) << 8) | sb[ 1]];
+		sb[ 2] = itbl[(sb[ 3] << 8)           | sb[ 1]];
+		sb[ 4] = itbl[(*(dst + 2*w - 1) << 8) | sb[ 5]];
+		sb[ 6] = itbl[(sb[ 7] << 8)           | sb[ 5]];
+		sb[ 8] = itbl[(*(dst + 3*w - 1) << 8) | sb[ 9]];
+		sb[10] = itbl[(sb[11] << 8)           | sb[ 9]];
+		sb[12] = itbl[(*(dst + 4*w - 1) << 8) | sb[13]];
+		sb[14] = itbl[(sb[15] << 8)           | sb[13]];
+		c48_4to8(dst, sb, w);
 		break;
 	case 0xFC:	/* 4x copy 4x4 block, per-block c48_mv, index from source */
 		for (i = 0; i < 8; i += 4) {
@@ -1131,7 +1136,7 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 		}
 		break;
 	case 0xFA:	/* scale 4x4 input block to 8x8 dest block */
-		c48_4to8(dst, src, w, itbl);
+		c48_4to8(dst, src, w);
 		src += 16;
 		break;
 	case 0xF9:	/* 16x 2x2 copy from delta, per-block c48_mv */
