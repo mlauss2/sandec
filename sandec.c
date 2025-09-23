@@ -3508,13 +3508,13 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
 		return;
 
-	/* scummvm says there are 2 type of psad headers, the old one has
-	 * all zeroes at data offset 4 at index 0 (which is hopefully the first
-	 * ever PSAD block encoutered).
-	 */
 	if (rt->psadhdr < 1) {
-		t1 = ua32(src + 4);
-		rt->psadhdr = (t1 == 0) ? 1 : 2;
+		/* dig.exe 4332f */
+		if ((src[0] == 0) && (src[1] == 0) && (src[4] == 0) &&
+		    (src[5] == 0) && (src[8] == 0) && (src[9] == 0))
+			rt->psadhdr = 1;
+		else
+			rt->psadhdr = 2;
 	}
 
 	if (rt->psadhdr == 1) {
