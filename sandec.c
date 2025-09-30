@@ -1707,24 +1707,58 @@ static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	}
 }
 
-static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-		    uint16_t h, int16_t top, int16_t left, uint32_t size)
+static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, const uint16_t w,
+		    const uint16_t h, int16_t top, int16_t left, uint32_t size)
 {
 	const uint16_t pitch = ctx->rt.pitch;
+	int hh = h, ww = w;
 
-	dst += (top * pitch) + left;
-	if (pitch == w) {
-		/* copy the whole thing in one go */
-		if (size > w * h)
-			size = w * h;
-		memcpy(dst, src, size);
+	if (((left + w) < 0) || (left >= ctx->rt.bufw) || ((top + h) < 0) || (top >= ctx->rt.bufh))
+	    return;
+
+	if ((left == 0) && (top == 0) && (w == pitch)) {
+		int hm = _min(h, ctx->rt.bufh);
+		hm *= w;
+		if (size < hm)
+			hm = size;
+		memcpy(dst, src, hm);
 	} else {
-		/* eh need to go line by line */
-		while (h-- && size >= w) {
-			memcpy(dst, src, w);
-			dst += pitch;
-			src += w;
-			size -= w;
+		if (top < 0) {
+			if (size < (-top * w))
+				return;
+			src += (-top) * w;
+			size -= (-top) * w;
+			hh += top;
+			top = 0;
+		}
+		if ((top + hh) >= ctx->rt.bufh) {
+			hh = ctx->rt.bufh - top;
+			if (hh >= ctx->rt.bufh)
+				hh = ctx->rt.bufh;
+		}
+		if (left < 0) {
+			if (size < -left)
+				return;
+			src += -left;
+			size -= -left;
+			ww += left;
+			left = 0;
+		}
+		if ((left + ww) >= ctx->rt.bufw) {
+			ww = ctx->rt.bufw - left;
+			if (ww >= ctx->rt.bufw)
+				ww = ctx->rt.bufw;
+		}
+		if ((ww > 0) && (hh > 0)) {
+			dst += left + (top * pitch);
+			while (hh--) {
+				if (size < ww)
+					return;
+				size -= ww;
+				memcpy(dst, src, ww);
+				dst += pitch;	/* dstpitch */
+				src += w;	/* srcpitch */
+			}
 		}
 	}
 }
