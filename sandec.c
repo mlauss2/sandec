@@ -106,12 +106,13 @@ static inline uint32_t ua32(uint8_t *p)
 
 /* sizes of various internal work buffers */
 #define SZ_IACT		(4096)
-#define SZ_PAL		(256 * 4)
-#define SZ_DELTAPAL	(768 * 2)
+#define SZ_PAL		(256 * sizeof(uint32_t))
+#define SZ_DELTAPAL	(768 * sizeof(int16_t))
+#define SZ_SHIFTPAL	(768 * sizeof(int16_t))
 #define SZ_C47IPTBL	(256 * 256)
 #define SZ_AUDTMPBUF1	(262144)
 #define SZ_ANMBUFS (SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL + \
-SZ_AUDTMPBUF1)
+SZ_AUDTMPBUF1 + SZ_SHIFTPAL)
 #define SZ_SNMBUFS	(SZ_AUDTMPBUF1)
 
 /* codec47 glyhps */
@@ -173,6 +174,7 @@ struct sanrt {
 	uint8_t *iactbuf;	/* 8 4kB for IACT chunks 		*/
 	uint8_t *c47ipoltbl;	/* 8 c47 interpolation table Compression 1 */
 	int16_t  *deltapal;	/* 8 768x 16bit for XPAL chunks		*/
+	int16_t *shiftpal;	/* 8 256x shifted pal			*/
 	uint32_t *palette;	/* 8 256x ABGR				*/
 	uint32_t fbsize;	/* 4 size of the framebuffers		*/
 	uint32_t framedur;	/* 4 standard frame duration		*/
@@ -2679,30 +2681,45 @@ static inline uint8_t _u8clip(int a)
 
 static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	const uint16_t cmd = be16_to_cpu(*(uint16_t *)(src + 2));
 	uint32_t *pal = ctx->rt.palette;
+	int16_t *sp = ctx->rt.shiftpal;
 	int16_t *dp = ctx->rt.deltapal;
 	int i, j, t2[3];
+	uint16_t cmd;
 
+	if (size < 4)
+		return;
+
+	cmd = be16_to_cpu(*(uint16_t *)(src + 2));
 	src += 4;
 
-	/* cmd1: apply delta */
-	if (cmd == 1) {
+	if (cmd == 0 || cmd == 2) {
+		if (cmd == 2) {
+			if (size < (768 * 3 + 4))
+				return;
+			read_palette(ctx, src + (768 * 2));
+		}
+		if (size < (768 * 2 + 4))
+			return;
+
 		for (i = 0; i < 768; i += 3) {
-			t2[0] = (*pal >>  0) & 0xff;
-			t2[1] = (*pal >>  8) & 0xff;
-			t2[2] = (*pal >> 16) & 0xff;
+			dp[i + 0] = le16_to_cpu(*(int16_t *)(src + 0));
+			dp[i + 1] = le16_to_cpu(*(int16_t *)(src + 2));
+			dp[i + 2] = le16_to_cpu(*(int16_t *)(src + 4));
+			src += 6;
+			sp[i + 0] = ((*pal >>  0) & 0xff) << 7;
+			sp[i + 1] = ((*pal >>  8) & 0xff) << 7;
+			sp[i + 2] = ((*pal >> 16) & 0xff) << 7;
+			pal++;
+		}
+	} else {
+		for (i = 0; i < 768; i += 3) {
 			for (j = 0; j < 3; j++) {
-				int cl = (t2[j] * 129) + le16_to_cpu(*dp++);
-				t2[j] = _u8clip(cl / 128) & 0xff;
+				sp[i + j] += dp[i + j];
+				t2[j] = _u8clip(sp[i + j] >> 7);
 			}
 			*pal++ = 0xff << 24 | t2[2] << 16 | t2[1] << 8 | t2[0];
 		}
-	/* cmd0/2: read deltapal values/+new palette */
-	} else if (cmd == 0 || cmd == 2) {
-		memcpy(ctx->rt.deltapal, src, 768 * 2);
-		if (size > (768 * 2 + 4))	/* cmd 2 */
-			read_palette(ctx, src + (768 * 2));
 	}
 }
 
@@ -4016,6 +4033,7 @@ static int sandec_alloc_memories(struct sanctx *ctx, const uint16_t maxx,
 		rt->iactbuf = (uint8_t *)m;	m += SZ_IACT;
 		rt->palette = (uint32_t *)m; 	m += SZ_PAL;
 		rt->deltapal = (int16_t *)m;	m += SZ_DELTAPAL;
+		rt->shiftpal = (int16_t *)m;	m += SZ_SHIFTPAL;
 		rt->c47ipoltbl = (uint8_t *)m;	m += SZ_C47IPTBL;
 		rt->atmpbuf1 = (uint8_t *)m;	m += SZ_AUDTMPBUF1;
 
