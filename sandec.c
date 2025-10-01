@@ -1716,24 +1716,28 @@ static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, const uint16
 	const uint16_t pitch = ctx->rt.pitch;
 	int hh = h, ww = w;
 
-	if (((left + w) < 0) || (left >= ctx->rt.bufw) || ((top + h) < 0) || (top >= ctx->rt.bufh))
-	    return;
+	if (((left + w) < 0) || (left >= ctx->rt.bufw) || ((top + h) < 0) || (top >= ctx->rt.bufh)
+            || (w < 1) || (h < 1))
+		return;
 
-	if ((left == 0) && (top == 0) && (w == pitch)) {
-		int hm = _min(h, ctx->rt.bufh);
+	if (top < 0) {
+		if (size < (-top * w))
+			return;
+		src += (-top) * w;
+		size -= (-top) * w;
+		hh += top;
+		top = 0;
+		if (hh < 1)
+			return;
+	}
+
+	if ((left == 0) && (w == pitch)) {
+		int lines = ctx->rt.bufh - top;		/* drawable height left */
+		int hm = _min(hh, lines);
 		hm *= w;
-		if (size < hm)
-			hm = size;
-		memcpy(dst, src, hm);
+		hm = (size < hm) ? size : hm;
+		memcpy(dst + (top * pitch), src, hm);
 	} else {
-		if (top < 0) {
-			if (size < (-top * w))
-				return;
-			src += (-top) * w;
-			size -= (-top) * w;
-			hh += top;
-			top = 0;
-		}
 		if ((top + hh) >= ctx->rt.bufh) {
 			hh = ctx->rt.bufh - top;
 			if (hh >= ctx->rt.bufh)
@@ -1754,9 +1758,7 @@ static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, const uint16
 		}
 		if ((ww > 0) && (hh > 0)) {
 			dst += left + (top * pitch);
-			while (hh--) {
-				if (size < ww)
-					return;
+			while (hh-- && (size >= ww)) {
 				size -= ww;
 				memcpy(dst, src, ww);
 				dst += pitch;	/* dstpitch */
