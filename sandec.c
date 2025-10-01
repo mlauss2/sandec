@@ -765,7 +765,7 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 		t[0] = *src++;
 		t[1] = *src++;
 		t[2] = *src++;
-		*pal++ = 0xff << 24 | t[2] << 16 | t[1] << 8 | t[0];
+		*pal++ = 0xffU << 24 | t[2] << 16 | t[1] << 8 | t[0];
 		i++;
 	}
 	/* HACK: (not sure though if really a hack): palette index 0
@@ -773,7 +773,7 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 	 * white/gray/.. space backgrounds, at least until the next NPAL.
 	 */
 	if (rt->version < 2)
-		rt->palette[0] = 0xff << 24;
+		rt->palette[0] = 0xffU << 24;
 }
 
 static void interpolate_frame(uint8_t *dst, const uint8_t *sr1, const uint8_t *srs,
@@ -2719,7 +2719,7 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 				sp[i + j] += dp[i + j];
 				t2[j] = _u8clip(sp[i + j] >> 7);
 			}
-			*pal++ = 0xff << 24 | t2[2] << 16 | t2[1] << 8 | t2[0];
+			*pal++ = 0xffU << 24 | t2[2] << 16 | t2[1] << 8 | t2[0];
 		}
 	}
 }
