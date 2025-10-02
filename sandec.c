@@ -2252,15 +2252,9 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 						fbuf += rt->pitch;
 					}
 				} else {
-					/* no upscaling, just copying */
-					int i, k, l;
-					k = _min(rt->bufh - top, h);
-					l = _min(rt->bufw - left, w);
-					for (i = 0; i < k; i++) {
-						uint8_t *dst2 = rt->fbuf + ((top + i) * rt->pitch) + left;
-						const uint8_t *src2 = dst + (i * w);
-						memcpy(dst2, src2, l);
-					}
+					/* no scaling, just copy onto larger image */
+					codec20(ctx, rt->fbuf, dst, w, h, top, left, w * h);
+					rt->vbuf = rt->fbuf;
 				}
 			}
 		}
