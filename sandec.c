@@ -1491,18 +1491,18 @@ static uint8_t* codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 
 /******************************************************************************/
 
-static void codec45(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, uint16_t h,
+static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w, uint16_t h,
 		    int16_t top, int16_t left, uint16_t size, uint8_t param,
 		    uint16_t param2)
 {
-	uint8_t *tbl1 = ctx->c45tbl1, *tbl2 = ctx->c45tbl2;
+	uint8_t *tbl1 = ctx->c45tbl1, *tbl2 = ctx->c45tbl2, *dst;
 	const uint16_t pitch = ctx->rt.pitch;
-	uint16_t t1, c1, c2, w1, w2, w3;
+	unsigned int t1, c1, c2, w1, w2, w3;
 	int32_t xoff, yoff;
-	int i, b1, b2, xd, xsize, ysize;
+	int i, b1, b2, xd;
 
 	/* RA2 32b00 */
-	if ((size < 5) || (src[4] != 1))
+	if ((size < 6) || (src[4] != 1))
 		return;
 
 	t1 = *(uint16_t *)(src + 2);
@@ -1519,33 +1519,29 @@ static void codec45(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w, 
 			i += b2;
 			size -= 2;
 		}
+	} else {
+		src += 6;
+		size -= 6;
 	}
-	if (!dst)
+	if (!dst_in)
 		return;
 
-	xoff = w;
-	dst += w;			// 52400 EBX = width
-	xoff -= left;
-	yoff = h;			// ECX = height
-	dst += (yoff * pitch); 		// 5240d - 52421
-	yoff -= top;			// 52423
-	xsize = ctx->rt.frmw - left;	// 52429 - 5242f
-	ysize = ctx->rt.frmh - top;	// 52434 - 5243a
+	xoff = left;
+	yoff = top;
 
 	while (size > 3) {
 		xd = le16_to_cpu(*(int16_t *)(src + 0));
 		src += 2;		// 52461
 		xoff += xd;		// 52467
-		dst += xd;		// 52469
 		b1 = *src++;		// 5246d - 5246f
 		yoff += b1;		// 52470
-		dst += b1 * pitch;	// 52472 - 52482
 		b2 = *src++;		// 486-488  EBP
 		do {
-			if (xoff >=0 && yoff >= 0 && xoff < xsize) {
-				if (yoff >= ysize)
+			if (xoff >=0 && yoff >= 0 && xoff < ctx->rt.frmw) {
+				if (yoff >= ctx->rt.frmh)
 					return;
 
+				dst = dst_in + xoff + (yoff * pitch);
 				c1 = *(dst - 1) * 3; /* 0 - 765 */
 				c2 = *(dst + 1) * 3;
 				w1 = *(tbl1 + c1 + 0) + *(tbl1 + c2 + 0);
