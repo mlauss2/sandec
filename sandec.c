@@ -1711,30 +1711,30 @@ static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 }
 
 static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, const uint16_t w,
-		    const uint16_t h, int16_t top, int16_t left, uint32_t size)
+		    const uint16_t h, int16_t top, int16_t left, uint32_t size_in, uint16_t srcstride)
 {
 	const uint16_t pitch = ctx->rt.pitch;
-	int hh = h, ww = w;
+	int hh = h, ww = w, size = size_in;
 
 	if (((left + w) < 0) || (left >= ctx->rt.bufw) || ((top + h) < 0) || (top >= ctx->rt.bufh)
             || (w < 1) || (h < 1))
 		return;
 
 	if (top < 0) {
-		if (size < (-top * w))
+		if (size < (-top * srcstride))
 			return;
-		src += (-top) * w;
-		size -= (-top) * w;
+		src += (-top) * srcstride;
+		size -= (-top) * srcstride;
 		hh += top;
 		top = 0;
 		if (hh < 1)
 			return;
 	}
 
-	if ((left == 0) && (w == pitch)) {
+	if ((left == 0) && (w == pitch) && (pitch == srcstride)) {
 		int lines = ctx->rt.bufh - top;		/* drawable height left */
 		int hm = _min(hh, lines);
-		hm *= w;
+		hm *= srcstride;
 		hm = (size < hm) ? size : hm;
 		memcpy(dst + (top * pitch), src, hm);
 	} else {
@@ -1759,10 +1759,10 @@ static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, const uint16
 		if ((ww > 0) && (hh > 0)) {
 			dst += left + (top * pitch);
 			while (hh-- && (size >= ww)) {
-				size -= ww;
 				memcpy(dst, src, ww);
-				dst += pitch;	/* dstpitch */
-				src += w;	/* srcpitch */
+				dst += pitch;		/* dstpitch */
+				src += srcstride;	/* srcpitch */
+				size -= srcstride;
 			}
 		}
 	}
@@ -2184,7 +2184,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 	case 2:   codec2(ctx, dst, src, w, h, top, left, size, param, param2); break;
 	case 4:
 	case 5:   codec4(ctx, dst, src, w, h, top, left, size, param, param2, codec == 5); break;
-	case 20: codec20(ctx, dst, src, w, h, top, left, size); break;
+	case 20: codec20(ctx, dst, src, w, h, top, left, size, w); break;
 	case 44:
 	case 21: codec21(ctx, dst, src, w, h, top ,left, size, param); break;
 	case 23: codec23(ctx, dst, src, w, h, top, left, size, param, param2); break;
@@ -2253,7 +2253,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 					}
 				} else {
 					/* no scaling, just copy onto larger image */
-					codec20(ctx, rt->fbuf, dst, w, h, top, left, w * h);
+					codec20(ctx, rt->fbuf, dst, w, h, top, left, w * h, w);
 					rt->vbuf = rt->fbuf;
 				}
 			}
