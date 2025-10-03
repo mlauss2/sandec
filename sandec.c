@@ -1226,13 +1226,20 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	flag =	src[12];
 	/* known flag values:
 	 * 0x01: skip decoding of comp3 if sequence number is odd and 0x10 is not set.
-	 * 0x02: if set: copy result line by line, stop a line when a certain color is found.
+	 *       used in MM only.
+	 * 0x02: if set: copy result line by line, skip a custom color (0).
 	 *       this is only used in "Making Magic"; in MotS setting this bit does not
-	 *       blit the result to the front buffer (i.e. previous frame is kept).
+	 *       blit the result to the front buffer (i.e. previous frame is kept), but
+	 *       not used in any MotS videos.
+	 * 0x04: unknown, always set, never checked for in MM or MotS.
 	 * 0x08: interpolation table data (0x8080 bytes) follows after the header.
 	 * 0x10: interpolate a frame using the 2 buffers and interpolation table, i.e.
 	 *        do not blit the current main buffer to destination, but rather create
-	 *        an intermediate frame using the interpolation table.  Seems to be unused.
+	 *        an intermediate frame using the interpolation table. Used in MM.
+	 *       The next frame then is compression 6, i.e. blits the actual decoding
+	 *        result to main buffer.
+	 * 0x20: unknown, checked in error path in MM
+	 * 0x30: unknonw, same as 0x20 but checked for MotS error path.
 	 */
 
 	if (decsize > ctx->rt.fbsize)
@@ -1241,8 +1248,7 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 		pktsize = ctx->rt.fbsize;
 
 	if (seq == 0) {
-		ctx->rt.lastseq = -1;
-		memset(ctx->rt.buf0, 0, decsize);
+		/* keep buf0 for comp == 6 */
 		memset(ctx->rt.buf2, 0, decsize);
 	}
 
@@ -1263,7 +1269,14 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 		memcpy(dst, src, pktsize);
 		break;
 	case 2: codec47_comp5(src, size, dst, decsize); break;
-	case 3: codec48_comp3(src, dst, ctx->rt.buf2, ctx->rt.c47ipoltbl, w, h); break;
+	case 3: if ((seq == 0) || (seq == ctx->rt.lastseq + 1)) {
+			if ((seq & 1) || ((flag & 1) == 0) || (flag & 0x10)) {
+				c47_swap_bufs(ctx, 1);	/* swap 0 and 2 */
+				dst = ctx->rt.buf0;
+			}
+			codec48_comp3(src, dst, ctx->rt.buf2, ctx->rt.c47ipoltbl, w, h);
+		}
+		break;
 	case 5: if (size < ((w * h) / 4))
 			return (uint8_t *)(-83);
 		codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h);
@@ -1272,12 +1285,21 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 		return dst;
 	}
 
-	if (seq > 1)
+	if (seq > 0)
 		ctx->rt.can_ipol = 1;
 	ctx->rt.lastseq = seq;
-	c47_swap_bufs(ctx, 1);	/* swap 0 and 2 */
 
-	return dst;	/* return our front buffer */
+	if ((flag & 2) == 0) {
+		if (flag & 0x10) {
+			interpolate_frame(ctx->rt.buf5, ctx->rt.buf0, ctx->rt.buf2,
+					  ctx->rt.c47ipoltbl, w, h);
+			dst = ctx->rt.buf5;
+		}
+	} else {
+		/* TODO: mask-blit, ignore color 0 when blitting */
+	}
+
+	return dst;
 }
 
 /******************************************************************************/
