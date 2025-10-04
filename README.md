@@ -54,8 +54,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
 # What does not work:
 - Mortimer and the Riddles of the Medallion
   - Most videos play, but issues with transparency and objects with only half width/height.
-- Star Wars: Making Magic
-  - lots of artifacts in the codec48 videos.
 - Audio
   - RA1/RA2 background music does not loop.
   - RA1 player speech is both genders simultaneously: the game engine filtered them using the SKIP chunks, which are not implemented (yet).
@@ -71,4 +69,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -s: no audio (silent)
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-20250814
+20251004

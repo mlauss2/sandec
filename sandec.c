@@ -1354,8 +1354,8 @@ static void codec48_comp3(uint8_t *src, uint8_t *dst, uint8_t *db,
 	}
 }
 
-static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
-		    int16_t top, int16_t left, uint32_t size)
+static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
+		   uint16_t h, int16_t top, int16_t left, uint32_t size)
 {
 	uint32_t pktsize, decsize;
 	uint8_t comp, flag, *dst;
@@ -1444,15 +1444,16 @@ static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
 
 	if ((flag & 2) == 0) {
 		if (flag & 0x10) {
-			blt_ipol(ctx->rt.fbuf, ctx->rt.buf0, ctx->rt.buf2, left, top,
+			blt_ipol(dbuf, ctx->rt.buf0, ctx->rt.buf2, left, top,
 				 0, 0, w, h, w, ctx->rt.pitch, ctx->rt.bufh, w * h,
 				 ctx->rt.c47ipoltbl);
+			ctx->rt.can_ipol = 0;
 			return 0;
 		}
-		blt_solid(ctx->rt.fbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
+		blt_solid(dbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
 			  ctx->rt.bufh, w * h);
 	} else {
-		blt_mask(ctx->rt.fbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
+		blt_mask(dbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
 			 ctx->rt.bufh, w * h, 0);
 	}
 
@@ -1616,19 +1617,20 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 	}
 }
 
-static uint8_t* codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint32_t size)
+static int codec37(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
+		   uint16_t h, int16_t top, int16_t left, uint32_t size)
 {
 	uint8_t comp, mvidx, flag, *dst, *db;
 	uint32_t decsize;
 	uint16_t seq;
 
 	if (size < 16)
-		return (uint8_t *)(-70);
+		return -70;
 
 	comp = src[0];
 	mvidx = src[1];
 	if (mvidx > 2)
-		return (uint8_t *)(-21);
+		return -21;
 	seq = le16_to_cpu(*(uint16_t *)(src + 2));
 	decsize = le32_to_cpu(ua32(src + 4));
 	flag = src[12];
@@ -1652,10 +1654,7 @@ static uint8_t* codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	db = ctx->rt.buf2;
 
 	switch (comp) {
-	case 0: if (size < decsize)
-			return (uint8_t *)(-71);
-		memcpy(dst, src, decsize);
-		break;
+	case 0: memcpy(dst, src, _min(size, decsize)); break;
 	case 1: codec37_comp1(src, size, dst, db, w, h, mvidx); break;
 	case 2: codec47_comp5(src, size, dst, decsize); break;
 	case 3: /* fallthrough */
@@ -1665,7 +1664,15 @@ static uint8_t* codec37(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 
 	ctx->rt.lastseq = seq;
 
-	return dst;
+	if ((flag & 2) == 0) {
+		blt_solid(dbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
+			  ctx->rt.bufh, w * h);
+	} else {
+		blt_mask(dbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
+			 ctx->rt.bufh, w * h, 0);
+	}
+
+	return 0;
 }
 
 /******************************************************************************/
@@ -2322,14 +2329,14 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 	case 33:
 	case 34: codec33(ctx, dst, src, w, h, top, left, size, param, param2, codec == 34); break;
 	case 45: codec45(ctx, dst, src, w, h, top, left, size, param, param2); break;
-	case 37: dst = codec37(ctx, src, w, h, size); break;
+	case 37: ret = codec37(ctx, dst, src, w, h, top, left, size); break;
 	case 47: dst = codec47(ctx, src, w, h, size); break;
-	case 48: ret = codec48(ctx, src, w, h, top, left, size); break;
+	case 48: ret = codec48(ctx, dst, src, w, h, top, left, size); break;
 	default: ret = 18;
 	}
 
 	/* dst is negative in case there was an error with codec37/47/48 */
-	if ((fsc) && (codec != 48) && ((intptr_t)(dst) < 0))
+	if ((codec == 47) && ((intptr_t)(dst) < 0))
 		ret = -((int)(intptr_t)dst);
 
 	if (ret == 0) {
@@ -2343,51 +2350,9 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 				return ret;
 		}
 
-		/* handle full-screen codec images composed onto existing images */
-		if ((fsc) && (codec != 48)) {
-			if ((rt->bufw == w) && (rt->bufh == h)) {
-				/* canvas has same size as decoded image.  If this is a
-				 * codec47/48 video, we display the result buffer
-				 * immediately; for codec37 we need to copy it to
-				 * the front buffer for further modifications by other
-				 * FOBJs (RA2, FT, Dig).
-				 */
-				if (codec != 37)
-					rt->vbuf = dst;
-				else
-					memcpy(rt->fbuf, dst, w * h);
-			} else {
-				/* canvas is larger than the decoded image. copy the
-				 * visible parts onto the canvas at left/top offsets.
-				 */
-				if ((left == 0) && (top == 0) && (codec == 37) &&
-				    (w * 2 == rt->bufw) && (h * 2 == rt->bufh)) {
-					/* This is "Mortimer and the Riddle of
-					 *  the Medallion", which requires some
-					 * codec37 images to be scaled by 2 in
-					 * both directions.
-					 */
-					int i, j;
-					uint8_t *fbuf = rt->fbuf;
-					for (i = 0; i < h; i++) {
-						for (j = 0; j < w; j++) {
-							*(fbuf + 0) = *dst;
-							*(fbuf + 1) = *dst;
-							*(fbuf + rt->pitch + 0) = *dst;
-							*(fbuf + rt->pitch + 1) = *dst;
-							dst++;
-							fbuf += 2;
-						}
-						fbuf += rt->pitch;
-					}
-				} else {
-					/* no scaling, just copy onto larger image */
-					blt_solid(rt->fbuf, dst, left, top, 0, 0, w, h, w, rt->pitch, rt->frmh, w * h);
-					rt->vbuf = rt->fbuf;
-				}
-			}
-		}
-
+		if (codec == 47)
+			rt->vbuf = dst;
+			
 		ctx->rt.have_frame = 1;
 
 		/* RA1 has a 384x242 internal window, but presents at 320x200.
