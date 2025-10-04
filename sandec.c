@@ -1126,14 +1126,14 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 	ctx->rt.have_itable = 1;
 }
 
-static uint8_t* codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint32_t size)
+static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, uint16_t h, uint32_t size)
 {
 	uint8_t *coltbl, comp, newrot, flag, *dst;
 	uint32_t decsize;
 	uint16_t seq;
 
 	if (size < 26)
-		return (uint8_t *)(-60);
+		return -60;
 
 	seq =    le16_to_cpu(*(uint16_t *)(src + 0));
 	comp =   src[2];
@@ -1153,7 +1153,7 @@ static uint8_t* codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	size -= 26;
 	if (flag & 1) {
 		if (size < 0x8080)
-			return (uint8_t *)(-61);
+			return -61;
 		codec47_itable(ctx, src);
 		src += 0x8080;
 		size -= 0x8080;
@@ -1162,11 +1162,11 @@ static uint8_t* codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0:	if (size < w * h)
-			return (uint8_t *)(-62);
+			return -62;
 		memcpy(dst, src, w * h);
 		break;
 	case 1:	if (size < ((w * h) / 4))
-			return (uint8_t *)(-63);
+			return -63;
 		codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h);
 		break;
 	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
@@ -1179,6 +1179,8 @@ static uint8_t* codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	default: break;
 	}
 
+	blt_solid(dbuf, dst, 0, 0, 0, 0, w, h, w, ctx->rt.pitch, ctx->rt.bufh, w * h);
+
 	if (seq == ctx->rt.lastseq + 1)
 		c47_swap_bufs(ctx, newrot);
 
@@ -1186,7 +1188,7 @@ static uint8_t* codec47(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	if (seq > 1)
 		ctx->rt.can_ipol = 1;
 
-	return dst;	/* return our front buffer */
+	return 0;
 }
 
 /******************************************************************************/
@@ -2273,17 +2275,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 		}
 	}
 
-	/* for codecs 1-34,44: default write to the front buffer */
-	dst = rt->fbuf;
-	rt->vbuf = dst;
-
-	/* When it's the very first FOBJ in a FRME, and it's not one of the
-	 * full-frame codecs, the frontbuffer needs to be cleared first.
-	 */
-	if (!rt->have_frame && rt->fbsize && !fsc) {
-		memset(dst, 0, rt->fbsize);
-	}
-
 	if (rt->to_store == 2 || (rt->to_store != 0 && fsc)) {
 		/* decode the image and change it to a FOBJ with codec20.
 		 * Used sometimes in RA1 only; RA2+ had this feature removed.
@@ -2295,17 +2286,40 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 		memcpy(rt->buf3 + 4, src, 14);		/* FOBJ header		*/
 		*( uint8_t *)(rt->buf3 + 4) = 20;	/* set to codec20	*/
 		dst = rt->buf3 + 4 + 14;		/* write image data here*/
-	} else if (rt->to_store == 1) {
-		/* copy the FOBJ whole (all SAN versions), and render it normally
-		 * to the default front buffer.
-		 */
-		rt->to_store = 0;
-		if (size <= rt->fbsize) {
-			*(uint32_t *)rt->buf3 = size;
-			memcpy(rt->buf3 + 4, src, size);
-		} else {
-			return 26;		/* STOR buffer too small! */
+		if (fsc) {
+			/* for "Making Magic": copy the existing image too,
+			 * change the codec20 to full buffer size
+			 */
+			memcpy(dst, rt->fbuf, rt->fbsize);
+			*( uint16_t *)(rt->buf3 +  6) = 0;		/* left   */
+			*( uint16_t *)(rt->buf3 +  8) = 0;		/* top    */
+			*( uint16_t *)(rt->buf3 + 10) = rt->bufw;	/* width  */
+			*( uint16_t *)(rt->buf3 + 12) = rt->bufh;	/* height */
 		}
+	} else {
+		/* for codecs 1-34,44: default write to the front buffer */
+		dst = rt->fbuf;
+		rt->vbuf = dst;
+
+		if (rt->to_store == 1) {
+			/* copy the FOBJ whole (all SAN versions), and render it normally
+			 * to the default front buffer.
+			 */
+			rt->to_store = 0;
+			if (size <= rt->fbsize) {
+				*(uint32_t *)rt->buf3 = size;
+				memcpy(rt->buf3 + 4, src, size);
+			} else {
+				return 26;		/* STOR buffer too small! */
+			}
+		}
+	}
+
+	/* When it's the very first FOBJ in a FRME, and it's not one of the
+	 * full-frame codecs, the frontbuffer needs to be cleared first.
+	 */
+	if (!rt->have_frame && rt->fbsize && !fsc) {
+		memset(dst, 0, rt->fbsize);
 	}
 
 	src += 14;
@@ -2330,14 +2344,10 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 	case 34: codec33(ctx, dst, src, w, h, top, left, size, param, param2, codec == 34); break;
 	case 45: codec45(ctx, dst, src, w, h, top, left, size, param, param2); break;
 	case 37: ret = codec37(ctx, dst, src, w, h, top, left, size); break;
-	case 47: dst = codec47(ctx, src, w, h, size); break;
+	case 47: ret = codec47(ctx, dst, src, w, h, size); break;
 	case 48: ret = codec48(ctx, dst, src, w, h, top, left, size); break;
 	default: ret = 18;
 	}
-
-	/* dst is negative in case there was an error with codec37/47/48 */
-	if ((codec == 47) && ((intptr_t)(dst) < 0))
-		ret = -((int)(intptr_t)dst);
 
 	if (ret == 0) {
 		/* the decoding-STOR was done, but we still need to put the image
@@ -2350,9 +2360,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 				return ret;
 		}
 
-		if (codec == 47)
-			rt->vbuf = dst;
-			
 		ctx->rt.have_frame = 1;
 
 		/* RA1 has a 384x242 internal window, but presents at 320x200.
@@ -3944,7 +3951,7 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	ret = 0;
 	sz = *(uint32_t *)(vb + 0);
-	if (sz > 0 && sz < ctx->rt.fbsize) {
+	if (sz > 0 && sz <= ctx->rt.fbsize) {
 		ret = handle_FOBJ(ctx, sz, vb + 4, xoff, yoff);
 	}
 	ctx->rt.can_ipol = 0;
