@@ -730,6 +730,158 @@ static void c4_5_param2(struct sanctx *ctx, uint8_t *src, uint16_t cnt,
 
 /******************************************************************************/
 
+static void blt_solid(uint8_t *dst, uint8_t *src, int16_t left, int16_t top,
+		      uint16_t srcxoff, uint16_t srcyoff, uint16_t srcwidth,
+		      uint16_t srcheight, uint16_t srcpitch, uint16_t dstpitch,
+		      uint16_t dstheight, int32_t size)
+{
+	if ((srcwidth == 0) || (srcheight == 0) || (size < 1))
+		return;
+	if (top < 0) {
+		if (-top >= srcheight)
+			return;
+		srcyoff -= top;
+		srcheight += top;
+		top = 0;
+		size -= (srcpitch * -top);
+	}
+
+	if ((top + srcheight) > dstheight) {
+		int clip = (top + srcheight) - dstheight;
+		if (clip >= srcheight)
+			return;
+		srcheight -= clip;
+	}
+
+	if (left < 0) {
+		if (-left >= srcwidth)
+			return;
+		srcxoff -= left;
+		srcwidth += left;
+		size += left;
+		left = 0;
+	}
+
+	if (left + srcwidth > dstpitch) {
+		int clip = (left + srcwidth) - dstpitch;
+		if (clip >= srcwidth)
+			return;
+		srcwidth -= clip;
+	}
+	src += ((uintptr_t)srcyoff * srcpitch) + srcxoff;
+	dst += ((uintptr_t)top * dstpitch) + left;
+	while ((srcheight--) && (size >= srcwidth)) {
+		memcpy(dst, src, srcwidth);
+		src += srcpitch;
+		dst += dstpitch;
+		size -= srcpitch;
+	}
+	if ((size > 0) && (size < srcwidth) && (srcheight > 0))
+		memcpy(dst, src, size);
+}
+
+static void blt_mask(uint8_t *dst, uint8_t *src, int16_t left, int16_t top,
+		     uint16_t srcxoff, uint16_t srcyoff, uint16_t srcwidth,
+		     uint16_t srcheight, uint16_t srcpitch, uint16_t dstpitch,
+		     uint16_t dstheight, int32_t size, uint8_t skipcolor)
+{
+	if ((srcwidth == 0) || (srcheight == 0) || (size < 1))
+		return;
+	if (top < 0) {
+		if (-top >= srcheight)
+			return;
+		srcyoff -= top;
+		srcheight += top;
+		top = 0;
+		size -= (srcpitch * -top);
+	}
+
+	if ((top + srcheight) > dstheight) {
+		int clip = (top + srcheight) - dstheight;
+		if (clip >= srcheight)
+			return;
+		srcheight -= clip;
+	}
+
+	if (left < 0) {
+		if (-left >= srcwidth)
+			return;
+		srcxoff -= left;
+		srcwidth += left;
+		size += left;
+		left = 0;
+	}
+
+	if (left + srcwidth > dstpitch) {
+		int clip = (left + srcwidth) - dstpitch;
+		if (clip >= srcwidth)
+			return;
+		srcwidth -= clip;
+	}
+	src += ((uintptr_t)srcyoff * srcpitch) + srcxoff;
+	dst += ((uintptr_t)top * dstpitch) + left;
+	for (int i = 0; (size > 0) && (i < srcheight); i++) {
+		for (int j = 0; (size > 0) && (j < srcwidth); j++, size--) {
+			if (src[j] != skipcolor)
+				dst[j] = src[j];
+			src += srcpitch;
+			dst += dstpitch;
+		}
+	}
+}
+
+static void blt_ipol(uint8_t *dst, uint8_t *src1, uint8_t *src2, int16_t left,
+		     int16_t top, uint16_t srcxoff, uint16_t srcyoff,
+		     uint16_t srcwidth, uint16_t srcheight, uint16_t srcpitch,
+		     uint16_t dstpitch, uint16_t dstheight, int32_t size,
+		     uint8_t *itbl)
+{
+	if ((srcwidth == 0) || (srcheight == 0) || (size < 1))
+		return;
+	if (top < 0) {
+		if (-top >= srcheight)
+			return;
+		srcyoff -= top;
+		srcheight += top;
+		top = 0;
+		size -= (srcpitch * -top);
+	}
+
+	if ((top + srcheight) > dstheight) {
+		int clip = (top + srcheight) - dstheight;
+		if (clip >= srcheight)
+			return;
+		srcheight -= clip;
+	}
+
+	if (left < 0) {
+		if (-left >= srcwidth)
+			return;
+		srcxoff -= left;
+		srcwidth += left;
+		size += left;
+		left = 0;
+	}
+
+	if (left + srcwidth > dstpitch) {
+		int clip = (left + srcwidth) - dstpitch;
+		if (clip >= srcwidth)
+			return;
+		srcwidth -= clip;
+	}
+	src1 += ((uintptr_t)srcyoff * srcpitch) + srcxoff;
+	src2 += ((uintptr_t)srcyoff * srcpitch) + srcxoff;
+	dst += ((uintptr_t)top * dstpitch) + left;
+	for (int i = 0; (size > 0) && (i < srcheight); i++) {
+		for (int j = 0; (size > 0) && (j < srcwidth); j++, size--) {
+			dst[j] = itbl[(src1[j] << 8) | src2[j]];
+		}
+		src1 += srcpitch;
+		src2 += srcpitch;
+		dst += dstpitch;
+	}
+}
+
 /* allocate memory for a full FRME */
 static int allocfrme(struct sanctx *ctx, uint32_t sz)
 {
@@ -1202,18 +1354,19 @@ static void codec48_comp3(uint8_t *src, uint8_t *dst, uint8_t *db,
 	}
 }
 
-static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h, uint32_t size)
+static int codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h,
+		    int16_t top, int16_t left, uint32_t size)
 {
 	uint32_t pktsize, decsize;
 	uint8_t comp, flag, *dst;
 	uint16_t seq;
 
 	if (size < 16)
-		return (uint8_t *)(-80);
+		return -80;
 
 	comp =	src[0];		/* subcodec */
 	if (src[1] != 1)	/* mvec table variant, always 1 with MotS */
-		return (uint8_t *)-22;
+		return -22;
 
 	seq = le16_to_cpu(*(uint16_t*)(src + 2));
 
@@ -1256,7 +1409,7 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	size -= 16;
 	if (flag & 8) {
 		if (size < 0x8080)
-			return (uint8_t *)(-81);
+			return -81;
 		codec47_itable(ctx, src);
 		src += 0x8080;
 		size -= 0x8080;
@@ -1265,7 +1418,7 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0:	if (size < pktsize)
-			return (uint8_t *)(-82);
+			return -82;
 		memcpy(dst, src, pktsize);
 		break;
 	case 2: codec47_comp5(src, size, dst, decsize); break;
@@ -1278,11 +1431,11 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 		}
 		break;
 	case 5: if (size < ((w * h) / 4))
-			return (uint8_t *)(-83);
+			return -83;
 		codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h);
 		break;
 	default:
-		return dst;
+		break;
 	}
 
 	if (seq > 0)
@@ -1291,15 +1444,19 @@ static uint8_t* codec48(struct sanctx *ctx, uint8_t *src, uint16_t w, uint16_t h
 
 	if ((flag & 2) == 0) {
 		if (flag & 0x10) {
-			interpolate_frame(ctx->rt.buf5, ctx->rt.buf0, ctx->rt.buf2,
-					  ctx->rt.c47ipoltbl, w, h);
-			dst = ctx->rt.buf5;
+			blt_ipol(ctx->rt.fbuf, ctx->rt.buf0, ctx->rt.buf2, left, top,
+				 0, 0, w, h, w, ctx->rt.pitch, ctx->rt.bufh, w * h,
+				 ctx->rt.c47ipoltbl);
+			return 0;
 		}
+		blt_solid(ctx->rt.fbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
+			  ctx->rt.bufh, w * h);
 	} else {
-		/* TODO: mask-blit, ignore color 0 when blitting */
+		blt_mask(ctx->rt.fbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
+			 ctx->rt.bufh, w * h, 0);
 	}
 
-	return dst;
+	return 0;
 }
 
 /******************************************************************************/
@@ -1729,61 +1886,15 @@ static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 }
 
 static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, const uint16_t w,
-		    const uint16_t h, int16_t top, int16_t left, uint32_t size_in, uint16_t srcstride)
+		    const uint16_t h, int16_t top, int16_t left, uint32_t size,
+		    uint16_t srcstride)
 {
-	const uint16_t pitch = ctx->rt.pitch;
-	int hh = h, ww = w, size = size_in;
-
-	if (((left + w) < 0) || (left >= ctx->rt.bufw) || ((top + h) < 0) || (top >= ctx->rt.bufh)
-            || (w < 1) || (h < 1))
+	if (((left + w) < 0) || (left >= ctx->rt.bufw) || ((top + h) < 0)
+	    || (top >= ctx->rt.bufh) || (w < 1) || (h < 1))
 		return;
 
-	if (top < 0) {
-		if (size < (-top * srcstride))
-			return;
-		src += (-top) * srcstride;
-		size -= (-top) * srcstride;
-		hh += top;
-		top = 0;
-		if (hh < 1)
-			return;
-	}
-
-	if ((left == 0) && (w == pitch) && (pitch == srcstride)) {
-		int lines = ctx->rt.bufh - top;		/* drawable height left */
-		int hm = _min(hh, lines);
-		hm *= srcstride;
-		hm = (size < hm) ? size : hm;
-		memcpy(dst + (top * pitch), src, hm);
-	} else {
-		if ((top + hh) >= ctx->rt.bufh) {
-			hh = ctx->rt.bufh - top;
-			if (hh >= ctx->rt.bufh)
-				hh = ctx->rt.bufh;
-		}
-		if (left < 0) {
-			if (size < -left)
-				return;
-			src += -left;
-			size -= -left;
-			ww += left;
-			left = 0;
-		}
-		if ((left + ww) >= ctx->rt.bufw) {
-			ww = ctx->rt.bufw - left;
-			if (ww >= ctx->rt.bufw)
-				ww = ctx->rt.bufw;
-		}
-		if ((ww > 0) && (hh > 0)) {
-			dst += left + (top * pitch);
-			while (hh-- && (size >= ww)) {
-				memcpy(dst, src, ww);
-				dst += pitch;		/* dstpitch */
-				src += srcstride;	/* srcpitch */
-				size -= srcstride;
-			}
-		}
-	}
+	blt_solid(dst, src, left, top, 0, 0, w, h, srcstride, ctx->rt.pitch,
+		  ctx->rt.frmh, size);
 }
 
 static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
@@ -2213,12 +2324,12 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 	case 45: codec45(ctx, dst, src, w, h, top, left, size, param, param2); break;
 	case 37: dst = codec37(ctx, src, w, h, size); break;
 	case 47: dst = codec47(ctx, src, w, h, size); break;
-	case 48: dst = codec48(ctx, src, w, h, size); break;
+	case 48: ret = codec48(ctx, src, w, h, top, left, size); break;
 	default: ret = 18;
 	}
 
 	/* dst is negative in case there was an error with codec37/47/48 */
-	if (fsc && ((intptr_t)(dst) < 0))
+	if ((fsc) && (codec != 48) && ((intptr_t)(dst) < 0))
 		ret = -((int)(intptr_t)dst);
 
 	if (ret == 0) {
@@ -2233,7 +2344,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 		}
 
 		/* handle full-screen codec images composed onto existing images */
-		if (fsc) {
+		if ((fsc) && (codec != 48)) {
 			if ((rt->bufw == w) && (rt->bufh == h)) {
 				/* canvas has same size as decoded image.  If this is a
 				 * codec47/48 video, we display the result buffer
@@ -2271,7 +2382,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 					}
 				} else {
 					/* no scaling, just copy onto larger image */
-					codec20(ctx, rt->fbuf, dst, w, h, top, left, w * h, w);
+					blt_solid(rt->fbuf, dst, left, top, 0, 0, w, h, w, rt->pitch, rt->frmh, w * h);
 					rt->vbuf = rt->fbuf;
 				}
 			}
