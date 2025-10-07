@@ -824,9 +824,9 @@ static void blt_mask(uint8_t *dst, uint8_t *src, int16_t left, int16_t top,
 		for (int j = 0; (size > 0) && (j < srcwidth); j++, size--) {
 			if (src[j] != skipcolor)
 				dst[j] = src[j];
-			src += srcpitch;
-			dst += dstpitch;
 		}
+		src += srcpitch;
+		dst += dstpitch;
 	}
 }
 
