@@ -2432,7 +2432,7 @@ static void bl16_comp7(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 		*(uint16_t *)(dst1 + 0) = c1;
 		*(uint16_t *)(dst1 + 2) = c1;
 		hw = (w - 1) >> 1;
-		while (hw--) {
+		while (--hw) {
 			c2 = le16_to_cpu(tbl2[*src++]);
 			*(uint16_t *)dst2 = bl16_c7_avg_col(c1, c2);
 			dst2 += 2;
@@ -2487,7 +2487,7 @@ static void bl16_comp1(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h)
 			dst2 = dst1 + 4;		/* 2 16bit pixels */
 			if (w - 2 > 0) {
 				hw = (w - 1) >> 1;
-				while (hw--) {
+				while (--hw) {
 					c2 = le16_to_cpu(*(uint16_t *)src);
 					src += 2;
 					*(uint16_t *)dst2 = bl16_c7_avg_col(c1, c2);
