@@ -33,6 +33,7 @@ struct playpriv {
 	int prevmult;
 	int sm;
 	int texsmooth;
+	int paused;
 };
 
 static const SDL_ScaleMode smodes[2] = { SDL_SCALEMODE_NEAREST, SDL_SCALEMODE_LINEAR };
@@ -186,6 +187,8 @@ static int render_frame(struct playpriv *p)
 		goto out;
 	}
 	SDL_RenderPresent(p->ren);
+	if (p->as && (p->paused == 0))
+		SDL_ResumeAudioStreamDevice(p->as);
 
 out:
 	return p->err;
@@ -235,7 +238,7 @@ static int init_sdl(struct playpriv *p)
 	as = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
 	p->as = as;
 	if (as)
-		SDL_ResumeAudioStreamDevice(as);
+		SDL_PauseAudioStreamDevice(as);
 
 	return 0;
 }
@@ -248,7 +251,7 @@ static int sio_read(void *ctx, void *dst, uint32_t size)
 
 int main(int a, char **argv)
 {
-	int ret, speedmode, fc, running, paused, parserdone, autopause, i, verbose;
+	int ret, speedmode, fc, running, parserdone, autopause, i, verbose;
 	int sdl_inited;
 	uint64_t t1, t2, ren, dec, ptick;
 	struct playpriv pp;
@@ -340,7 +343,7 @@ int main(int a, char **argv)
 		fc = sandec_get_framecount(sanctx);
 		pp.err = 0;
 		running = 1;
-		paused = 0;
+		pp.paused = 0;
 		ptick = 0;
 		parserdone = 0;
 		ren = 0;
@@ -368,13 +371,13 @@ int main(int a, char **argv)
 						break;
 
 					if (ke->scancode == SDL_SCANCODE_SPACE && speedmode < 1) {
-						if (paused && autopause) {
-							paused = 0;
+						if (pp.paused && autopause) {
+							pp.paused = 0;
 							autopause = 0;
 						} else
-							paused ^= 1;
+							pp.paused ^= 1;
 
-						if (!paused) {
+						if (!pp.paused) {
 							pp.next_disp_us += (SDL_GetTicks() - ptick) * 1000;
 							SDL_ResumeAudioStreamDevice(pp.as);
 						} else {
@@ -387,8 +390,8 @@ int main(int a, char **argv)
 							SDL_ClearAudioStream(pp.as);
 					} else if (ke->scancode == SDL_SCANCODE_PERIOD) {
 						autopause = 1;
-						if (paused) {
-							paused = 0;
+						if (pp.paused) {
+							pp.paused = 0;
 							pp.next_disp_us += (SDL_GetTicks() - ptick) * 1000;
 							SDL_ResumeAudioStreamDevice(pp.as);
 						}
@@ -422,7 +425,7 @@ int main(int a, char **argv)
 				}
 			}
 
-			if (!paused && ret == SANDEC_OK) {
+			if (!pp.paused && ret == SANDEC_OK) {
 
 				if (parserdone) {
 					if (speedmode) {
@@ -463,7 +466,7 @@ err:
 						fflush(stdout);
 					}
 					if (autopause) {
-						paused = 1;
+						pp.paused = 1;
 						if (pp.as)
 							SDL_PauseAudioStreamDevice(pp.as);
 						ptick = SDL_GetTicks();
