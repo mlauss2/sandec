@@ -1269,8 +1269,7 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 		for (i = 0; i < 8; i += 4) {
 			for (k = 0; k < 8; k += 4) {
 				opc = *src++;
-				if (opc == 255)
-					continue;	/* no mv for this one */
+				opc = (opc == 255) ? 0 : opc;
 				mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
 				for (j = 0; j < 4; j++) {
 					ofs = (w * (j + i)) + k;
@@ -1301,8 +1300,7 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 			for (j = 0; j < 8; j += 2) {			/* 4 */
 				ofs = (w * i) + j;
 				opc = *src++;
-				if (opc == 255)
-					continue;
+				opc = (opc == 255) ? 0 : opc;
 				mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
 				for (l = 0; l < 2; l++) {
 					*(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
@@ -1522,6 +1520,7 @@ static void codec37_comp1(uint8_t *src, uint32_t size, uint8_t *dst, uint8_t *db
 				}
 			}
 			/* 4x4 block copy from prev with MV */
+			opc = (opc == 255) ? 0 : opc;
 			mvofs = c37_mv[mvidx][opc*2] + (c37_mv[mvidx][opc*2 + 1] * w);
 			for (k = 0; k < 4; k++) {
 				ofs = j + (k * w);
@@ -1563,7 +1562,7 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 			opc = *src++;
 			size--;
 			if (opc == 0xff) {
-				/* 4x4 block, per-pixel data from source */
+				/* 1 4x4 block, per-pixel data from source */
 				if (size < 16)
 					return;
 				for (k = 0; k < 4; k++) {
@@ -1573,7 +1572,7 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 				}
 				size -= 16;
 			} else if (f4 && (opc == 0xfe)) {
-				/* 4x4 block, per-2x2 block color from source */
+				/* 4 2x2 blocks, per-block color from source */
 				if (size < 4)
 					return;
 				for (k = 0; k < 4; k += 2) {
@@ -1587,7 +1586,7 @@ static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, u
 				}
 				size -= 4;
 			} else if (f4 && (opc == 0xfd)) {
-				/* 4x4 block, per block color from source */
+				/* 1 4x4 block, block color from source */
 				if (size < 1)
 					return;
 				c = *src++;
@@ -1743,11 +1742,9 @@ static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 				*dst = *(tbl2 + ((((w1 << 5) & 0x7c00) + (w2 & 0x3e0) + (w3 >> 5)) & 0x7fff));
 			}
 			xoff++;
-			dst++;
 			b2--;
 		} while (b2 >= 0);
 		xoff--;
-		dst--;
 		size -= 4;
 	}
 }
