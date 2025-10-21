@@ -1126,7 +1126,8 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 	ctx->rt.have_itable = 1;
 }
 
-static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, uint16_t h, uint32_t size)
+static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, uint16_t h,
+		   int16_t top, int16_t left, uint32_t size)
 {
 	uint8_t *coltbl, comp, newrot, flag, *dst;
 	uint32_t decsize;
@@ -1179,7 +1180,7 @@ static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, 
 	default: break;
 	}
 
-	blt_solid(dbuf, dst, 0, 0, 0, 0, w, h, w, ctx->rt.pitch, ctx->rt.bufh, w * h);
+	blt_solid(dbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch, ctx->rt.bufh, w * h);
 
 	if (seq == ctx->rt.lastseq + 1)
 		c47_swap_bufs(ctx, newrot);
@@ -2229,6 +2230,12 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 	/* codecs with their own front buffers */
 	fsc = (codec == 37 || codec == 47 || codec == 48);
 
+	/* SotE: all videos have top==60 to center the video in the
+	 * 640x400 game window.  We don't need that.
+	 */
+	if ((w == 640) && (h == 272) && (top == 60) && (codec == 47))
+		left = top = 0;
+
 	/* decide on a buffer size */
 	if (!rt->have_vdims) {
 		if (rt->version < 2) {
@@ -2245,19 +2252,12 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 			/* detect common resolutions */
 			wr = w + left;
 			hr = h + top;
-			if ((w == 640) && (h == 272) && (codec == 47)) {
-				/* special case SotE: it has top=60 to achieve
-				 * centered video in the 640x480 game window.
-				 * We don't need that here though.
-				 */
-				left = top = 0;
-				wr = w;
-				hr = h;
-				rt->have_vdims = 1;
-			} else if (((wr == 424) && (hr == 260)) ||	/* RA2 */
-				   ((wr == 320) && (hr == 200)) ||	/* FT/DIG/.. */
-				   ((wr == 640) && (hr == 480)) ||	/* COMI/OL/.. */
-				   ((left == 0) && (top == 0) && (codec == 20) && (w > 3) && (h > 3))) {
+			if (((wr == 424) && (hr == 260)) ||	/* RA2 */
+			    ((wr == 320) && (hr == 200)) ||	/* FT/DIG/.. */
+			    ((wr == 640) && (hr == 272)) ||	/* SotE */
+			    ((wr == 640) && (hr == 350)) ||	/* MotS */
+			    ((wr == 640) && (hr == 480)) ||	/* COMI/OL/.. */
+			    ((left == 0) && (top == 0) && (codec == 20) && (w > 3) && (h > 3))) {
 				rt->have_vdims = 1;
 			}
 
@@ -2341,7 +2341,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 	case 34: codec33(ctx, dst, src, w, h, top, left, size, param, param2, codec == 34); break;
 	case 45: codec45(ctx, dst, src, w, h, top, left, size, param, param2); break;
 	case 37: ret = codec37(ctx, dst, src, w, h, top, left, size); break;
-	case 47: ret = codec47(ctx, dst, src, w, h, size); break;
+	case 47: ret = codec47(ctx, dst, src, w, h, top, left, size); break;
 	case 48: ret = codec48(ctx, dst, src, w, h, top, left, size); break;
 	default: ret = 18;
 	}
