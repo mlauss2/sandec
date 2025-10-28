@@ -1037,12 +1037,12 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 			break;
 		case 0xfd:
 			opc = *src++;
-			col[0] = *src++;
 			col[1] = *src++;
+			col[0] = *src++;
 			pglyph = (size == 8) ? ctx->c47_glyph8x8[opc] : ctx->c47_glyph4x4[opc];
 			for (i = 0; i < size; i++)
 				for (j = 0; j < size; j++)
-					*(dst + (i * w) + j) = col[!*pglyph++];
+					*(dst + (i * w) + j) = col[*pglyph++];
 			break;
 		case 0xfc:
 			for (i = 0; i < size; i++)
