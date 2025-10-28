@@ -2606,7 +2606,7 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 			for (i = 0; i < blksize; i++) {
 				ofs = i * stride;
 				for (j = 0; j < blksize; j++) {
-					*(uint16_t *)(dst + ofs + j*2) = c[!!(*pglyph++)];
+					*(uint16_t *)(dst + ofs + j*2) = c[(*pglyph++)];
 				}
 			}
 		}
