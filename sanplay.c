@@ -34,6 +34,7 @@ struct playpriv {
 	int sm;
 	int texsmooth;
 	int paused;
+	int animv1full;
 };
 
 static const SDL_ScaleMode smodes[2] = { SDL_SCALEMODE_NEAREST, SDL_SCALEMODE_LINEAR };
@@ -66,8 +67,15 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 		p->err = 1105;
 		return;
 	}
+	if ((w == 384) && (h == 242) && (p->animv1full == 0)) {
+		p->pxw = 320;
+		p->pxh = 200;
+	} else {
+		p->pxw = w;
+		p->pxh = h;
+	}
 
-	sur = SDL_CreateSurfaceFrom(w, h, imgpal ? SDL_PIXELFORMAT_INDEX8 : SDL_PIXELFORMAT_RGB565,
+	sur = SDL_CreateSurfaceFrom(p->pxw, p->pxh, imgpal ? SDL_PIXELFORMAT_INDEX8 : SDL_PIXELFORMAT_RGB565,
 				    vdata, pitch);
 	if (!sur) {
 		p->err = 1106;
@@ -91,8 +99,6 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 	}
 	p->newimg = sur;
 	p->vbufsize = size;
-	p->pxw = w;
-	p->pxh = h;
 	p->subid = subid;
 	p->err = 0;
 	p->next_disp_us += frame_duration_us;
@@ -131,7 +137,7 @@ static int render_frame(struct playpriv *p)
 			p->nextmult = 1;
 	}
 
-	if (p->winw < p->pxw || p->winh < p->pxh) {
+	if (p->winw != p->pxw || p->winh != p->pxh) {
 		SDL_SetWindowSize(p->win, p->pxw, p->pxh);
 		p->winw = p->pxw;
 		p->winh = p->pxh;
@@ -415,7 +421,7 @@ int main(int a, char **argv)
 					} else if (ke->scancode == SDL_SCANCODE_I) {
 						sio.flags ^= SANDEC_FLAG_DO_FRAME_INTERPOLATION;
 					} else if (ke->scancode == SDL_SCANCODE_L) {
-						sio.flags ^= SANDEC_FLAG_ANIMv1_FULL_FRAME;
+						pp.animv1full ^= 1;
 					} else if (ke->scancode == SDL_SCANCODE_S) {
 						pp.texsmooth ^= 1;
 						ret = render_frame(&pp);

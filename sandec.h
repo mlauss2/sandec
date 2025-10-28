@@ -100,8 +100,6 @@
 #define SANDEC_FLAG_DO_FRAME_INTERPOLATION	(1 << 0)
 /* ignore audio */
 #define SANDEC_FLAG_NO_AUDIO			(1 << 1)
-/* show RA1 full frame instead of 320x200 viewport */
-#define SANDEC_FLAG_ANIMv1_FULL_FRAME		(1 << 2)
 
 struct sanio {
 	int(*ioread)(void *userctx, void *dst, uint32_t size);

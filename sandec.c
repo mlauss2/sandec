@@ -165,8 +165,6 @@ struct sanrt {
 	uint16_t pitch;		/* 2 image pitch			*/
 	uint16_t bufw;		/* 2 alloc'ed buffer width/pitch	*/
 	uint16_t bufh;		/* 2 alloc'ed buffer height		*/
-	uint16_t frmw;		/* 2 current frame width		*/
-	uint16_t frmh;		/* 2 current frame height		*/
 	int16_t  lastseq;	/* 2 c47 last sequence id		*/
 	uint16_t subid;		/* 2 subtitle message number		*/
 	uint16_t to_store;	/* 2 STOR encountered			*/
@@ -1725,8 +1723,8 @@ static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 		yoff += b1;		// 52470
 		b2 = *src++;		// 486-488  EBP
 		do {
-			if (xoff >=0 && yoff >= 0 && xoff < ctx->rt.frmw) {
-				if (yoff >= ctx->rt.frmh)
+			if (xoff >=0 && yoff >= 0 && xoff < ctx->rt.bufw) {
+				if (yoff >= ctx->rt.bufh)
 					return;
 
 				dst = dst_in + xoff + (yoff * pitch);
@@ -1756,7 +1754,7 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t top, int16_t left, uint16_t size,
 		    uint8_t param, int16_t param2)
 {
-	const uint16_t mx = ctx->rt.frmw, my = ctx->rt.frmh, p = ctx->rt.pitch;
+	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
 	int skip, i, j, ls, pc, y, wrlen, skip_left;
 	uint8_t lut[256], *d;
 
@@ -1848,7 +1846,7 @@ static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t top, int16_t left, uint16_t size,
 		    uint8_t param)
 {
-	const uint16_t mx = ctx->rt.frmw, my = ctx->rt.frmh, p = ctx->rt.pitch;
+	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
 	int j, y, pc, skip, ls;
 	uint8_t c, *nsrc;
 
@@ -1901,7 +1899,7 @@ static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, const uint16
 		return;
 
 	blt_solid(dst, src, left, top, 0, 0, w, h, srcstride, ctx->rt.pitch,
-		  ctx->rt.frmh, size);
+		  ctx->rt.bufh, size);
 }
 
 static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
@@ -2010,7 +2008,7 @@ static void codec4(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w,
 		   uint16_t h, int16_t top, int16_t left, uint32_t size, int transp)
 {
-	const uint16_t mx = ctx->rt.frmw, my = ctx->rt.frmh;
+	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh;
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
 	int j, x, y;
@@ -2126,7 +2124,7 @@ static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t top, int16_t left, uint32_t size, uint8_t p1,
 		    int opaque)
 {
-	const uint16_t mx = ctx->rt.frmw, my = ctx->rt.frmh, p = ctx->rt.pitch;
+	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
 	uint8_t code, col;
 	uint16_t rlen, dlen;
 	int j, x, y;
@@ -2246,8 +2244,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 			rt->bufw = wr;
 			rt->bufh = hr;
 			rt->pitch = wr;
-			rt->frmw = 320;
-			rt->frmh = 200;
 		} else {
 			/* detect common resolutions */
 			wr = w + left;
@@ -2262,8 +2258,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 			}
 
 			rt->pitch = wr;
-			rt->frmw = wr;
-			rt->frmh = hr;
 		}
 		if (!rt->fbsize || (wr > rt->bufw) || (hr > rt->bufh)) {
 			rt->bufw = _max(rt->bufw, wr);
@@ -2358,20 +2352,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src, int16_t 
 		}
 
 		ctx->rt.have_frame = 1;
-
-		/* RA1 has a 384x242 internal window, but presents at 320x200.
-		 * The Full Throttle "blink*.san" animations have the same dimensions,
-		 * but only content in the 320x200 upper left area.
-		 */
-		if (rt->version < 2) {
-			if (ctx->io->flags & SANDEC_FLAG_ANIMv1_FULL_FRAME) {
-				rt->frmw = 384;
-				rt->frmh = 242;
-			} else {
-				rt->frmw = 320;
-				rt->frmh = 200;
-			}
-		}
 	}
 
 	rt->to_store = 0;
@@ -4027,15 +4007,15 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 						  rt->c47ipoltbl, rt->bufw, rt->bufh);
 				rt->have_ipframe = 1;
 				rt->can_ipol = 0;
-				memcpy(rt->buf4, rt->vbuf, rt->frmw * rt->frmh * 1);
+				memcpy(rt->buf4, rt->vbuf, rt->bufw * rt->bufh * 1);
 				ctx->io->queue_video(ctx->io->userctx, rt->buf5,
-					     rt->pitch * rt->frmh,
-					     rt->frmw, rt->frmh, rt->pitch, rt->palette,
+					     rt->pitch * rt->bufh,
+					     rt->bufw, rt->bufh, rt->pitch, rt->palette,
 					     rt->subid, rt->framedur / 2);
 			} else {
 				ctx->io->queue_video(ctx->io->userctx, rt->vbuf,
-					     rt->pitch * rt->frmh * 1,
-					     rt->frmw, rt->frmh, rt->pitch, rt->palette,
+					     rt->pitch * rt->bufh * 1,
+					     rt->bufw, rt->bufh, rt->pitch, rt->palette,
 					     rt->subid, rt->framedur);
 				/* save frame as possible interpolation source */
 				if (rt->have_itable)
@@ -4260,12 +4240,12 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 
 	rt->version = 3;	/* HACK */
 	rt->FRMEcnt = le32_to_cpu(ua32(src + 2));
-	rt->frmw = le16_to_cpu(*(uint16_t *)(src + 8));
-	rt->frmh = le16_to_cpu(*(uint16_t *)(src + 10));
+	rt->bufw = le16_to_cpu(*(uint16_t *)(src + 8));
+	rt->bufh = le16_to_cpu(*(uint16_t *)(src + 10));
 	rt->framedur = le32_to_cpu(ua32(src + 14));
-	rt->pitch = 2 * rt->frmw;	/* 16bit colors */
-	maxx = rt->frmw;
-	maxy = rt->frmh;
+	rt->pitch = 2 * rt->bufw;	/* 16bit colors */
+	maxx = rt->bufw;
+	maxy = rt->bufh;
 	free(src);
 
 	/* there's now >1kB of data left, no idea what it's for.
@@ -4353,8 +4333,8 @@ int sandec_decode_next_frame(void *sanctx)
 	if (ctx->rt.have_ipframe) {
 		struct sanrt *rt = &ctx->rt;
 		rt->have_ipframe = 0;
-		ctx->io->queue_video(ctx->io->userctx, rt->vbuf, rt->pitch * rt->frmh,
-				     rt->frmw, rt->frmh, rt->pitch, rt->palette,
+		ctx->io->queue_video(ctx->io->userctx, rt->vbuf, rt->pitch * rt->bufh,
+				     rt->bufw, rt->bufh, rt->pitch, rt->palette,
 				     rt->subid, rt->framedur / 2);
 		return SANDEC_OK;
 	}
