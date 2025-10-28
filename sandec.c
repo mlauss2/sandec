@@ -1973,15 +1973,15 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 			if (c4t & 0x80) {
 				for (k = 0; k < 4; k++)
 					*(dst + dstoff + k) = ((*(dst + dstoff + k) + *(dst + dstoff + k - p)) >> 1) | 0x80;
-				*(dst + dstoff + 1 * p) = (*(dst + dstoff + 1 * p) + *(dst + dstoff + 1 * p - 1)) >> 1 | 0x80;
-				*(dst + dstoff + 2 * p) = (*(dst + dstoff + 2 * p) + *(dst + dstoff + 2 * p - 1)) >> 1 | 0x80;
-				*(dst + dstoff + 3 * p) = (*(dst + dstoff + 3 * p) + *(dst + dstoff + 3 * p - 1)) >> 1 | 0x80;
+				*(dst + dstoff + 1 * p) = ((*(dst + dstoff + 1 * p) + *(dst + dstoff + 1 * p - 1)) >> 1) | 0x80;
+				*(dst + dstoff + 2 * p) = ((*(dst + dstoff + 2 * p) + *(dst + dstoff + 2 * p - 1)) >> 1) | 0x80;
+				*(dst + dstoff + 3 * p) = ((*(dst + dstoff + 3 * p) + *(dst + dstoff + 3 * p - 1)) >> 1) | 0x80;
 			} else {
 				for (k = 0; k < 4; k++)
 					*(dst + dstoff + k) = ((*(dst + dstoff + k) + *(dst + dstoff + k - p)) >> 1) & 0x7f;
-				*(dst + dstoff + 1 * p) = (*(dst + dstoff + 1 * p) + *(dst + dstoff + 1 * p - 1)) >> 1;
-				*(dst + dstoff + 2 * p) = (*(dst + dstoff + 2 * p) + *(dst + dstoff + 2 * p - 1)) >> 1;
-				*(dst + dstoff + 3 * p) = (*(dst + dstoff + 3 * p) + *(dst + dstoff + 3 * p - 1)) >> 1;
+				*(dst + dstoff + 1 * p) = ((*(dst + dstoff + 1 * p) + *(dst + dstoff + 1 * p - 1)) >> 1) & 0x7f;
+				*(dst + dstoff + 2 * p) = ((*(dst + dstoff + 2 * p) + *(dst + dstoff + 2 * p - 1)) >> 1) & 0x7f;
+				*(dst + dstoff + 3 * p) = ((*(dst + dstoff + 3 * p) + *(dst + dstoff + 3 * p - 1)) >> 1) & 0x7f;
 			}
 		}
 	}
