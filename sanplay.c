@@ -25,6 +25,7 @@ struct playpriv {
 
 	uint32_t vbufsize;
 	uint64_t next_disp_us;
+	uint64_t ptick;
 	unsigned char *vbuf;
 	uint16_t subid;
 	int err;
@@ -35,6 +36,7 @@ struct playpriv {
 	int texsmooth;
 	int paused;
 	int animv1full;
+	int autopause;
 };
 
 static const SDL_ScaleMode smodes[2] = { SDL_SCALEMODE_NEAREST, SDL_SCALEMODE_LINEAR };
@@ -193,6 +195,10 @@ static int render_frame(struct playpriv *p)
 		goto out;
 	}
 	SDL_RenderPresent(p->ren);
+	if (p->autopause) {
+		p->paused = 1;	
+		p->ptick = SDL_GetTicks();
+	}
 	if (p->as && (p->paused == 0))
 		SDL_ResumeAudioStreamDevice(p->as);
 
@@ -257,9 +263,9 @@ static int sio_read(void *ctx, void *dst, uint32_t size)
 
 int main(int a, char **argv)
 {
-	int ret, speedmode, fc, running, parserdone, autopause, i, verbose;
+	int ret, speedmode, fc, running, parserdone, i, verbose;
 	int sdl_inited;
-	uint64_t t1, t2, ren, dec, ptick;
+	uint64_t t1, t2, ren, dec;
 	struct playpriv pp;
 	struct sanio sio;
 	int64_t delt;
@@ -331,10 +337,10 @@ int main(int a, char **argv)
 				sdl_inited = 1;
 		}
 
-		autopause = 0;
+		pp.autopause = 0;
 		if (speedmode == 3) {
 			speedmode = 0;
-			autopause = 1;
+			pp.autopause = 1;
 		}
 
 		pp.sm = speedmode;
@@ -350,7 +356,7 @@ int main(int a, char **argv)
 		pp.err = 0;
 		running = 1;
 		pp.paused = 0;
-		ptick = 0;
+		pp.ptick = 0;
 		parserdone = 0;
 		ren = 0;
 		dec = 0;
@@ -377,28 +383,28 @@ int main(int a, char **argv)
 						break;
 
 					if (ke->scancode == SDL_SCANCODE_SPACE && speedmode < 1) {
-						if (pp.paused && autopause) {
+						if (pp.paused && pp.autopause) {
 							pp.paused = 0;
-							autopause = 0;
+							pp.autopause = 0;
 						} else
 							pp.paused ^= 1;
 
 						if (!pp.paused) {
-							pp.next_disp_us += (SDL_GetTicks() - ptick) * 1000;
+							pp.next_disp_us += (SDL_GetTicks() - pp.ptick) * 1000;
 							SDL_ResumeAudioStreamDevice(pp.as);
 						} else {
 							SDL_PauseAudioStreamDevice(pp.as);
-							ptick = SDL_GetTicks();
+							pp.ptick = SDL_GetTicks();
 						}
 					} else if (ke->scancode == SDL_SCANCODE_N) {
 						running = 0;	/* end current video */
 						if (pp.as)
 							SDL_ClearAudioStream(pp.as);
 					} else if (ke->scancode == SDL_SCANCODE_PERIOD) {
-						autopause = 1;
+						pp.autopause = 1;
 						if (pp.paused) {
 							pp.paused = 0;
-							pp.next_disp_us += (SDL_GetTicks() - ptick) * 1000;
+							pp.next_disp_us += (SDL_GetTicks() - pp.ptick) * 1000;
 							SDL_ResumeAudioStreamDevice(pp.as);
 						}
 					} else if (ke->scancode == SDL_SCANCODE_Q) {
@@ -468,15 +474,10 @@ err:
 					}
 
 					if (running && verbose) {
-						printf("\33[2K\r%4u/%4u  %lu ms/%lu ms I:%d S:%d P:%d  R:%d", sandec_get_currframe(sanctx), fc, ren, dec, !!(sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION), pp.texsmooth, autopause, ret);
+						printf("\33[2K\r%4u/%4u  %lu ms/%lu ms I:%d S:%d P:%d  R:%d", sandec_get_currframe(sanctx), fc, ren, dec, !!(sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION), pp.texsmooth, pp.autopause, ret);
 						fflush(stdout);
 					}
-					if (autopause) {
-						pp.paused = 1;
-						if (pp.as)
-							SDL_PauseAudioStreamDevice(pp.as);
-						ptick = SDL_GetTicks();
-					}
+
 				} else if (delt > 5000) {
 					SDL_Delay(5);
 				}
