@@ -1698,7 +1698,11 @@ static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 		memcpy(tbl1, src + 6, 0x300);
 		src += 0x306;
 		size -= 0x306;
-		i = 1;
+		/* if you follow the assembly (32b49 - 32b6d), EAX is 1 when the
+		 * first store to tbl2 is done.  However this is of course wrong and
+		 * results in wrong colors.
+		 */
+		i = 0;
 		while ((size > 1) && (i < 0x8000)) {
 			b2 = *src++;
 			memset(tbl2 + i, *src++, b2);
