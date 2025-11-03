@@ -1774,6 +1774,8 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		 * this is a delta value to apply to the color instead.
 		 */
 		if (param2 == 256) {
+			if (size < 256)
+				return;
 			memcpy(ctx->c23lut, src, 256);
 			src += 256;
 			size -= 256;
@@ -2044,10 +2046,11 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 		while (dlen && size) {
 			code = *src++;
 			dlen--;
-			if (--size < 1)
-				return;
+			size--;
 			rlen = (code >> 1) + 1;
 			if (code & 1) {
+				if (size < 1)
+					return;
 				col = *src++;
 				dlen--;
 				size--;
@@ -2160,10 +2163,11 @@ static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		while (dlen && size) {
 			code = *src++;
 			dlen--;
-			if (--size < 1)
-				return;
+			size--;
 			rlen = (code >> 1) + 1;
 			if (code & 1) {
+				if (size < 1)
+					return;
 				col = *src++;
 				dlen--;
 				size--;
