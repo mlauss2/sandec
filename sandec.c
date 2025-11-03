@@ -1209,16 +1209,22 @@ static void c48_4to8(uint8_t *dst, uint8_t *src, uint16_t w)
 }
 
 /* process an 8x8 block */
-static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_t w, const uint8_t *itbl)
+static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_t w, const uint8_t *itbl, uint32_t *size)
 {
 	uint8_t opc, sb[16];
 	int16_t mvofs;
 	uint32_t ofs;
 	int i, j, k, l;
 
+	if (*size < 1)
+		return 0;
 	opc = *src++;
+	(*size)--;
 	switch (opc) {
 	case 0xFF:	/* 1x1 -> 8x8 block scale */
+		if (*size < 1)
+			return 0;
+		(*size)--;
 		sb[15] = *src++;
 		sb[ 7] = itbl[(*(dst - 1*w + 7) << 8) | sb[15]];
 		sb[ 3] = itbl[(*(dst - 1*w + 7) << 8) | sb[ 7]];
@@ -1238,14 +1244,19 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 		c48_4to8(dst, sb, w);
 		break;
 	case 0xFE:	/* 1x 8x8 copy from deltabuf, 16bit mv from src */
+		if ((*size) < 2)
+			return 0;
 		mvofs = (int16_t)le16_to_cpu(ua16(src)); src += 2;
 		for (i = 0; i < 8; i++) {
 			ofs = w * i;
 			for (k = 0; k < 8; k++)
 				*(dst + ofs + k) = *(db + ofs + k + mvofs);
 		}
+		(*size) -= 2;
 		break;
 	case 0xFD:	/* 2x2 -> 8x8 block scale */
+		if ((*size) < 4)
+			return 0;
 		sb[ 5] = *src++;
 		sb[ 7] = *src++;
 		sb[13] = *src++;
@@ -1263,8 +1274,11 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 		sb[12] = itbl[(*(dst + 4*w - 1) << 8) | sb[13]];
 		sb[14] = itbl[(sb[15] << 8)           | sb[13]];
 		c48_4to8(dst, sb, w);
+		(*size) -= 4;
 		break;
 	case 0xFC:	/* 4x copy 4x4 block, per-block c48_mv, index from source */
+		if ((*size) < 4)
+			return 0;
 		for (i = 0; i < 8; i += 4) {
 			for (k = 0; k < 8; k += 4) {
 				opc = *src++;
@@ -1277,8 +1291,11 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 				}
 			}
 		}
+		(*size) -= 4;
 		break;
 	case 0xFB: 	/* Copy 4x 4x4 blocks, per-block mv from source */
+		if ((*size) < 8)
+			return 0;
 		for (i = 0; i < 8; i += 4) {			/* 2 */
 			for (k = 0; k < 8; k += 4) {		/* 2 */
 				mvofs = le16_to_cpu(ua16(src)); src += 2;
@@ -1289,12 +1306,18 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 				}
 			}
 		}
+		(*size) -= 8;
 		break;
 	case 0xFA:	/* scale 4x4 input block to 8x8 dest block */
+		if ((*size) < 16)
+			return 0;
 		c48_4to8(dst, src, w);
 		src += 16;
+		(*size) -= 16;
 		break;
 	case 0xF9:	/* 16x 2x2 copy from delta, per-block c48_mv */
+		if ((*size) < 16)
+			return 0;
 		for (i = 0; i < 8; i += 2) {				/* 4 */
 			for (j = 0; j < 8; j += 2) {			/* 4 */
 				ofs = (w * i) + j;
@@ -1307,8 +1330,11 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 				}
 			}
 		}
+		(*size) -= 16;
 		break;
 	case 0xF8:	/* 16x 2x2 blocks copy, mv from source */
+		if ((*size) < 32)
+			return 0;
 		for (i = 0; i < 8; i += 2) {				/* 4 */
 			for (j = 0; j < 8; j += 2) {			/* 4 */
 				ofs = w * i + j;
@@ -1319,13 +1345,17 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 				}
 			}
 		}
+		(*size) -= 32;
 		break;
 	case 0xF7:	/* copy 8x8 block from src to dest */
+		if ((*size) < 64)
+			return 0;
 		for (i = 0; i < 8; i++) {
 			ofs = i * w;
 			for (l = 0; l < 8; l++)
 				*(dst + ofs + l) = *src++;
 		}
+		(*size) -= 64;
 		break;
 	default:	/* copy 8x8 block from prev, c48_mv */
 		mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
@@ -1339,18 +1369,19 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 	return src;
 }
 
-static void codec48_comp3(uint8_t *src, uint8_t *dst, uint8_t *db,
-			  uint8_t *itbl, uint16_t w, uint16_t h)
+static int codec48_comp3(uint8_t *src, uint8_t *dst, uint8_t *db,
+			 uint8_t *itbl, uint16_t w, uint16_t h, uint32_t size)
 {
 	int i, j;
 
-	for (i = 0; i < h; i += 8) {
-		for (j = 0; j < w; j += 8) {
-			src = c48_block(src, dst + j, db + j, w, itbl);
+	for (i = 0; (i < h) && src && size; i += 8) {
+		for (j = 0; (j < w) && src && size; j += 8) {
+			src = c48_block(src, dst + j, db + j, w, itbl, &size);
 		}
 		dst += w * 8;
 		db += w * 8;
 	}
+	return (src == 0) ? 1 : 0;
 }
 
 static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
@@ -1426,7 +1457,8 @@ static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 				c47_swap_bufs(ctx, 1);	/* swap 0 and 2 */
 				dst = ctx->rt.buf0;
 			}
-			codec48_comp3(src, dst, ctx->rt.buf2, ctx->rt.c47ipoltbl, w, h);
+			if (0 != codec48_comp3(src, dst, ctx->rt.buf2, ctx->rt.c47ipoltbl, w, h, size))
+				return -84;
 		}
 		break;
 	case 5: if (size < ((w * h) / 4))
