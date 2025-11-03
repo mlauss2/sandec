@@ -1485,7 +1485,10 @@ static void codec37_comp1(uint8_t *src, uint32_t size, uint8_t *dst, uint8_t *db
 			}
 
 			if (!skip) {
+				if (size < 1)
+					return;
 				opc = *src++;
+				size--;
 				if (opc == 0xff) {
 					len--;
 					for (k = 0; k < 4; k++) {
