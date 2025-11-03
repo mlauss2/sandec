@@ -1003,37 +1003,54 @@ static void codec47_comp1(uint8_t *src, uint8_t *dst_in, uint8_t *itbl, uint16_t
 
 static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 			      uint8_t *p1, uint8_t *p2, const uint16_t w,
-			      const uint8_t *coltbl, uint16_t size)
+			      const uint8_t *coltbl, uint16_t size, uint32_t *dsize)
 {
 	uint8_t opc, col[2], c;
 	uint16_t i, j;
 	int8_t *pglyph;
 
+	if ((*dsize) < 1)
+		return 0;
 	opc = *src++;
+	(*dsize)--;
 	if (opc >= 0xF8) {
 		switch (opc) {
 		case 0xff:
 			if (size == 2) {
+				if ((*dsize) < 4)
+					return 0;
 				*(dst + 0 + 0) = *src++; *(dst + 0 + 1) = *src++;
 				*(dst + w + 0) = *src++; *(dst + w + 1) = *src++;
+				(*dsize) -= 4;
 			} else {
 				size >>= 1;
-				src = codec47_block(ctx, src, dst, p1, p2, w, coltbl, size);
-				src = codec47_block(ctx, src, dst + size, p1 + size, p2 + size, w, coltbl, size);
+				src = codec47_block(ctx, src, dst, p1, p2, w, coltbl, size, dsize);
+				if (!src)
+					return 0;
+				src = codec47_block(ctx, src, dst + size, p1 + size, p2 + size, w, coltbl, size, dsize);
+				if (!src)
+					return 0;
 				dst += (size * w);
 				p1 += (size * w);
 				p2 += (size * w);
-				src = codec47_block(ctx, src, dst, p1, p2, w, coltbl, size);
-				src = codec47_block(ctx, src, dst + size, p1 + size, p2 + size, w, coltbl, size);
+				src = codec47_block(ctx, src, dst, p1, p2, w, coltbl, size, dsize);
+				if (!src)
+					return 0;
+				src = codec47_block(ctx, src, dst + size, p1 + size, p2 + size, w, coltbl, size, dsize);
 			}
 			break;
 		case 0xfe:
+			if ((*dsize) < 1)
+				return 0;
 			c = *src++;
+			(*dsize)--;
 			for (i = 0; i < size; i++)
 				for (j = 0; j < size; j++)
 					*(dst + (i * w) + j) = c;
 			break;
 		case 0xfd:
+			if ((*dsize) < 3)
+				return 0;
 			opc = *src++;
 			col[1] = *src++;
 			col[0] = *src++;
@@ -1041,6 +1058,7 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 			for (i = 0; i < size; i++)
 				for (j = 0; j < size; j++)
 					*(dst + (i * w) + j) = col[*pglyph++];
+			(*dsize) -= 3;
 			break;
 		case 0xfc:
 			for (i = 0; i < size; i++)
@@ -1062,20 +1080,21 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 	return src;
 }
 
-static void codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
-			  const uint16_t w, const uint16_t h, const uint8_t *coltbl)
+static int codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
+			 const uint16_t w, const uint16_t h, const uint8_t *coltbl, uint32_t size)
 {
 	uint8_t *b1 = ctx->rt.buf1, *b2 = ctx->rt.buf2;
 	unsigned int i, j;
 
-	for (j = 0; j < h; j += 8) {
-		for (i = 0; i < w; i += 8) {
-			src = codec47_block(ctx, src, dst + i, b1 + i, b2 + i, w, coltbl, 8);
+	for (j = 0; (j < h) && src && size; j += 8) {
+		for (i = 0; (i < w) && src && size; i += 8) {
+			src = codec47_block(ctx, src, dst + i, b1 + i, b2 + i, w, coltbl, 8, &size);
 		}
 		dst += (w * 8);
 		b1 += (w * 8);
 		b2 += (w * 8);
 	}
+	return (src == 0) ? 1 : 0;
 }
 
 static void codec47_comp5(uint8_t *src, uint32_t size, uint8_t *dst, uint32_t left)
@@ -1169,7 +1188,8 @@ static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, 
 		codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h);
 		break;
 	case 2:	if (seq == (ctx->rt.lastseq + 1)) {
-			codec47_comp2(ctx, src, dst, w, h, coltbl);
+			if (0 != codec47_comp2(ctx, src, dst, w, h, coltbl, size))
+				return -64;
 		}
 		break;
 	case 3:	memcpy(dst, ctx->rt.buf2, ctx->rt.fbsize); break;
