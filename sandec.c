@@ -1693,7 +1693,7 @@ static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 
 	t1 = *(uint16_t *)(src + 2);
 	if (t1 == 0) {
-		if (size < 0x300)
+		if (size < 0x306)
 			return;
 		memcpy(tbl1, src + 6, 0x300);
 		src += 0x306;
@@ -1705,6 +1705,8 @@ static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 		i = 0;
 		while ((size > 1) && (i < 0x8000)) {
 			b2 = *src++;
+			if ((b2 + i) > 0x8000)
+				b2 = 0x8000 - i;
 			memset(tbl2 + i, *src++, b2);
 			i += b2;
 			size -= 2;
@@ -1727,8 +1729,8 @@ static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 		yoff += b1;		// 52470
 		b2 = *src++;		// 486-488  EBP
 		do {
-			if (xoff >=0 && yoff >= 0 && xoff < ctx->rt.bufw) {
-				if (yoff >= ctx->rt.bufh)
+			if (xoff > 0 && yoff > 0 && xoff < (ctx->rt.bufw - 1)) {
+				if (yoff >= (ctx->rt.bufh - 1))
 					return;
 
 				dst = dst_in + xoff + (yoff * pitch);
