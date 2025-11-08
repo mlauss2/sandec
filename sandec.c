@@ -120,34 +120,47 @@ SZ_AUDTMPBUF1 + SZ_SHIFTPAL)
 #define NGLYPHS 256
 
 /* maximum volume. This is the maximum found in PSAD/iMUS streams */
-#define AUD_VOL_MAX	127
+#define ATRK_VOL_MAX	127
 
 /* PSAD/iMUS multistream audio track */
-#define AUD_INUSE		(1 << 0)
-#define AUD_SRC8BIT		(1 << 1)
-#define AUD_SRC12BIT		(1 << 2)
-#define AUD_1CH			(1 << 3)
-#define AUD_RATE11KHZ		(1 << 4)
-#define AUD_SRCDONE		(1 << 5)
-#define AUD_MIXED		(1 << 6)
-#define AUD_BLOCKED		(1 << 7)
+#define ATRK_INUSE	(1 << 0)
+#define ATRK_1CH	(1 << 1)
+#define ATRK_SRC8BIT	(1 << 2)
+#define ATRK_SRC12BIT	(1 << 3)
+#define ATRK_SRCDONE	(1 << 4)
+#define ATRK_MIXED	(1 << 5)
+#define ATRK_BLOCKED	(1 << 6)
 
-/* audio track. 1M buffer seems required for a few RA2 files */
-#define ATRK_MAXWP	(1 << 20)
-/* 16 seems required for some RA1/RA2 files */
-#define ATRK_NUM	16
+/* 1M for Dig */
+#define _ATRK_DATSZ	(1 << 20)
+_Static_assert((_ATRK_DATSZ > 0) && ((_ATRK_DATSZ & (_ATRK_DATSZ - 1)) == 0),
+	       "_ATRK_DATSZ must be a power of 2.");
+
+static const uint32_t ATRK_DATSZ = _ATRK_DATSZ;
+static const uint32_t ATRK_DATMASK = (_ATRK_DATSZ - 1);
+
+#define ATRK_MAX	10
+
+/* function to read the source data and convert it to 16bit sample,
+ * at offset i, for channel c
+ */
+struct sanatrk;
+typedef int16_t(*atrk_decode)(struct sanatrk*, uint32_t i, uint8_t c);
+
 struct sanatrk {
 	uint8_t *data;		/* 22,05kHz signed 16bit 2ch audio data	*/
 	uint32_t rdptr;		/* read pointer				*/
 	uint32_t wrptr;		/* write pointer			*/
 	int32_t datacnt;	/* currently held data in buffer	*/
 	uint32_t flags;		/* track flags				*/
-	uint32_t pdcnt;		/* count of left over bytes from prev.  */
-	uint8_t pd[4];		/* unused bytes from prev. datablock	*/
-	uint16_t trkid;		/* ID of this track			*/
+	atrk_decode decode;	/* upmix function			*/
 	int32_t dataleft;	/* SAUD data left until track ends	*/
+	uint16_t trkid;		/* ID of this track			*/
 	uint8_t vol;		/* PSAD/iMUS stream volume		*/
 	int8_t pan;		/* PSAD stream pan			*/
+	uint32_t src_accum;	/* SRC accumulator 16.16		*/
+	uint32_t src_cnvrate;	/* SRC conversion ratio 16.16		*/
+	uint16_t srate;		/* source sample rate			*/
 };
 
 /* internal context: per-file */
@@ -185,12 +198,14 @@ struct sanrt {
 	uint8_t  have_itable:1;	/* 1 have c47/48 interpolation table    */
 	uint8_t  can_ipol:1;	/* 1 do an interpolation                */
 	uint8_t  have_ipframe:1;/* 1 we have an interpolated frame      */
-	struct sanatrk sanatrk[ATRK_NUM];	/* audio tracks 	*/
-	uint8_t  acttrks;	/* 1 active audio tracks in this frame	*/
+	struct sanatrk sanatrk[ATRK_MAX];	/* audio tracks 	*/
+	uint8_t  num_atrk;	/* 1 number of atrks allocated		*/
 	uint8_t *atmpbuf1;	/* 8 audio buffer 1			*/
 	uint8_t psadhdr;	/* 1 psad type 1 = old 2 new		*/
-	uint32_t audfragsize;	/* 2 PSAD/iMUS audio fragment size	*/
+	uint32_t audminframes;	/* 4 dest sample rate frames for a frame*/
 	uint32_t audchans;	/* 4 VIMA audio channel count		*/
+	uint8_t *audrsb1;	/* 8 generic 1-frame resample dest buf	*/
+	uint8_t *audrsb2;	/* 8 generic 1-frame resample dest buf	*/
 };
 
 /* internal context: static stuff. */
@@ -2863,6 +2878,654 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
+/* count how many frames (Mono 1ch samples / stereo L+R samples) can be
+ * constructed with the available data in an atrk.
+ */
+static uint32_t atrk_cnt_srcframes_avail(struct sanatrk *atrk)
+{
+	uint32_t avail;
+	if (atrk->flags & ATRK_SRC8BIT) {
+		avail = atrk->datacnt;			/* samples */
+	} else if (atrk->flags & ATRK_SRC12BIT) {
+		avail = (atrk->datacnt * 2) / 3;	/* samples */
+	} else {
+		avail = atrk->datacnt >> 1;		/* samples */
+	}
+	if (0 == (atrk->flags & ATRK_1CH)) {
+		avail >>= 1;				/* frames */
+	}
+
+	return avail;					/* frames */
+}
+
+/* count how many frames in the *destination rate* can be constructed from
+ * the data available in the source atrk.
+ * Use a few shortcuts: the result is only interesting if it is below the
+ * minimum fragment size, above that just return 4096.
+ */
+static uint32_t atrk_cnt_dstframes_avail(struct sanatrk *atrk)
+{
+	const uint32_t sf = atrk_cnt_srcframes_avail(atrk);
+	uint32_t den = atrk->src_cnvrate >> 8;
+	if (den == 0) {
+		return (sf == 0) ? 0 : 4096;	/* enough data */
+	}
+	uint32_t num = sf << 8;
+	if (num > (4096 * den))
+		return 4096;
+
+	return num / den;
+}
+
+/* extract a sample for channel "ch" from frame at offset "frameofs" in the source
+ * at the readpointer.  For 16bit-LE source data format.
+ */
+static int16_t atrk_decode_src16le(struct sanatrk *atrk, uint32_t frameofs, uint8_t ch)
+{
+	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;	/* channel mult */
+	uint32_t srcofs;
+	uint8_t lo, hi;
+
+	srcofs = (atrk->rdptr + (frameofs * chm * 2) + (ch * 2));
+	srcofs &= ATRK_DATMASK;
+	lo = atrk->data[srcofs];
+	hi = atrk->data[(srcofs + 1) & ATRK_DATMASK];
+	return (int16_t)((hi << 8) | lo);
+}
+
+/* extract a sample for channel "ch" from frame at offset "frameofs" in the source
+ * at the readpointer.  For unsigned 8bit source data format.
+ */
+static int16_t atrk_decode_src8(struct sanatrk *atrk, uint32_t frameofs, uint8_t ch)
+{
+	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;	/* channel mult */
+	uint32_t doff = (frameofs * chm * 1) + (ch * 1);
+	uint32_t srcofs;
+
+	srcofs = (atrk->rdptr + (frameofs * chm * 1) + (ch * 1));
+	srcofs &= ATRK_DATMASK;
+	if (doff >= atrk->datacnt)
+		return 0;
+	return ((atrk->data[srcofs]) << 8) ^ 0x8000;
+}
+
+/* extract a sample for channel "ch" from frame at offset "frameofs" in the source
+ * at the readpointer.  For packed 12bit source data format.
+ */
+static int16_t atrk_decode_src12(struct sanatrk *atrk, uint32_t frameofs, uint8_t ch)
+{
+	const uint32_t ch1 = atrk->flags & ATRK_1CH;
+	uint8_t b0, b1 ,b2;
+	uint32_t srcofs;
+	int16_t s[2];
+
+	/*   mono: 3 src bytes for 2 16bit frames.
+	 * stereo: 3 src bytes for 1 16bit-2ch frame */
+	srcofs = atrk->rdptr + (ch1 ? (frameofs / 2) * 3 : frameofs * 3);
+	b0 = atrk->data[(srcofs + 0) & ATRK_DATMASK];
+	b1 = atrk->data[(srcofs + 1) & ATRK_DATMASK];
+	b2 = atrk->data[(srcofs + 2) & ATRK_DATMASK];
+	s[0] = ((((b1 & 0x0f) << 8) | b0) << 4) - 0x8000;
+	s[1] = ((((b1 & 0xf0) << 4) | b2) << 4) - 0x8000;
+
+	return (ch1) ? s[frameofs & 1] : s[!!ch];
+}
+
+static inline void atrk_reset(struct sanatrk *atrk)
+{
+	atrk->rdptr = 0;
+	atrk->wrptr = 0;
+	atrk->datacnt = 0;
+	atrk->flags = 0;
+	atrk->decode = NULL;
+	atrk->trkid = 0;
+	atrk->dataleft = 0;
+	atrk->vol = 0;
+	atrk->pan = 0;
+	atrk->srate = 0;
+	atrk->src_accum = 0;
+	atrk->src_cnvrate = 0;
+}
+
+static void atrk_set_srcfmt(struct sanctx *ctx, struct sanatrk *atrk, uint16_t rate,
+			    uint8_t bits, uint8_t ch, uint8_t vol, int8_t pan)
+{
+	atrk->flags &= ~(ATRK_1CH | ATRK_SRC8BIT | ATRK_SRC12BIT);
+	if (bits == 8) {
+		atrk->flags |= ATRK_SRC8BIT;
+		atrk->decode = atrk_decode_src8;
+	} else if (bits == 12) {
+		atrk->flags |= ATRK_SRC12BIT;
+		atrk->decode = atrk_decode_src12;
+	} else {
+		atrk->decode = atrk_decode_src16le;
+	}
+	if (ch < 2)
+		atrk->flags |= ATRK_1CH;
+
+	atrk->srate = rate;
+	atrk->vol = vol;
+	atrk->pan = pan;
+	atrk->src_cnvrate = (rate << 16) / (22050);
+}
+
+/* find a trkid in the santrak list. Default allocate a new if the trkid is
+ * not yet valid, or optionally return NULLptr if trkid is unknown.
+ */
+static struct sanatrk *atrk_find_trkid(struct sanctx *ctx, uint16_t trkid,
+				       int fail_on_not_found)
+{
+	struct sanrt *rt = &ctx->rt;
+	struct sanatrk *atrk;
+	int i, newid;
+
+	newid = -1;
+	for (i = 0; i < rt->num_atrk; i++) {
+		atrk = &(rt->sanatrk[i]);
+		if ((atrk->flags & ATRK_INUSE) && (trkid == atrk->trkid))
+			return atrk;
+		if ((newid < 0) && (0 == (atrk->flags & ATRK_INUSE)))
+			newid = i;
+	}
+	if ((newid > -1) && (!fail_on_not_found)) {
+		atrk = &(rt->sanatrk[newid]);
+		atrk_reset(atrk);
+		return atrk;
+	}
+	return NULL;
+}
+
+/* clear the ATRK_MIXED flag from all tracks */
+static void atrk_reset_mixed(struct sanrt *rt)
+{
+	int i;
+
+	for (i = 0; i < rt->num_atrk; i++)
+		rt->sanatrk[i].flags &= ~ATRK_MIXED;
+}
+
+/* get the FIRST mixable track. */
+static struct sanatrk *atrk_get_next_mixable(struct sanrt *rt)
+{
+	struct sanatrk *atrk;
+	int i;
+	for (i = 0; i < rt->num_atrk; i++) {
+		atrk = &(rt->sanatrk[i]);
+		if ((ATRK_INUSE == (atrk->flags & (ATRK_INUSE | ATRK_MIXED | ATRK_BLOCKED)))
+			&& atrk_cnt_srcframes_avail(atrk))
+			return atrk;
+	}
+	return NULL;
+}
+
+/* count all mixable tracks, with shortest buffer size returned too */
+static int atrk_count_mixable(struct sanrt *rt, uint32_t *minlen)
+{
+	struct sanatrk *atrk;
+	int i, mixable;
+	uint32_t ml, df;
+
+	ml = ~0;
+	mixable = 0;
+	for (i = 0; i < rt->num_atrk; i++) {
+		atrk = &(rt->sanatrk[i]);
+		df = atrk_cnt_dstframes_avail(atrk);
+		if ((ATRK_INUSE == (atrk->flags & (ATRK_INUSE | ATRK_MIXED | ATRK_BLOCKED))) && df) {
+			mixable++;
+			if (ml > df) {
+				ml = df;
+			}
+		}
+	}
+
+	if (minlen)
+		*minlen = ml;
+	return mixable;
+}
+
+/* count all active tracks: tracks which are still allocated */
+static int atrk_count_active(struct sanrt *rt)
+{
+	struct sanatrk *atrk;
+	int i, active;
+
+	active = 0;
+	for (i = 0; i < rt->num_atrk; i++) {
+		atrk = &(rt->sanatrk[i]);
+		if (ATRK_INUSE == (atrk->flags & (ATRK_INUSE)))
+			active++;
+	}
+	return active;
+}
+
+/* buffer the incoming data to the ringbuffer */
+static int atrk_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
+			    uint32_t size, uint8_t *src)
+{
+	uint32_t toend;
+
+	if (0 == (atrk->flags & ATRK_INUSE))
+		return 50;
+	if ((atrk->datacnt + size) > ATRK_DATSZ)
+		return 51;
+
+	toend = ATRK_DATSZ - atrk->wrptr;
+	if (size <= toend) {
+		memcpy(atrk->data + atrk->wrptr, src, size);
+	} else {
+		memcpy(atrk->data + atrk->wrptr, src, toend);
+		memcpy(atrk->data + 0, src + toend, size - toend);
+	}
+	atrk->datacnt += size;
+	atrk->wrptr += size;
+	atrk->wrptr &= ATRK_DATMASK;
+
+	return 0;
+}
+
+static void atrk_consume(struct sanatrk *atrk, uint32_t bytes)
+{
+	if (bytes > atrk->datacnt)
+		bytes = atrk->datacnt;
+	atrk->datacnt -= bytes;
+	atrk->rdptr += bytes;
+	atrk->rdptr &= ATRK_DATMASK;
+
+	if ((atrk_cnt_dstframes_avail(atrk) < 1) && (atrk->flags & ATRK_SRCDONE)) {
+		atrk_reset(atrk);
+	}
+}
+
+#if 0
+static void atrk_consume_frames(struct sanatrk *atrk, uint32_t frames)
+{
+	uint32_t bytes;
+
+	if (atrk->flags & ATRK_SRC8BIT) {
+		bytes = frames;
+		if (0 == (atrk->flags & ATRK_1CH))
+			bytes *= 2;
+	} else if (atrk->flags & ATRK_SRC12BIT) {
+		if (atrk->flags & ATRK_1CH)
+			bytes = (frames * 3) / 2;
+		else
+			bytes = frames * 3;
+	} else {
+		bytes = frames * 2;
+		if (0 == (atrk->flags & ATRK_1CH))
+			bytes *= 2;
+	}
+
+	atrk->rdptr += bytes;
+	atrk->rdptr &= ATRK_DATMASK;
+	atrk->datacnt -= bytes;
+	if (atrk->datacnt <= 0) {
+		atrk->datacnt = 0;
+		atrk->rdptr = 0;
+		atrk->wrptr = 0;
+		if (atrk->flags & ATRK_SRCDONE)
+			atrk_reset(atrk);
+	}
+}
+#endif
+static int atrk_frame_data_avail(struct sanatrk *atrk, uint32_t frameidx)
+{
+	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;
+	uint32_t n1, n2;
+	int ret = 0;
+
+	if (atrk->flags & ATRK_SRC8BIT) {
+		n1 = (frameidx + 1) * chm;
+		n2 = (frameidx + 2) * chm;
+	} else if (atrk->flags & ATRK_SRC12BIT) {
+		if (atrk->flags & ATRK_1CH) {
+			n1 = (((frameidx + 0) / 2) + 1) * 3;
+			n2 = (((frameidx + 1) / 2) + 1) * 3;
+		} else {
+			n1 = ((frameidx + 0) + 1) * 3;
+			n2 = ((frameidx + 1) + 1) * 3;
+		}
+	} else {
+		n1 = ((frameidx + 0) + 1) * chm * 2;
+		n2 = ((frameidx + 1) + 1) * chm * 2;
+	}
+	ret  = (n1 <= atrk->datacnt) ? 1 : 0;
+	ret |= (n2 <= atrk->datacnt) ? 2 : 0;
+	return ret;
+}
+
+/* convert the ATRK src data to 16bit 2ch and resample it to get the desired
+ * number of target frames.
+ */
+static void atrk_convert_resample(struct sanatrk *atrk, int16_t *dst,
+				  uint32_t dest_frame_count)
+{
+	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;
+	uint32_t isidx, frac, tc, bc;
+	int32_t l, r, s1, s2, s3, s4;
+	int fda;
+
+	for (uint32_t i = 0; i < dest_frame_count; i++) {
+		/* input sample real index and fractional part */
+		isidx = atrk->src_accum >> 16;
+		frac = atrk->src_accum & 0xFFFF;
+
+		/* get info about source availability of current and next frame.
+		 * bitmask: bit 1 = have source data at index frame,
+		 * bit 2 = have source data at next index frame.
+		 */
+		fda = atrk_frame_data_avail(atrk, isidx);
+
+		if (!(fda & 1)) {
+			/* no CURRENT data, this should not happen, but
+			 * generate silence.
+			 */
+			dst[i * 2 + 0] = 0;
+			dst[i * 2 + 1] = 0;
+		} else {
+			if (atrk->flags & ATRK_1CH) {
+				/* mono: get 2 samples if possible, then inter-
+				 * polate between them and write it to both
+				 * output channels.
+				 */
+				s1 = atrk->decode(atrk, isidx, 0);
+				s2 = (fda & 2) ? atrk->decode(atrk, isidx + 1, 0) : s1;
+				l = r = s1 + (((s2 - s1) * (int32_t)frac) >> 16);
+			} else {
+				/* stereo: get a sample for both channels */
+				s1 = atrk->decode(atrk, isidx, 0);
+				s2 = atrk->decode(atrk, isidx, 1);
+
+				if (fda & 2) {
+					/* have next frame: get it an interpolate */
+					s3 = atrk->decode(atrk, isidx + 1, 0);
+					s4 = atrk->decode(atrk, isidx + 1, 1);
+
+					l = s1 + (((s3 - s1) * (int32_t)frac) >> 16);
+					r = s2 + (((s4 - s2) * (int32_t)frac) >> 16);
+				} else {
+					/* no next frame: duplicate existing data */
+					l = s1;
+					r = s2;
+				}
+			}
+
+			/* clamp */
+			if (l > 32767)
+				l = 32767;
+			if (l < -32768)
+				l = -32768;
+			if (r > 32767)
+				r = 32767;
+			if (r < -32768)
+				r = -32768;
+
+			/* write */
+			dst[i * 2 + 0] = (int16_t)l;
+			dst[i * 2 + 1] = (int16_t)r;
+		}
+
+		/* advance input sample position */
+		atrk->src_accum += atrk->src_cnvrate;
+	}
+
+	/* update track pointers/counters, need to calculate how many bytes of
+	 * the INPUT format have been consumed.
+	 */
+	tc = atrk->src_accum >> 16;	/* how many source frames read */
+	if (atrk->flags & ATRK_SRC8BIT) {
+		bc = tc * chm;		/* bytes = frames * channels */
+	} else if (atrk->flags & ATRK_SRC12BIT) {
+		if (atrk->flags & ATRK_1CH) {
+			bc = ((tc + 1) / 2) * 3;	/* 3 bytes per 2 frames */
+		} else {
+			bc = tc * 3;	/* 3 bytes per frame */
+		}
+	} else {
+		bc = tc * 2 * chm;	/* 2bytes per frame * channels */
+	}
+	atrk_consume(atrk, bc);
+	/* we've advanced rdptr, keep only the fractional part of accumulator */
+	atrk->src_accum &= 0x0000ffff;
+}
+
+static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
+		       uint8_t vol1, int8_t pan1, uint8_t vol2, int8_t pan2)
+{
+	int32_t vol1_l, vol1_r, vol2_l, vol2_r;
+	int16_t *src1 = (int16_t *)s1;
+	int16_t *src2 = (int16_t *)s2;
+	int16_t *dst = (int16_t *)ds1;
+	int d1, d2, d3;
+
+	if (pan1 == 0) {
+		vol1_l = vol1_r = vol1;
+	} else if (pan1 < 0) {
+		vol1_l = vol1;
+		vol1_r = (vol1 * (ATRK_VOL_MAX + pan1)) / ATRK_VOL_MAX;
+	} else {
+		vol1_l = (vol1 * (ATRK_VOL_MAX - pan1)) / ATRK_VOL_MAX;
+		vol1_r = vol1;
+	}
+
+	if (pan2 == 0) {
+		vol2_l = vol2_r = vol2;
+	} else if (pan2 < 0) {
+		vol2_l = vol2;
+		vol2_r = (vol2 * (ATRK_VOL_MAX + pan2)) / ATRK_VOL_MAX;
+	} else {
+		vol2_l = (vol2 * (ATRK_VOL_MAX - pan2)) / ATRK_VOL_MAX;
+		vol2_r = vol2;
+	}
+
+	while (bytes > 3) {
+		/* LEFT SAMPLE */
+		d1 = src1 ? (*src1++) : 0;
+		d2 = src2 ? (*src2++) : 0;
+		bytes -= 2;
+
+		d1 = (d1 * vol1_l) / ATRK_VOL_MAX;
+		d2 = (d2 * vol2_l) / ATRK_VOL_MAX;
+		d1 = d1 + 32768;	/* s16 sample to u16 */
+		d2 = d2 + 32768;
+
+		if (d1 < 32768 && d2 < 32768) {
+			d3 = (d1 * d2) / 32768;
+		} else {
+			d3 = (2 * (d1 + d2)) - ((d1 * d2) / 32768) - 65536;
+		}
+		*dst++ = (d3 - 32768);	/* mixed u16 back to s16 and write */
+
+		/* RIGHT SAMPLE */
+		d1 = src1 ? (*src1++) : 0;
+		d2 = src2 ? (*src2++) : 0;
+		bytes -= 2;
+
+		d1 = (d1 * vol1_r) / ATRK_VOL_MAX;
+		d2 = (d2 * vol2_r) / ATRK_VOL_MAX;
+		d1 = d1 + 32768;		/* s16 sample to u16 */
+		d2 = d2 + 32768;
+
+		if (d1 < 32768 && d2 < 32768) {
+			d3 = (d1 * d2) / 32768;
+		} else {
+			d3 = (2 * (d1 + d2)) - ((d1 * d2) / 32768) - 65536;
+		}
+
+		*dst++ = (d3 - 32768);	/* mixed u16 back to s16 and write */
+	}
+}
+
+/* mix all of the tracks which have data available together:
+ * (1) find all ready tracks with data
+ * (2) find out which one hast the _least_ available (minlen)
+ * (3) of all tracks with data, take minlen bytes and mix them into the dest buffer
+ * (4) have any of these tracks finished (i.e. no more data incoming)
+ *	yes -> go back to (1)
+ *	no -> we're done, queue audio buffer, wait for next frame with more
+ *		track data.
+ */
+static int aud_mix_tracks(struct sanctx *ctx)
+{
+	struct sanrt *rt = &ctx->rt;
+	int16_t *trkobuf = (int16_t *)rt->audrsb1;
+	int active1, active2, mixable;
+	uint32_t minlen1, dstlen, dff;
+	uint8_t *dstptr, *aptr;
+	struct sanatrk *atrk;
+
+	dstlen = 0;
+	dstptr = aptr = rt->atmpbuf1;
+	memset(dstptr, 0, rt->audminframes * 4);
+
+	dff = rt->audminframes;	/* amount of target samples to generate */
+
+	active1 = atrk_count_active(rt);
+	while ((active1 != 0) && (dff != 0)) {
+		atrk_reset_mixed(rt);
+		mixable = atrk_count_mixable(rt, &minlen1);
+		if (!mixable)
+			break;
+
+		if (dff && (minlen1 == -1)) {
+			/* hmm underrun */
+			break;
+		}
+
+		if (minlen1 > dff)
+			minlen1 = dff;
+
+		while (NULL != (atrk = atrk_get_next_mixable(rt))) {
+			atrk_convert_resample(atrk, trkobuf, minlen1);
+			aud_mixs16(dstptr, (uint8_t *)trkobuf, dstptr,
+				   minlen1 * 4, atrk->vol, atrk->pan, 127, 0);
+			atrk->flags |= ATRK_MIXED;
+		}
+		dstlen += minlen1 * 4;
+		dstptr += dstlen;
+		dff -= minlen1;
+
+		if (dff) {
+			active2 = atrk_count_active(rt);
+			if (active2 >= active1)
+				break;
+		}
+		active1 = active2;
+	}
+	if (dstlen)
+		ctx->io->queue_audio(ctx->io->userctx, aptr, dstlen);
+
+	atrk_reset_mixed(rt);
+	return (dstlen != 0);
+}
+
+/* buffer data from iMUSE IACT block.
+ * the source can be multiple independent tracks, all with different rates,
+ * channels, resolution.  Decode the data and if necessary, convert it to
+ * 22.05kHz, 16bit, stereo.  Final mixing of the tracks is done at the end
+ * of FRME handling.
+ */
+static void iact_audio_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
+			      uint16_t trkid, uint16_t uid)
+{
+	uint32_t cid, csz, mapsz;
+	uint16_t rate, bits, chnl, vol;
+	struct sanatrk *atrk;
+
+	vol = ATRK_VOL_MAX;
+	if (uid == 1)
+		trkid += 100;
+	else if (uid == 2)
+		trkid += 200;
+	else if (uid == 3)
+		trkid += 300;
+	else if ((uid >= 100) && (uid <= 163)) {
+		trkid += 400;
+		vol = uid * 2 - 200;
+	} else if ((uid >= 200) && (uid <= 263)) {
+		trkid += 500;
+		vol = uid * 2 - 400;
+	} else if ((uid >= 300) && (uid <= 363)) {
+		trkid += 600;
+		vol = uid * 2 - 600;
+	}
+
+	atrk = atrk_find_trkid(ctx, trkid, 0);
+	if (!atrk)
+		return;
+	atrk->trkid = trkid;
+
+	if (vol > ATRK_VOL_MAX)
+		vol = ATRK_VOL_MAX;
+	rate = ctx->rt.samplerate;
+	bits = 12;
+	chnl = 1;
+
+	/*
+	 * read header of new track. NOTE: subchunks aren't 16bit aligned!
+	 */
+	if (0 == (atrk->flags & ATRK_INUSE)) {
+		if (size < 24)
+			return;
+		cid = le32_to_cpu(ua32(src + 0));
+		if (cid != iMUS)
+			return;
+
+		cid = le32_to_cpu(ua32(src + 8));
+		mapsz = be32_to_cpu(ua32(src + 12));
+
+		size -= 16;
+		src += 16;
+
+		if (cid != MAP_ || mapsz > size)
+			return;
+
+		/* the MAP_ chunk again has a few subchuks, need the FRMT tag */
+		while (mapsz > 7 && size > 7) {
+			cid = le32_to_cpu(ua32(src + 0));
+			csz = be32_to_cpu(ua32(src + 4));
+
+			size -= 8;
+			mapsz -= 8;
+			src += 8;
+
+			if (cid == FRMT) {
+				bits = be16_to_cpu(ua16(src + 10));
+				rate = be16_to_cpu(ua16(src + 14));
+				chnl = be16_to_cpu(ua16(src + 18));
+			}
+
+			src += csz;
+			size -= csz;
+			mapsz -= csz;
+		}
+
+		/* now there should be "DATA" with the TOTAL len of sound of the whole track */
+		if (size < 8)
+			return;
+		cid = le32_to_cpu(ua32(src + 0));
+		csz = be32_to_cpu(ua32(src + 4));
+		src += 8;
+		size -= 8;
+		if (cid != DATA)
+			return;
+
+		atrk->flags |= ATRK_INUSE | ATRK_BLOCKED;	/* active track */
+		atrk->dataleft = csz;
+		atrk_set_srcfmt(ctx, atrk, rate, bits, chnl, vol, 0);
+	}
+
+	atrk_read_pcmsrc(ctx, atrk, size, src);
+	atrk->dataleft -= size;
+	if (atrk->dataleft <= 0) {
+		atrk->flags |= ATRK_SRCDONE;	/* free track after mixing */
+		atrk->flags &= ~ATRK_BLOCKED;
+		atrk->dataleft = 0;
+	}
+	if (atrk_cnt_dstframes_avail(atrk) >= ctx->rt.audminframes)
+		atrk->flags &= ~ATRK_BLOCKED;
+}
+
 static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint8_t v1, v2, v3, *src2, *ib = ctx->rt.iactbuf;
@@ -2912,710 +3575,6 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
-static void atrk_put_sample(struct sanatrk *atrk, int16_t samp)
-{
-	int16_t *dst;
-
-	if (atrk->wrptr >= ATRK_MAXWP)
-		atrk->wrptr = 0;
-
-	dst = (int16_t *)(atrk->data + atrk->wrptr);
-	*dst = samp;
-	atrk->wrptr += 2;
-	atrk->datacnt += 2;
-}
-
-/* read PCM source data, and convert it to 16bit/stereo/22kHz samplerate
- * if necessary, to match the format of the IACT tracks of codec47/48 videos.
- * FIXME: the "upsampling" is just doubling the samples, so super crude; best
- * to interpolate between last generated and newly generated sample.
- */
-static void aud_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
-			    uint32_t size, uint8_t *src)
-{
-	uint32_t space, toend;
-	int16_t s1, s2, *dst;
-	uint8_t v[3];
-	int f, i, fast;
-
-	f = atrk->flags;
-	if (!(f & AUD_INUSE))
-		return;
-
-	/* calculate expected space requirements to determine if the wrptr
-	 * may wrap around, or the fast path can be used.
-	 */
-	space = size;
-	if (f & AUD_SRC12BIT)
-		space = (size + atrk->pdcnt) / 3 * 4;
-	else if (f & AUD_SRC8BIT)
-		space = size * 2;
-
-	if (f & AUD_1CH)
-		space *= 2;
-	if (f & AUD_RATE11KHZ)
-		space *= 2;
-
-	toend = ATRK_MAXWP - atrk->wrptr;
-	fast = space <= toend;
-	dst = (int16_t *)(atrk->data + atrk->wrptr);
-
-	if (0 == (f & (AUD_SRC12BIT | AUD_SRC8BIT | AUD_RATE11KHZ | AUD_1CH))) {
-		/* optimal case: 22kHz/16bit/2ch source */
-		/* handle wraparound of wrptr */
-		if (size > toend) {
-			memcpy(atrk->data + atrk->wrptr, src, toend);
-			memcpy(atrk->data, src + toend, size - toend);
-		} else {
-			memcpy(atrk->data + atrk->wrptr, src, size);
-		}
-		atrk->datacnt += size;
-		size = 0;
-	} else if (f & AUD_SRC12BIT) {
-		/* 12->16bit to stereo decode, need at least 3 bytes */
-		while (size > 2 || atrk->pdcnt) {
-			for (i = 0; i < 3; i++) {
-				if (atrk->pdcnt > 0) {
-					v[i] = atrk->pd[i];
-					atrk->pdcnt--;
-				} else {
-					v[i] = *src++;
-					size--;
-				}
-			}
-			s1 = ((((v[1] & 0x0f) << 8) | v[0]) << 4) - 0x8000;
-			s2 = ((((v[1] & 0xf0) << 4) | v[2]) << 4) - 0x8000;
-			if (f & AUD_1CH) {
-				if (fast) {
-					*dst++ = s1;
-					*dst++ = s1;
-					*dst++ = s2;
-					*dst++ = s2;
-				} else {
-					atrk_put_sample(atrk, s1);
-					atrk_put_sample(atrk, s1);
-					atrk_put_sample(atrk, s2);
-					atrk_put_sample(atrk, s2);
-				}
-				if (f & AUD_RATE11KHZ) {
-					if (fast) {
-						*dst++ = s1;
-						*dst++ = s1;
-						*dst++ = s2;
-						*dst++ = s2;
-					} else {
-						atrk_put_sample(atrk, s1);
-						atrk_put_sample(atrk, s1);
-						atrk_put_sample(atrk, s2);
-						atrk_put_sample(atrk, s2);
-					}
-				}
-			} else {
-				if (fast) {
-					*dst++ = s1;
-					*dst++ = s2;
-				} else {
-					atrk_put_sample(atrk, s1);
-					atrk_put_sample(atrk, s2);
-				}
-				if (f & AUD_RATE11KHZ) {
-					if (fast) {
-						*dst++ = s1;
-						*dst++ = s2;
-					} else {
-						atrk_put_sample(atrk, s1);
-						atrk_put_sample(atrk, s2);
-					}
-				}
-			}
-		}
-
-	} else if (f & AUD_SRC8BIT) {
-		/* 8 -> 16 bit to stereo conversion */
-		while (size > 0) {
-			s1 = ((*src++) << 8) ^ 0x8000;
-			size--;
-
-			if (f & AUD_1CH) {
-				if (fast) {
-					*dst++ = s1;
-					*dst++ = s1;
-				} else {
-					atrk_put_sample(atrk, s1); /* L */
-					atrk_put_sample(atrk, s1);	/* R */
-				}
-				if (f & AUD_RATE11KHZ) {
-					if (fast) {
-						*dst++ = s1;
-						*dst++ = s1;
-					} else {
-						atrk_put_sample(atrk, s1);
-						atrk_put_sample(atrk, s1);
-					}
-				}
-			} else {
-				if (fast)
-					*dst++ = s1;
-				else
-					atrk_put_sample(atrk, s1);
-				if (f & AUD_RATE11KHZ) {
-					if (fast)
-						*dst++ = s1;
-					else
-						atrk_put_sample(atrk, s1);
-				}
-			}
-
-		}
-
-	} else {
-		/* 16bit mono samples -> 16bit stereo conversion. */
-
-		/* construct a 16 bit sample from optional leftover byte from
-		 * the last iteration
-		 */
-		s1 = 0;
-		if (atrk->pdcnt) {
-			s1 |= atrk->pd[0];
-			atrk->pdcnt--;
-			if (size > 0) {
-				s1 = (s1 << 8) | *src++;
-				size--;
-			} else {
-				/* zero new data, bail */
-				return;
-			}
-			if (fast) {
-				*dst++ = s1;
-				*dst++ = s1;
-			} else {
-				atrk_put_sample(atrk, s1);	/* L */
-				atrk_put_sample(atrk, s1);	/* R */
-			}
-			if (f & AUD_RATE11KHZ) {
-				if (fast) {
-					*dst++ = s1;
-					*dst++ = s1;
-				} else {
-					atrk_put_sample(atrk, s1);
-					atrk_put_sample(atrk, s1);
-				}
-			}
-		}
-
-		while (size > 1) {
-			s1 = *(int16_t *)src;
-			if (fast) {
-				*dst++ = s1;
-				*dst++ = s1;
-			} else {
-				atrk_put_sample(atrk, s1);	/* L */
-				atrk_put_sample(atrk, s1);	/* R */
-			}
-			if (f & AUD_RATE11KHZ) {
-				if (fast) {
-					*dst++ = s1;
-					*dst++ = s1;
-				} else {
-					atrk_put_sample(atrk, s1);
-					atrk_put_sample(atrk, s1);
-				}
-			}
-			src += 2;
-			size -= 2;
-		}
-	}
-
-	/* sometimes not all the data can be consumed at once (12bit!):
-	 * store the rest for the next datapacket for this track
-	 */
-	atrk->pdcnt = size;
-	for (i = 0; size; i++, size--)
-		atrk->pd[i] = *src++;
-
-	/* update track pointers, slowpath does that in atrk_put_sample() */
-	if (fast) {
-		atrk->wrptr += space;
-		if (atrk->wrptr >= ATRK_MAXWP)
-			atrk->wrptr -= ATRK_MAXWP;
-		atrk->datacnt += space;
-	}
-
-	/* unblock the track once enough data for a single frame duration
-	 * is available, to avoid clicks due to underruns.
-	 */
-	if ((atrk->datacnt > ctx->rt.audfragsize) && (atrk->flags & AUD_BLOCKED))
-		atrk->flags &= ~AUD_BLOCKED;
-}
-
-static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
-		       uint8_t vol1, int8_t pan1, uint8_t vol2, int8_t pan2)
-{
-	int16_t *src1 = (int16_t *)s1;
-	int16_t *src2 = (int16_t *)s2;
-	int16_t *dst = (int16_t *)ds1;
-	int d1, d2, d3;
-
-	while (bytes > 3) {
-		/* LEFT SAMPLE */
-		d1 = src1 ? (*src1++) : 0;
-		d2 = src2 ? (*src2++) : 0;
-		bytes -= 2;
-
-		if (pan1 <= 0)
-			d1 = (d1 * vol1) / AUD_VOL_MAX;
-		else
-			d1 = ((d1 * (AUD_VOL_MAX - pan1) / AUD_VOL_MAX) * vol1) / AUD_VOL_MAX;
-
-		if (pan2 <= 0)
-			d2 = (d2 * vol2) / AUD_VOL_MAX;
-		else
-			d2 = ((d2 * (AUD_VOL_MAX - pan2) / AUD_VOL_MAX) * vol2) / AUD_VOL_MAX;
-
-		d1 = d1 + 32768;	/* s16 sample to u16 */
-		d2 = d2 + 32768;
-
-		if (d1 < 32768 && d2 < 32768) {
-			d3 = (d1 * d2) / 32768;
-		} else {
-			d3 = (2 * (d1 + d2)) - ((d1 * d2) / 32768) - 65536;
-		}
-		*dst++ = (d3 - 32768);	/* mixed u16 back to s16 and write */
-
-		/* RIGHT SAMPLE */
-		d1 = src1 ? (*src1++) : 0;
-		d2 = src2 ? (*src2++) : 0;
-		bytes -= 2;
-
-		if (pan1 >= 0)
-			d1 = (d1 * vol1) / AUD_VOL_MAX;
-		else
-			d1 = ((d1 * (AUD_VOL_MAX + pan1) / AUD_VOL_MAX) * vol1) / AUD_VOL_MAX;
-
-		if (pan2 >= 0)
-			d2 = (d2 * vol2) / AUD_VOL_MAX;
-		else
-			d2 = ((d2 * (AUD_VOL_MAX + pan2) / AUD_VOL_MAX) * vol2) / AUD_VOL_MAX;
-
-		d1 = d1 + 32768;		/* s16 sample to u16 */
-		d2 = d2 + 32768;
-
-		if (d1 < 32768 && d2 < 32768) {
-			d3 = (d1 * d2) / 32768;
-		} else {
-			d3 = (2 * (d1 + d2)) - ((d1 * d2) / 32768) - 65536;
-		}
-
-		*dst++ = (d3 - 32768);	/* mixed u16 back to s16 and write */
-	}
-}
-
-static struct sanatrk *aud_find_trk(struct sanctx *ctx, uint16_t trkid, int fail)
-{
-	struct sanrt *rt = &ctx->rt;
-	struct sanatrk *atrk;
-	int i, newid;
-
-	newid = -1;
-	for (i = 0; i < ATRK_NUM; i++) {
-		atrk = &(rt->sanatrk[i]);
-		if ((atrk->flags & AUD_INUSE) && (trkid == atrk->trkid))
-			return atrk;
-		if ((newid < 0) && (0 == (atrk->flags & AUD_INUSE)))
-			newid = i;
-	}
-	if ((newid > -1) && (!fail)) {
-		atrk = &(rt->sanatrk[newid]);
-		atrk->rdptr = 0;
-		atrk->wrptr = 0;
-		atrk->datacnt = 0;
-		atrk->flags = 0;
-		atrk->pdcnt = 0;
-		atrk->trkid = trkid;
-		atrk->dataleft = 0;
-		atrk->vol = AUD_VOL_MAX;
-		atrk->pan = 0;
-		return atrk;
-	}
-	return NULL;
-}
-
-/* buffer data from iMUSE IACT block.
- * the source can be multiple independent tracks, all with different rates,
- * channels, resolution.  Decode the data and if necessary, convert it to
- * 22.05kHz, 16bit, stereo.  Final mixing of the tracks is done at the end
- * of FRME handling.
- */
-static void iact_buffer_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
-			      uint16_t trkid, uint16_t uid)
-{
-	uint32_t cid, csz, mapsz;
-	uint16_t rate, bits, chnl, vol;
-	struct sanatrk *atrk;
-
-	vol = AUD_VOL_MAX;
-	if (uid == 1)
-		trkid += 100;
-	else if (uid == 2)
-		trkid += 200;
-	else if (uid == 3)
-		trkid += 300;
-	else if ((uid >= 100) && (uid <= 163)) {
-		trkid += 400;
-		vol = uid * 2 - 200;
-	} else if ((uid >= 200) && (uid <= 263)) {
-		trkid += 500;
-		vol = uid * 2 - 400;
-	} else if ((uid >= 300) && (uid <= 363)) {
-		trkid += 600;
-		vol = uid * 2 - 600;
-	}
-
-	atrk = aud_find_trk(ctx, trkid, 0);
-	if (!atrk)
-		return;
-
-	if (vol > AUD_VOL_MAX)
-		vol = AUD_VOL_MAX;
-	atrk->vol = vol;
-	atrk->pan = 0;
-
-	/*
-	 * read header of new track. NOTE: subchunks aren't 16bit aligned!
-	 */
-	if (0 == (atrk->flags & AUD_INUSE)) {
-		if (size < 24)
-			return;
-		cid = le32_to_cpu(ua32(src + 0));
-		if (cid != iMUS)
-			return;
-
-		cid = le32_to_cpu(ua32(src + 8));
-		mapsz = be32_to_cpu(ua32(src + 12));
-
-		size -= 16;
-		src += 16;
-
-		if (cid != MAP_ || mapsz > size)
-			return;
-
-		/* the MAP_ chunk again has a few subchuks, need the FRMT tag */
-		while (mapsz > 7 && size > 7) {
-			cid = le32_to_cpu(ua32(src + 0));
-			csz = be32_to_cpu(ua32(src + 4));
-
-			size -= 8;
-			mapsz -= 8;
-			src += 8;
-
-			if (cid == FRMT) {
-				bits = be16_to_cpu(ua16(src + 10));
-				rate = be16_to_cpu(ua16(src + 14));
-				chnl = be16_to_cpu(ua16(src + 18));
-				if (bits == 8)
-					atrk->flags |= AUD_SRC8BIT;
-				else if (bits == 12)
-					atrk->flags |= AUD_SRC12BIT;
-				if (rate == 11025)
-					atrk->flags |= AUD_RATE11KHZ;
-				if (chnl == 1)
-					atrk->flags |= AUD_1CH;
-			}
-
-			src += csz;
-			size -= csz;
-			mapsz -= csz;
-		}
-
-		/* now there should be "DATA" with the TOTAL len of sound of the whole track */
-		if (size < 8)
-			return;
-		cid = le32_to_cpu(ua32(src + 0));
-		csz = be32_to_cpu(ua32(src + 4));
-		src += 8;
-		size -= 8;
-		if (cid != DATA)
-			return;
-
-		atrk->flags |= AUD_INUSE | AUD_BLOCKED;	/* active track */
-		atrk->dataleft = csz;
-		ctx->rt.acttrks++;
-	}
-
-	if (size >= atrk->dataleft) {
-		size = atrk->dataleft;
-		atrk->flags |= AUD_SRCDONE;	/* free track after mixing */
-		atrk->flags &= ~AUD_BLOCKED;
-	}
-	aud_read_pcmsrc(ctx, atrk, size, src);
-	atrk->dataleft -= size;
-}
-
-/* count all active tracks: tracks which are still allocated */
-static int aud_count_active(struct sanrt *rt)
-{
-	struct sanatrk *atrk;
-	int i, active;
-
-	active = 0;
-	for (i = 0; i < ATRK_NUM; i++) {
-		atrk = &(rt->sanatrk[i]);
-		if (AUD_INUSE == (atrk->flags & (AUD_INUSE | AUD_BLOCKED)))
-			active++;
-	}
-	return active;
-}
-
-/* count all mixable tracks, with shortest buffer size returned too */
-static int aud_count_mixable(struct sanrt *rt, uint32_t *minlen)
-{
-	struct sanatrk *atrk;
-	int i, mixable;
-	uint32_t ml;
-
-	ml = ~0;
-	mixable = 0;
-	for (i = 0; i < ATRK_NUM; i++) {
-		atrk = &(rt->sanatrk[i]);
-		if ((AUD_INUSE == (atrk->flags & (AUD_INUSE | AUD_MIXED | AUD_BLOCKED)))
-		    && (atrk->datacnt > 1)) {
-			mixable++;
-			if (ml > atrk->datacnt)
-				ml = atrk->datacnt;
-		}
-	}
-
-	*minlen = ml;
-	return mixable;
-}
-
-/* clear the AUD_MIXED flag from all tracks */
-static void aud_reset_mixable(struct sanrt *rt)
-{
-	int i;
-
-	for (i = 0; i < ATRK_NUM; i++)
-		rt->sanatrk[i].flags &= ~AUD_MIXED;
-}
-
-/* get the FIRST mixable track. */
-static struct sanatrk *aud_get_mixable(struct sanrt *rt)
-{
-	struct sanatrk *atrk;
-	int i;
-	for (i = 0; i < ATRK_NUM; i++) {
-		atrk = &(rt->sanatrk[i]);
-		if ((AUD_INUSE == (atrk->flags & (AUD_INUSE | AUD_MIXED | AUD_BLOCKED)))
-			&& (atrk->datacnt > 1))
-			return atrk;
-	}
-	return NULL;
-}
-
-static void aud_atrk_consume(struct sanrt *rt, struct sanatrk *atrk, uint32_t bytes)
-{
-	atrk->datacnt -= bytes;
-	atrk->rdptr += bytes;
-	if (atrk->rdptr >= ATRK_MAXWP)
-		atrk->rdptr -= ATRK_MAXWP;
-
-	if (atrk->datacnt < 1) {
-		atrk->rdptr = 0;
-		atrk->wrptr = 0;
-		if (atrk->flags & AUD_SRCDONE) {
-			atrk->flags = 0;
-			atrk->pdcnt = 0;
-			atrk->trkid = 0;
-			atrk->dataleft = 0;
-			rt->acttrks--;
-		}
-	}
-}
-
-/* mix all of the tracks which have data available together:
- * (1) find all ready tracks with data
- * (2) find out which one hast the _least_ available (minlen)
- * (3) of all tracks with data, take minlen bytes and mix them into the dest buffer
- * (4) have any of these tracks finished (i.e. no more data incoming)
- *	yes -> go back to (1)
- *	no -> we're done, queue audio buffer, wait for next frame with more
- *		track data.
- */
-static int aud_mix_tracks(struct sanctx *ctx)
-{
-	struct sanrt *rt = &ctx->rt;
-	struct sanatrk *atrk1, *atrk2;
-	int active1, active2, mixable, step, l3;
-	uint32_t minlen1, dstlen, ml2, toend1, toend2, todo, dff;
-	uint8_t *dstptr, *src1, *src2, *aptr;
-
-	dstlen = 0;
-	step = 0;
-	dstptr = aptr = rt->atmpbuf1;
-
-_aud_mix_again:
-	dff = rt->audfragsize - dstlen;
-	mixable = aud_count_mixable(rt, &minlen1);
-	active1 = aud_count_active(rt);
-
-	if (dff < 1)
-		goto done;
-
-	if (dff && (minlen1 == -1)) {
-		/* hmm underrun */
-		goto done;
-	}
-
-	if (minlen1 > dff)
-		minlen1 = dff;
-
-	/* only one mixable track found.  If we haven't mixed before, we can
-	 * queue the track buffer directly; otherwise we append to the dest
-	 * buffer.
-	 */
-	if ((mixable == 1) && (minlen1 != ~0)){
-		atrk1 = aud_get_mixable(rt);
-		if (!atrk1)
-			return 0;
-
-		if (step == 0) {
-			aud_mixs16(dstptr, atrk1->data + atrk1->rdptr, NULL,
-				   minlen1, atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
-			dstlen += minlen1;
-			aud_atrk_consume(rt, atrk1, minlen1);
-		} else {
-			toend1 = ATRK_MAXWP - atrk1->rdptr;
-			if (minlen1 <= toend1) {
-				aud_mixs16(dstptr, atrk1->data + atrk1->rdptr, NULL,
-					   minlen1, atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
-				aud_atrk_consume(rt, atrk1, minlen1);
-			} else {
-				todo = minlen1;
-				aud_mixs16(dstptr, atrk1->data + atrk1->rdptr, NULL,
-					   toend1, atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
-				aud_atrk_consume(rt, atrk1, toend1);
-				todo -= toend1;
-				aud_mixs16(dstptr + toend1, atrk1->data + atrk1->rdptr, NULL,
-					   todo, atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
-				aud_atrk_consume(rt, atrk1, todo);
-			}
-			dstlen += minlen1;
-		}
-	} else if ((mixable != 0) && (minlen1 != ~0)) {
-		/* step 0: mix the first 2 tracks together */
-		atrk1 = aud_get_mixable(rt);
-		atrk1->flags |= AUD_MIXED;
-		atrk2 = aud_get_mixable(rt);
-		atrk2->flags |= AUD_MIXED;
-
-		src1 = atrk1->data + atrk1->rdptr;
-		src2 = atrk2->data + atrk2->rdptr;
-		toend1 = ATRK_MAXWP - atrk1->rdptr;
-		toend2 = ATRK_MAXWP - atrk2->rdptr;
-		if (minlen1 <= toend1 && minlen1 <= toend2) {
-			/* best case: both tracks don't wrap around */
-			aud_mixs16(dstptr, src1, src2, minlen1,
-				   atrk1->vol, atrk1->pan, atrk2->vol, atrk2->pan);
-			aud_atrk_consume(rt, atrk1, minlen1);
-			aud_atrk_consume(rt, atrk2, minlen1);
-		} else {
-			/* reading 'minlen' bytes would wrap one or both around */
-			todo = minlen1;
-			/* read till the first wraps around */
-			ml2 = _min(toend1, toend2);
-			aud_mixs16(dstptr, src1, src2, ml2,
-				   atrk1->vol, atrk1->pan, atrk2->vol, atrk2->pan);
-			aud_atrk_consume(rt, atrk1, ml2);
-			aud_atrk_consume(rt, atrk2, ml2);
-			src1 = atrk1->data + atrk1->rdptr;
-			src2 = atrk2->data + atrk2->rdptr;
-			toend1 -= ml2;
-			toend2 -= ml2;
-			todo -= ml2;
-			/* one toendX is now zero and wrapped around, read the
-			 * other until wrap around */
-			if (toend1 == 0)
-				l3 = _min(todo, toend2);
-			else
-				l3 = _min(todo, toend1);
-
-			aud_mixs16(dstptr + ml2, src1, src2, l3,
-				   atrk1->vol, atrk1->pan, atrk2->vol, atrk2->pan);
-			aud_atrk_consume(rt, atrk1, l3);
-			aud_atrk_consume(rt, atrk2, l3);
-			src1 = atrk1->data + atrk1->rdptr;
-			src2 = atrk2->data + atrk2->rdptr;
-			todo -= l3;
-			/* now the rest */
-			if (todo) {
-				aud_mixs16(dstptr + ml2 + l3, src1, src2, todo,
-					   atrk1->vol, atrk1->pan, atrk2->vol, atrk2->pan);
-				aud_atrk_consume(rt, atrk1, todo);
-				aud_atrk_consume(rt, atrk2, todo);
-			}
-		}
-
-		mixable -= 2;
-		step++;
-
-		/* step 1: mix the next tracks into dstptr, minlen is still
-		 * in effect.
-		 */
-		while (mixable > 0) {
-			atrk1 = aud_get_mixable(rt);
-			if (!atrk1) {
-				mixable = 0;
-				break;
-			}
-			atrk1->flags |= AUD_MIXED;
-			src1 = atrk1->data + atrk1->rdptr;
-			src2 = dstptr;
-			toend1 = ATRK_MAXWP - atrk1->rdptr;
-			if (minlen1 <= toend1) {
-				aud_mixs16(dstptr, src1, src2, minlen1,
-					   atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
-				aud_atrk_consume(rt, atrk1, minlen1);
-			} else {
-				todo = minlen1;
-				aud_mixs16(dstptr, src1, src2, toend1,
-					   atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
-				aud_atrk_consume(rt, atrk1, toend1);
-				todo -= toend1;
-				src1 = atrk1->data + atrk1->rdptr;
-				aud_mixs16(dstptr + toend1, src1, src2 + toend1, todo,
-					   atrk1->vol, atrk1->pan, AUD_VOL_MAX, 0);
-				aud_atrk_consume(rt, atrk1, todo);
-			}
-			--mixable;
-		}
-
-		dstlen += minlen1;
-		dstptr += minlen1;
-		/* now all tracks including the one with minimal lenght have
-		 * been mixed into destination.
-		 * Now test if the number of active streams has changed.
-		 * If not, we're done.  If YES: that means that the track with
-		 *  minlen has finished, and we can assume a new minlen, and
-		 * repeat this cycle, appending to dst.
-		 */
-		active2 = aud_count_active(rt);
-		if (active2 < active1 && active2 != 0) {
-			/* last minlen stream is finished, a new minlen
-			 * can be set and more mixing be done, need to
-			 * clear the MIXED flag from all active streams.
-			 */
-			aud_reset_mixable(rt);
-		}
-		if (minlen1 < dff)
-			goto _aud_mix_again;
-	}
-done:
-	aud_reset_mixable(rt);
-	if (dstlen)
-		ctx->io->queue_audio(ctx->io->userctx, aptr, dstlen);
-	return (dstlen != 0);
-}
-
 static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint16_t p[7];
@@ -3633,104 +3592,83 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			iact_audio_scaled(ctx, size - 18, src + 18);
 		} else {
 			/* imuse-type */
-			iact_buffer_imuse(ctx, size - 18, src + 18, p[4], p[3]);
+			iact_audio_imuse(ctx, size - 18, src + 18, p[4], p[3]);
 		}
 	}
 }
 
 static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
-			uint32_t saudsize, uint32_t tid)
+			const uint32_t saudsize, uint32_t tid, uint8_t vol, int8_t pan)
 {
-	uint32_t cid, csz, xsize = _min(size, saudsize);
+	uint32_t cid, csz;
 	uint16_t rate;
 	struct sanatrk *atrk;
 
-	atrk = aud_find_trk(ctx, tid, 0);
+	atrk = atrk_find_trkid(ctx, tid, 0);
 	if (!atrk)
 		return;
 
 	/* RA1 does this */
 	if (atrk->flags != 0) {
-		atrk->wrptr = 0;
-		atrk->rdptr = 0;
-		atrk->datacnt = 0;
-		atrk->dataleft = 0;
-		atrk->flags = 0;
-		atrk->pdcnt = 0;
-		atrk->trkid = tid;
-		atrk->vol = AUD_VOL_MAX;
-		atrk->pan = 0;
+		atrk_reset(atrk);
 	}
 
+	atrk->trkid = tid;
 	rate = ctx->rt.samplerate;
-	atrk->flags = AUD_SRC8BIT | AUD_1CH;
-	while (xsize > 7) {
+	while (size > 7) {
 		cid = le32_to_cpu(ua32(src + 0));
 		csz = be32_to_cpu(ua32(src + 4));
 		src += 8;
-		xsize -= 8;
 		size -= 8;
 		if (cid == STRK) {
 			if (csz == 14)
 				rate = be16_to_cpu(*(uint16_t *)(src + 12));
 
-			if (rate == 22050 || rate == 22222)
-				atrk->flags &= ~AUD_RATE11KHZ;
-			else	/* HACK ALERT FIXME: rate conversion required */
-				atrk->flags |= AUD_RATE11KHZ;
-
 		} else if (cid == SDAT) {
-			atrk->flags |= AUD_INUSE | AUD_BLOCKED;
+			atrk->flags |= ATRK_INUSE | ATRK_BLOCKED;
 			atrk->dataleft = csz;
-			ctx->rt.acttrks++;
 			break;
 		}
 		src += csz;
-		xsize -= csz;
 		size -= csz;
 	}
-	if (size > atrk->dataleft)
-		size = atrk->dataleft;
-	aud_read_pcmsrc(ctx, atrk, size, src);
+	atrk_set_srcfmt(ctx, atrk, rate, 8, 1, vol, pan);
+	atrk_read_pcmsrc(ctx, atrk, size, src);
 	atrk->dataleft -= size;
 	if (atrk->dataleft <= 0) {
-		atrk->flags |= AUD_SRCDONE;
-		atrk->flags &= ~AUD_BLOCKED;
+		atrk->flags |= ATRK_SRCDONE;
+		atrk->flags &= ~ATRK_BLOCKED;
 	}
+	if (atrk_cnt_dstframes_avail(atrk) >= ctx->rt.audminframes)
+		atrk->flags &= ~ATRK_BLOCKED;
 }
 
 static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	struct sanrt *rt = &ctx->rt;
 	uint32_t t1, csz, tid, idx, vol, pan;
 	struct sanatrk *atrk;
 
 	if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
 		return;
 
-	if (rt->psadhdr < 1) {
-		/* dig.exe 4332f */
-		if ((src[0] == 0) && (src[1] == 0) && (src[4] == 0) &&
-		    (src[5] == 0) && (src[8] == 0) && (src[9] == 0))
-			rt->psadhdr = 1;
-		else
-			rt->psadhdr = 2;
-	}
-
-	if (rt->psadhdr == 1) {
+	/* dig.exe 4332f */
+	if ((src[0] == 0) && (src[1] == 0) && (src[4] == 0) &&
+	    (src[5] == 0) && (src[8] == 0) && (src[9] == 0)) {
+		/* PSADv1, as in Rebel Assault 1 / ANIMv1 */
 		tid = be32_to_cpu(ua32(src + 0));
 		idx = be32_to_cpu(ua32(src + 4));
-		vol = AUD_VOL_MAX;	/* maximum */
+		vol = ATRK_VOL_MAX;	/* maximum */
 		pan = 0;		/* centered */
 		src += 12;
 		size -= 12;
 	} else {
+		/* PSADv2, as in Rebel Assault 2+ / ANIMv2 */
 		tid = le16_to_cpu(ua16(src + 0));
 		idx = le16_to_cpu(ua16(src + 2));
 		vol = src[8];
 
-		if (vol > AUD_VOL_MAX)
-			vol = AUD_VOL_MAX;
+		if (vol > ATRK_VOL_MAX)
+			vol = ATRK_VOL_MAX;
 
 		/* RA2 mono sound supposed to be played on both channels.
 		 * used for the music mostly. Set pan to zero since the source
@@ -3749,13 +3687,13 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		t1 = le32_to_cpu(ua32(src + 0));
 		csz = be32_to_cpu(ua32(src + 4));
 		if (t1 == SAUD) {
-			handle_SAUD(ctx, size - 8, src + 8, csz, tid);
+			handle_SAUD(ctx, size - 8, src + 8, csz, tid, vol, pan);
 		}
 	} else {
 		/* handle_SAUD should have allocated it.  RA1 however
 		 * sometimes repeats the last index of a tid a few times.
 		 */
-		atrk = aud_find_trk(ctx, tid, 1);
+		atrk = atrk_find_trkid(ctx, tid, 1);
 		if (!atrk)
 			return;
 
@@ -3763,10 +3701,14 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		atrk->vol = vol;
 		if (size > atrk->dataleft)
 			size = atrk->dataleft;
-		aud_read_pcmsrc(ctx, atrk, size, src);
+		atrk_read_pcmsrc(ctx, atrk, size, src);
 		atrk->dataleft -= size;
-		if (atrk->dataleft < 1)
-			atrk->flags |= AUD_SRCDONE;
+		if (atrk->dataleft < 1) {
+			atrk->flags |= ATRK_SRCDONE;
+			atrk->flags &= ~ATRK_BLOCKED;
+		}
+		if (atrk_cnt_dstframes_avail(atrk) >= ctx->rt.audminframes)
+			atrk->flags &= ~ATRK_BLOCKED;
 	}
 }
 
@@ -4089,7 +4031,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		}
 
 		/* mix multi-track audio and queue it up */
-		if (rt->acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO))
+		if (!(ctx->io->flags & SANDEC_FLAG_NO_AUDIO))
 			aud_mix_tracks(ctx);
 
 		rt->currframe++;
@@ -4132,13 +4074,22 @@ static void sandec_free_memories(struct sanctx *ctx)
 static int sandec_alloc_memories(struct sanctx *ctx, const uint16_t maxx,
 				 const uint16_t maxy, int sanm)
 {
-	uint32_t vmem, cmem, mem, gb;
+	uint32_t vmem, cmem, mem, gb, grsb;
 	struct sanrt *rt = &ctx->rt;
 	uint8_t *m;
 	int i;
 
+	rt->num_atrk = sanm ? 1 : ATRK_MAX;
+
 	/* work buffers */
 	mem = sanm ? SZ_SNMBUFS : SZ_ANMBUFS;
+
+	/* 16bit 2ch for the frame duration */
+	if (!rt->audminframes)
+		rt->audminframes = 22050;
+
+	grsb = 4 * rt->audminframes;
+	mem += grsb * 2;
 
 	/* codec buffers: 43 lines (max. c47 mv) top + bottom as guard bands
 	 * for stray motion vectors.
@@ -4166,9 +4117,10 @@ static int sandec_alloc_memories(struct sanctx *ctx, const uint16_t maxx,
 		mem += vmem * 4;
 		/* STOR buffer c20 FOBJ header + data size */
 		mem += 32;
-		/* ANM audio track buffers */
-		mem += (ATRK_NUM * ATRK_MAXWP);
 	}
+
+	/* ANM audio track buffers, resample structures */
+	mem += (rt->num_atrk * ATRK_DATSZ);
 
 	/* allocate memory for work buffers */
 	m = (uint8_t *)malloc(mem);
@@ -4185,11 +4137,13 @@ static int sandec_alloc_memories(struct sanctx *ctx, const uint16_t maxx,
 		rt->shiftpal = (int16_t *)m;	m += SZ_SHIFTPAL;
 		rt->c47ipoltbl = (uint8_t *)m;	m += SZ_C47IPTBL;
 		rt->atmpbuf1 = (uint8_t *)m;	m += SZ_AUDTMPBUF1;
+		rt->audrsb1 = (uint8_t *)m;	m += grsb;
+		rt->audrsb2 = (uint8_t *)m;	m += grsb;
 
 		/* PSAD/iMUS audio track buffers */
-		for (i = 0; i < ATRK_NUM; i++) {
+		for (i = 0; i < rt->num_atrk; i++) {
 			rt->sanatrk[i].data = m;
-			m += ATRK_MAXWP;
+			m += ATRK_DATSZ;
 		}
 
 		/* set up video buffers for ANM */
@@ -4203,6 +4157,13 @@ static int sandec_alloc_memories(struct sanctx *ctx, const uint16_t maxx,
 	} else {
 		/* VIMA output buffer */
 		rt->atmpbuf1 = (uint8_t *)m;	m += SZ_AUDTMPBUF1;
+		rt->audrsb1 = (uint8_t *)m;	m += grsb;
+		rt->audrsb2 = (uint8_t *)m;	m += grsb;
+
+		for (i = 0; i < rt->num_atrk; i++) {
+			rt->sanatrk[i].data = m;
+			m += ATRK_DATSZ;
+		}
 
 		/* set up buffers for SNM: 3 video buffers for BL16 */
 		rt->fbuf = NULL;
@@ -4273,8 +4234,10 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	if (!fps)
 		fps = 15;
 	rt->framedur = 1000000 / fps;	/* frame duration in microseconds */
-	/* minimum audio fragment size per FRME to sustain click-free playback */
-	rt->audfragsize = (((22050 * 2 * 2) / fps) + 3) & ~3;
+	/* minimum number of samples to generate when resampling a stream to the
+	 * output rate to supply enough data for the duration of a single frame.
+	 */
+	rt->audminframes = ((22050 / fps) + 1) & ~1U;
 
 	/* for Full Throttle: the incoming audio data rate is not not enough
 	 * to sustain click-free playback at the requested 10fps.  It starts
@@ -4284,7 +4247,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	 */
 	if (fps < 11) {
 		rt->framedur = 10000000 / 105;
-		rt->audfragsize = (((22050 * 2 * 2 * 10) / 105) + 3) & ~3;
+		rt->audminframes = (((22050 * 10) / 105) + 1) & ~1U;
 	}
 
 	free(ahbuf);
@@ -4421,7 +4384,7 @@ again:
 		if (ctx->rt.currframe >= ctx->rt.FRMEcnt) {
 			ret = SANDEC_DONE;	/* seems we reached file end */
 			b = 1;
-			while (b && (ctx->rt.acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)))
+			while (b && (atrk_count_mixable(&ctx->rt, NULL) && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)))
 				b = aud_mix_tracks(ctx);
 		}
 		goto out;
@@ -4446,7 +4409,7 @@ again:
 		}
 		goto again;
 
-	} else if (ctx->rt.acttrks && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)) {
+	} else if (atrk_count_active(&ctx->rt) && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)) {
 		aud_mix_tracks(ctx);
 
 	} else {
@@ -4528,10 +4491,11 @@ int sandec_open(void *sanctx, struct sanio *io)
 				free(dat);
 				goto out;
 			}
-			handle_SAUD(ctx, csz, dat, csz, 0);
+			sandec_alloc_memories(ctx, 0, 0, 0);
+			handle_SAUD(ctx, csz, dat, csz, 0, ATRK_VOL_MAX, 0);
 			free(dat);
-			ctx->rt.audfragsize = (22050 * 2 * 2) / 2; /* half a sec */
-			ret = ctx->rt.acttrks > 0 ? 0 : 8;
+			ctx->rt.audminframes = 22050 / 10;
+			ret = atrk_count_active(&ctx->rt) > 0 ? 0 : 8;
 		}	
 	} else {
 		ret = 9;

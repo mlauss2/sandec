@@ -37,10 +37,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
     - default off as it generates a lot of ghosting, but some scenes, esp. zoom-ins and pans, look noticeably smoother.
 - Audio decoding
   - audio ouput for all by the decoder is 22kHz/16bit/2ch.
-  - handles all raw PCM:
-    - best for codec47/48/bl16 titles (The Dig/COMI/Outlaws/SotE/MotS/..).
-    - PSAD-based multistream audio currently is a bit wonky (RA1/RA2/FT/MakingMagic/Mortimer/..)
-    - 11kHz/5kHz sources are very crudely upsampled.
+  - handles all raw PCM (SMUSH).
   - VIMA and IMA4 on Grim Fandango/Infernal Machine/ForceCommander/XWA/..
 - player keyboard controls:
   - space to pause/unpause
@@ -59,9 +56,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - Mortimer and the Riddles of the Medallion
   - Most videos play, but issues with transparency and objects with only half width/height.
 - Audio
-  - PSAD-based audio is far from perfect, a rewrite is in progress.
-    - stream data is frequently overwritten (esp noticeable in MakingMagic).
-    - upsampling is fast but terrible and memory-hungry.
+  - PSAD-based audio issues remaining:
     - RA1/RA2 background music does not loop.
     - RA1 player speech is both genders simultaneously: the game engine filtered them using the SKIP chunks, which are not implemented (yet).
 
@@ -76,4 +71,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -s: no audio (silent)
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-20251108
+20251114
