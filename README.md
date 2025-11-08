@@ -31,13 +31,17 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Force Commander
     - you need to unzip the .znm files first to play them.
 - Video decoding
-  - Handles all 8-bit codecs found in LucasArts DOS/Windows titles
+  - Handles all 8-bit codecs found in LucasArts DOS/Windows titles.
   - BL16 video in .snm/.znm files.
   - frame interpolation for codec47/48 videos
     - default off as it generates a lot of ghosting, but some scenes, esp. zoom-ins and pans, look noticeably smoother.
 - Audio decoding
   - audio ouput for all by the decoder is 22kHz/16bit/2ch.
-    - all sources with lower quality are very crudely upsampled.
+  - handles all raw PCM:
+    - best for codec47/48/bl16 titles (The Dig/COMI/Outlaws/SotE/MotS/..).
+    - PSAD-based multistream audio currently is a bit wonky (RA1/RA2/FT/MakingMagic/Mortimer/..)
+    - 11kHz/5kHz sources are very crudely upsampled.
+  - VIMA and IMA4 on Grim Fandango/Infernal Machine/ForceCommander/XWA/..
 - player keyboard controls:
   - space to pause/unpause
   - f     to toggle fullscreen/windowed
@@ -55,8 +59,11 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - Mortimer and the Riddles of the Medallion
   - Most videos play, but issues with transparency and objects with only half width/height.
 - Audio
-  - RA1/RA2 background music does not loop.
-  - RA1 player speech is both genders simultaneously: the game engine filtered them using the SKIP chunks, which are not implemented (yet).
+  - PSAD-based audio is far from perfect, a rewrite is in progress.
+    - stream data is frequently overwritten (esp noticeable in MakingMagic).
+    - upsampling is fast but terrible and memory-hungry.
+    - RA1/RA2 background music does not loop.
+    - RA1 player speech is both genders simultaneously: the game engine filtered them using the SKIP chunks, which are not implemented (yet).
 
 # Build:
 - Have SDL3
@@ -69,4 +76,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -s: no audio (silent)
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-20251004
+20251108
