@@ -130,6 +130,7 @@ SZ_AUDTMPBUF1 + SZ_SHIFTPAL)
 #define AUD_RATE11KHZ		(1 << 4)
 #define AUD_SRCDONE		(1 << 5)
 #define AUD_MIXED		(1 << 6)
+#define AUD_BLOCKED		(1 << 7)
 
 /* audio track. 1M buffer seems required for a few RA2 files */
 #define ATRK_MAXWP	(1 << 20)
@@ -3139,6 +3140,12 @@ static void aud_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
 			atrk->wrptr -= ATRK_MAXWP;
 		atrk->datacnt += space;
 	}
+
+	/* unblock the track once enough data for a single frame duration
+	 * is available, to avoid clicks due to underruns.
+	 */
+	if ((atrk->datacnt > ctx->rt.audfragsize) && (atrk->flags & AUD_BLOCKED))
+		atrk->flags &= ~AUD_BLOCKED;
 }
 
 static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
@@ -3330,7 +3337,7 @@ static void iact_buffer_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		if (cid != DATA)
 			return;
 
-		atrk->flags |= AUD_INUSE;	/* active track */
+		atrk->flags |= AUD_INUSE | AUD_BLOCKED;	/* active track */
 		atrk->dataleft = csz;
 		ctx->rt.acttrks++;
 	}
@@ -3338,6 +3345,7 @@ static void iact_buffer_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	if (size >= atrk->dataleft) {
 		size = atrk->dataleft;
 		atrk->flags |= AUD_SRCDONE;	/* free track after mixing */
+		atrk->flags &= ~AUD_BLOCKED;
 	}
 	aud_read_pcmsrc(ctx, atrk, size, src);
 	atrk->dataleft -= size;
@@ -3352,7 +3360,7 @@ static int aud_count_active(struct sanrt *rt)
 	active = 0;
 	for (i = 0; i < ATRK_NUM; i++) {
 		atrk = &(rt->sanatrk[i]);
-		if (AUD_INUSE == (atrk->flags & (AUD_INUSE)))
+		if (AUD_INUSE == (atrk->flags & (AUD_INUSE | AUD_BLOCKED)))
 			active++;
 	}
 	return active;
@@ -3369,7 +3377,7 @@ static int aud_count_mixable(struct sanrt *rt, uint32_t *minlen)
 	mixable = 0;
 	for (i = 0; i < ATRK_NUM; i++) {
 		atrk = &(rt->sanatrk[i]);
-		if ((AUD_INUSE == (atrk->flags & (AUD_INUSE | AUD_MIXED)))
+		if ((AUD_INUSE == (atrk->flags & (AUD_INUSE | AUD_MIXED | AUD_BLOCKED)))
 		    && (atrk->datacnt > 1)) {
 			mixable++;
 			if (ml > atrk->datacnt)
@@ -3397,7 +3405,7 @@ static struct sanatrk *aud_get_mixable(struct sanrt *rt)
 	int i;
 	for (i = 0; i < ATRK_NUM; i++) {
 		atrk = &(rt->sanatrk[i]);
-		if ((AUD_INUSE == (atrk->flags & (AUD_INUSE | AUD_MIXED)))
+		if ((AUD_INUSE == (atrk->flags & (AUD_INUSE | AUD_MIXED | AUD_BLOCKED)))
 			&& (atrk->datacnt > 1))
 			return atrk;
 	}
@@ -3672,7 +3680,7 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 				atrk->flags |= AUD_RATE11KHZ;
 
 		} else if (cid == SDAT) {
-			atrk->flags |= AUD_INUSE;
+			atrk->flags |= AUD_INUSE | AUD_BLOCKED;
 			atrk->dataleft = csz;
 			ctx->rt.acttrks++;
 			break;
@@ -3685,8 +3693,10 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		size = atrk->dataleft;
 	aud_read_pcmsrc(ctx, atrk, size, src);
 	atrk->dataleft -= size;
-	if (atrk->dataleft <= 0)
+	if (atrk->dataleft <= 0) {
 		atrk->flags |= AUD_SRCDONE;
+		atrk->flags &= ~AUD_BLOCKED;
+	}
 }
 
 static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
