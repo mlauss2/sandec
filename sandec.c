@@ -155,6 +155,7 @@ struct sanatrk {
 	uint32_t flags;		/* track flags				*/
 	atrk_decode decode;	/* upmix function			*/
 	int32_t dataleft;	/* SAUD data left until track ends	*/
+	uint32_t dstfavail;	/* frames in dest format available	*/
 	uint16_t trkid;		/* ID of this track			*/
 	uint8_t vol;		/* PSAD/iMUS stream volume		*/
 	int8_t pan;		/* PSAD stream pan			*/
@@ -2878,12 +2879,10 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
-/* count how many frames (Mono 1ch samples / stereo L+R samples) can be
- * constructed with the available data in an atrk.
- */
-static uint32_t atrk_cnt_srcframes_avail(struct sanatrk *atrk)
+static void atrk_update_dstframes_avail(struct sanatrk *atrk)
 {
-	uint32_t avail;
+	uint32_t den = atrk->src_cnvrate >> 8, avail;
+
 	if (atrk->flags & ATRK_SRC8BIT) {
 		avail = atrk->datacnt;			/* samples */
 	} else if (atrk->flags & ATRK_SRC12BIT) {
@@ -2895,26 +2894,16 @@ static uint32_t atrk_cnt_srcframes_avail(struct sanatrk *atrk)
 		avail >>= 1;				/* frames */
 	}
 
-	return avail;					/* frames */
-}
-
-/* count how many frames in the *destination rate* can be constructed from
- * the data available in the source atrk.
- * Use a few shortcuts: the result is only interesting if it is below the
- * minimum fragment size, above that just return 4096.
- */
-static uint32_t atrk_cnt_dstframes_avail(struct sanatrk *atrk)
-{
-	const uint32_t sf = atrk_cnt_srcframes_avail(atrk);
-	uint32_t den = atrk->src_cnvrate >> 8;
 	if (den == 0) {
-		return (sf == 0) ? 0 : 4096;	/* enough data */
+		avail = (avail == 0) ? 0 : 4096;
+	} else {
+		uint32_t num = avail << 8;
+		if (num > (4096 * den))
+			avail = 4096;
+		else
+			avail = num / den;
 	}
-	uint32_t num = sf << 8;
-	if (num > (4096 * den))
-		return 4096;
-
-	return num / den;
+	atrk->dstfavail = avail;
 }
 
 /* extract a sample for channel "ch" from frame at offset "frameofs" in the source
@@ -2980,6 +2969,7 @@ static inline void atrk_reset(struct sanatrk *atrk)
 	atrk->decode = NULL;
 	atrk->trkid = 0;
 	atrk->dataleft = 0;
+	atrk->dstfavail = 0;
 	atrk->vol = 0;
 	atrk->pan = 0;
 	atrk->srate = 0;
@@ -3049,7 +3039,7 @@ static struct sanatrk *atrk_get_next_mixable(struct sanrt *rt)
 	for (int i = 0; i < rt->num_atrk; i++) {
 		atrk = &(rt->sanatrk[i]);
 		if ((ATRK_INUSE == (atrk->flags & (ATRK_INUSE | ATRK_MIXED | ATRK_BLOCKED)))
-			&& atrk_cnt_srcframes_avail(atrk))
+			&& atrk->dstfavail)
 			return atrk;
 	}
 	return NULL;
@@ -3062,11 +3052,11 @@ static int atrk_count_mixable(struct sanrt *rt, uint32_t *minlen)
 	int i, mixable;
 	uint32_t ml, df;
 
-	ml = ~0;
+	ml = ~0U;
 	mixable = 0;
 	for (i = 0; i < rt->num_atrk; i++) {
 		atrk = &(rt->sanatrk[i]);
-		df = atrk_cnt_dstframes_avail(atrk);
+		df = atrk->dstfavail;
 		if ((ATRK_INUSE == (atrk->flags & (ATRK_INUSE | ATRK_MIXED | ATRK_BLOCKED))) && df) {
 			mixable++;
 			if (ml > df) {
@@ -3116,6 +3106,7 @@ static int atrk_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
 	atrk->datacnt += size;
 	atrk->wrptr += size;
 	atrk->wrptr &= ATRK_DATMASK;
+	atrk_update_dstframes_avail(atrk);
 
 	return 0;
 }
@@ -3127,8 +3118,8 @@ static void atrk_consume(struct sanatrk *atrk, uint32_t bytes)
 	atrk->datacnt -= bytes;
 	atrk->rdptr += bytes;
 	atrk->rdptr &= ATRK_DATMASK;
-
-	if ((atrk_cnt_dstframes_avail(atrk) < 1) && (atrk->flags & ATRK_SRCDONE)) {
+	atrk_update_dstframes_avail(atrk);
+	if ((atrk->dstfavail < 1) && (atrk->flags & ATRK_SRCDONE)) {
 		atrk_reset(atrk);
 	}
 }
@@ -3472,7 +3463,7 @@ static void iact_audio_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		atrk->flags &= ~ATRK_BLOCKED;
 		atrk->dataleft = 0;
 	}
-	if (atrk_cnt_dstframes_avail(atrk) >= ctx->rt.audminframes)
+	if (atrk->dstfavail >= ctx->rt.audminframes)
 		atrk->flags &= ~ATRK_BLOCKED;
 }
 
@@ -3589,7 +3580,7 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		atrk->flags |= ATRK_SRCDONE;
 		atrk->flags &= ~ATRK_BLOCKED;
 	}
-	if (atrk_cnt_dstframes_avail(atrk) >= ctx->rt.audminframes)
+	if (atrk->dstfavail >= ctx->rt.audminframes)
 		atrk->flags &= ~ATRK_BLOCKED;
 }
 
@@ -3657,7 +3648,7 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			atrk->flags |= ATRK_SRCDONE;
 			atrk->flags &= ~ATRK_BLOCKED;
 		}
-		if (atrk_cnt_dstframes_avail(atrk) >= ctx->rt.audminframes)
+		if (atrk->dstfavail >= ctx->rt.audminframes)
 			atrk->flags &= ~ATRK_BLOCKED;
 	}
 }
