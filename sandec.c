@@ -3038,9 +3038,7 @@ static struct sanatrk *atrk_find_trkid(struct sanctx *ctx, uint16_t trkid,
 /* clear the ATRK_MIXED flag from all tracks */
 static void atrk_reset_mixed(struct sanrt *rt)
 {
-	int i;
-
-	for (i = 0; i < rt->num_atrk; i++)
+	for (int i = 0; i < rt->num_atrk; i++)
 		rt->sanatrk[i].flags &= ~ATRK_MIXED;
 }
 
@@ -3048,8 +3046,7 @@ static void atrk_reset_mixed(struct sanrt *rt)
 static struct sanatrk *atrk_get_next_mixable(struct sanrt *rt)
 {
 	struct sanatrk *atrk;
-	int i;
-	for (i = 0; i < rt->num_atrk; i++) {
+	for (int i = 0; i < rt->num_atrk; i++) {
 		atrk = &(rt->sanatrk[i]);
 		if ((ATRK_INUSE == (atrk->flags & (ATRK_INUSE | ATRK_MIXED | ATRK_BLOCKED)))
 			&& atrk_cnt_srcframes_avail(atrk))
@@ -3136,38 +3133,6 @@ static void atrk_consume(struct sanatrk *atrk, uint32_t bytes)
 	}
 }
 
-#if 0
-static void atrk_consume_frames(struct sanatrk *atrk, uint32_t frames)
-{
-	uint32_t bytes;
-
-	if (atrk->flags & ATRK_SRC8BIT) {
-		bytes = frames;
-		if (0 == (atrk->flags & ATRK_1CH))
-			bytes *= 2;
-	} else if (atrk->flags & ATRK_SRC12BIT) {
-		if (atrk->flags & ATRK_1CH)
-			bytes = (frames * 3) / 2;
-		else
-			bytes = frames * 3;
-	} else {
-		bytes = frames * 2;
-		if (0 == (atrk->flags & ATRK_1CH))
-			bytes *= 2;
-	}
-
-	atrk->rdptr += bytes;
-	atrk->rdptr &= ATRK_DATMASK;
-	atrk->datacnt -= bytes;
-	if (atrk->datacnt <= 0) {
-		atrk->datacnt = 0;
-		atrk->rdptr = 0;
-		atrk->wrptr = 0;
-		if (atrk->flags & ATRK_SRCDONE)
-			atrk_reset(atrk);
-	}
-}
-#endif
 static int atrk_frame_data_avail(struct sanatrk *atrk, uint32_t frameidx)
 {
 	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;
@@ -3356,15 +3321,6 @@ static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
 	}
 }
 
-/* mix all of the tracks which have data available together:
- * (1) find all ready tracks with data
- * (2) find out which one hast the _least_ available (minlen)
- * (3) of all tracks with data, take minlen bytes and mix them into the dest buffer
- * (4) have any of these tracks finished (i.e. no more data incoming)
- *	yes -> go back to (1)
- *	no -> we're done, queue audio buffer, wait for next frame with more
- *		track data.
- */
 static int aud_mix_tracks(struct sanctx *ctx)
 {
 	struct sanrt *rt = &ctx->rt;
@@ -3419,12 +3375,6 @@ static int aud_mix_tracks(struct sanctx *ctx)
 	return (dstlen != 0);
 }
 
-/* buffer data from iMUSE IACT block.
- * the source can be multiple independent tracks, all with different rates,
- * channels, resolution.  Decode the data and if necessary, convert it to
- * 22.05kHz, 16bit, stereo.  Final mixing of the tracks is done at the end
- * of FRME handling.
- */
 static void iact_audio_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			      uint16_t trkid, uint16_t uid)
 {
@@ -3732,7 +3682,6 @@ static void handle_IMA4(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	i = 0;
 	/* this is IMA ADPCM QT */
 	while ((size > 0) && (i < samples)) {
-
 		if (nibsel == 0) {
 			if (size < 1)
 				break;
@@ -3741,7 +3690,6 @@ static void handle_IMA4(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			size--;
 		} else {
 			nib = in & 0x0f;
-
 		}
 		nibsel = !nibsel;
 
