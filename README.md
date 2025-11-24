@@ -37,7 +37,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
     - default off as it generates a lot of ghosting, but some scenes, esp. zoom-ins and pans, look noticeably smoother.
 - Audio decoding
   - audio ouput for all by the decoder is 22kHz/16bit/2ch.
-  - handles all raw PCM (SMUSH).
+  - handles all raw PCM (SMUSH SAUD/PSAD).
   - VIMA and IMA4 on Grim Fandango/Infernal Machine/ForceCommander/XWA/..
 - player keyboard controls:
   - space to pause/unpause
@@ -56,8 +56,10 @@ If you find this useful, I'd be very happy if you dropped me a line!
 - Mortimer and the Riddles of the Medallion
   - Most videos play, but issues with transparency and objects with only half width/height.
 - Audio
-  - PSAD-based audio issues remaining:
-    - RA1/RA2 background music does not loop.
+  - SAUD/PSAD-based audio issues remaining:
+    - no support for fading and stream ducking yet:
+      The various game engines support fading in/out of a stream, distinguish between Background Music/SFX/Speech and apply attenuation to other
+      stream types when speech is playing.
     - RA1 player speech is both genders simultaneously: the game engine filtered them using the SKIP chunks, which are not implemented (yet).
 
 # Build:
@@ -71,4 +73,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -s: no audio (silent)
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-20251114
+20251125
