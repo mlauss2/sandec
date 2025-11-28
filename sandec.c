@@ -110,10 +110,8 @@ static inline uint32_t ua32(uint8_t *p)
 #define SZ_DELTAPAL	(768 * sizeof(int16_t))
 #define SZ_SHIFTPAL	(768 * sizeof(int16_t))
 #define SZ_C47IPTBL	(256 * 256)
-#define SZ_AUDTMPBUF1	(262144)
-#define SZ_ANMBUFS (SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL + \
-SZ_AUDTMPBUF1 + SZ_SHIFTPAL)
-#define SZ_SNMBUFS	(SZ_AUDTMPBUF1)
+#define SZ_ADSTBUF	(393216)
+#define SZ_ANMBUFS (SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL + SZ_SHIFTPAL)
 
 /* codec47 glyhps */
 #define GLYPH_COORD_VECT_SIZE 16
@@ -156,9 +154,10 @@ static const uint32_t ATRK_DATMASK = (_ATRK_DATSZ - 1);
  * at offset i, for channel c
  */
 struct sanatrk;
+struct sanmsa;
+
 typedef int16_t(*atrk_decode)(struct sanatrk*, uint32_t i, uint8_t c);
 
-struct sanrt;
 struct sanatrk {
 	/* ATRK fields */
 	uint8_t *data;		/* input data buffer			*/
@@ -187,7 +186,26 @@ struct sanatrk {
 	uint8_t strk[ATRK_MAX_STRK_SIZE];	/* STRK opcodes		*/
 	uint16_t strkptr;	/* STRK pc				*/
 	uint16_t strksz;	/* STRK data size			*/
-	struct sanrt *rt;	/* for the shared sou_* vars		*/
+	struct sanmsa *msa;	/* ptr back to shared parent		*/
+};
+
+/* Multistream Audio container */
+struct sanmsa {
+	struct sanatrk atrk[ATRK_MAX];	/* audio tracks 		*/
+	uint8_t *audrsb1;	/* 8 generic 1-frame resample dest buf	*/
+	uint32_t audminframes;	/* 4 dest sample rate frames for a frame*/
+	uint8_t sou_hooks[256];		/* 256 PSAD shared sound hooks	*/
+	uint16_t sou_vol_sfx;			/* sfx volume		*/
+	uint16_t sou_vol_voice;			/* voice volume		*/
+	uint16_t sou_vol_music;			/* global music volume	*/
+	uint16_t sou_vol_global;		/* overall volume	*/
+	int16_t sou_vol_damp;		/* damping volume, 255 no damp	*/
+	uint16_t sou_damp_min;		/* minimum damping volume	*/
+	uint16_t sou_damp_max;		/* maximum damping volume	*/
+	uint16_t sou_damp_dip_rate;	/* damping volume reduct. rate  */
+	uint16_t sou_damp_rise_rate;	/* damping volume augment. rate */
+	uint32_t samplerate;		/* 4 audio samplerate in Hz	*/
+	uint8_t numtrk;
 };
 
 /* internal context: per-file */
@@ -217,7 +235,6 @@ struct sanrt {
 	uint32_t *palette;	/* 8 256x ABGR				*/
 	uint32_t fbsize;	/* 4 size of the framebuffers		*/
 	uint32_t framedur;	/* 4 standard frame duration		*/
-	uint32_t samplerate;	/* 4 audio samplerate in Hz		*/
 	uint16_t FRMEcnt;	/* 2 number of FRMEs in SAN		*/
 	uint16_t version;	/* 2 SAN version number			*/
 	uint8_t  have_vdims:1;	/* 1 we have valid video dimensions	*/
@@ -225,30 +242,16 @@ struct sanrt {
 	uint8_t  have_itable:1;	/* 1 have c47/48 interpolation table    */
 	uint8_t  can_ipol:1;	/* 1 do an interpolation                */
 	uint8_t  have_ipframe:1;/* 1 we have an interpolated frame      */
-	struct sanatrk sanatrk[ATRK_MAX];	/* audio tracks 	*/
-	uint8_t  num_atrk;	/* 1 number of atrks allocated		*/
-	uint8_t *atmpbuf1;	/* 8 audio buffer 1			*/
-	uint32_t audminframes;	/* 4 dest sample rate frames for a frame*/
-	uint32_t audchans;	/* 4 VIMA audio channel count		*/
-	uint8_t *audrsb1;	/* 8 generic 1-frame resample dest buf	*/
-	uint8_t sou_hooks[256];	/* 256 PSAD shared sound hooks		*/
-	uint16_t sou_vol_sfx;
-	uint16_t sou_vol_voice;
-	uint16_t sou_vol_music;
-	uint16_t sou_vol_global;
-	int16_t sou_vol_damp;
-	uint16_t sou_damp_min;
-	uint16_t sou_damp_max;
-	uint16_t sou_damp_dip_rate;
-	uint16_t sou_damp_rise_rate;
 };
 
 /* internal context: static stuff. */
 struct sanctx {
 	struct sanrt rt;
 	struct sanio *io;
+	struct sanmsa *msa;	/* 8 ATRK infra				*/
 	int errdone;		/* latest error status */
-
+	uint8_t *adstbuf1;	/* 8 audio buffer 1			*/
+		
 	/* codec47 static data */
 	int8_t c47_glyph4x4[NGLYPHS][16];
 	int8_t c47_glyph8x8[NGLYPHS][64];
@@ -2918,7 +2921,7 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
  *
  ******************************************************************************/
 
-static void atrk_setdamp(struct sanctx *ctx, uint16_t dampmin, uint16_t dampmax,
+static void atrk_setdamp(struct sanmsa *msa, uint16_t dampmin, uint16_t dampmax,
 			 uint16_t diprate, uint16_t riserate)
 {
 	if (dampmax > 256)
@@ -2932,20 +2935,20 @@ static void atrk_setdamp(struct sanctx *ctx, uint16_t dampmin, uint16_t dampmax,
 	if (diprate > 256 || diprate < 1)
 		diprate = 16;
 
-	ctx->rt.sou_vol_damp = dampmax;
-	ctx->rt.sou_damp_min = dampmin;
-	ctx->rt.sou_damp_max = dampmax;
-	ctx->rt.sou_damp_dip_rate = diprate;
-	ctx->rt.sou_damp_rise_rate = riserate;
+	msa->sou_vol_damp = dampmax;
+	msa->sou_damp_min = dampmin;
+	msa->sou_damp_max = dampmax;
+	msa->sou_damp_dip_rate = diprate;
+	msa->sou_damp_rise_rate = riserate;
 }
 
-static void atrk_init_volumes(struct sanctx *ctx)
+static void atrk_init_volumes(struct sanmsa *msa)
 {
-	ctx->rt.sou_vol_sfx = 127;
-	ctx->rt.sou_vol_voice = 127;
-	ctx->rt.sou_vol_music = 127;
-	ctx->rt.sou_vol_global = 127;
-	atrk_setdamp(ctx, 114, 256, 16, 32);
+	msa->sou_vol_sfx = 127;
+	msa->sou_vol_voice = 127;
+	msa->sou_vol_music = 127;
+	msa->sou_vol_global = 127;
+	atrk_setdamp(msa, 114, 256, 16, 48);
 }
 
 static uint32_t atrk_bytes_to_dstframes(struct sanatrk *atrk, uint32_t avail)
@@ -2953,14 +2956,14 @@ static uint32_t atrk_bytes_to_dstframes(struct sanatrk *atrk, uint32_t avail)
 	uint32_t den = atrk->src_cnvrate >> 8;
 
 	if (atrk->flags & ATRK_SRC8BIT) {
-		avail = avail;			/* samples */
+		avail = avail * 1;		/* samples */
 	} else if (atrk->flags & ATRK_SRC12BIT) {
 		avail = (avail * 2) / 3;	/* samples */
 	} else {
 		avail = avail >> 1;		/* samples */
 	}
 	if (0 == (atrk->flags & ATRK_1CH)) {
-		avail >>= 1;				/* frames */
+		avail >>= 1;			/* frames */
 	}
 
 	if (den == 0) {
@@ -3076,7 +3079,7 @@ static inline void atrk_set_default_strk(struct sanatrk *atrk, uint32_t len)
 /* STRK script processor, called when a stream has run out of data to play. */
 static void atrk_process_strk(struct sanatrk *atrk)
 {
-	uint8_t *s, *r = &atrk->rt->sou_hooks[0xff];
+	uint8_t *s, *r = &atrk->msa->sou_hooks[0xff];
 	uint32_t v1, v2, v3, v4;
 	int j;
 
@@ -3109,10 +3112,10 @@ static void atrk_process_strk(struct sanatrk *atrk)
 				if ((s[3] >= 0) && (s[3] < 128))
 					atrk->vol = s[3];
 			} else if (s[2] == 0xfd) {
-				if ((s[3] > -128) && (s[3] < 128))
+				if (((int8_t)s[3] > -128) && (s[3] < 128))
 					atrk->pan = s[3];
 			} else {
-				atrk->rt->sou_hooks[s[2]] = s[3];
+				atrk->msa->sou_hooks[s[2]] = s[3];
 			}
 			atrk->strkptr += s[1] + 2;
 			break;
@@ -3131,7 +3134,7 @@ static void atrk_process_strk(struct sanatrk *atrk)
 				if (atrk->pan & 0x80)
 					atrk->pan = 0;
 			} else {
-				atrk->rt->sou_hooks[s[2]] += (int8_t)s[3];
+				atrk->msa->sou_hooks[s[2]] += (int8_t)s[3];
 			}
 			atrk->strkptr += s[1] + 2;
 			break;
@@ -3165,7 +3168,7 @@ static void atrk_process_strk(struct sanatrk *atrk)
 			} else if (s[4] == 0xfd) {
 				*r = atrk->pan;
 			} else {
-				*r = atrk->rt->sou_hooks[s[4]];
+				*r = atrk->msa->sou_hooks[s[4]];
 			}
 			/* execute logical op */
 			switch (s[0]) {
@@ -3219,9 +3222,10 @@ static void atrk_process_strk(struct sanatrk *atrk)
 out_err:
 	atrk_reset(atrk);
 out_ok:
+	return;
 }
 
-static void atrk_set_srcfmt(struct sanctx *ctx, struct sanatrk *atrk, uint16_t rate,
+static void atrk_set_srcfmt(struct sanatrk *atrk, uint16_t rate,
 			    uint8_t bits, uint8_t ch, uint8_t vol, int8_t pan)
 {
 	atrk->flags &= ~(ATRK_1CH | ATRK_SRC8BIT | ATRK_SRC12BIT);
@@ -3245,23 +3249,22 @@ static void atrk_set_srcfmt(struct sanctx *ctx, struct sanatrk *atrk, uint16_t r
 /* find a trkid in the santrak list. Default allocate a new if the trkid is
  * not yet valid, or optionally return NULLptr if trkid is unknown.
  */
-static struct sanatrk *atrk_find_trkid(struct sanctx *ctx, uint16_t trkid,
+static struct sanatrk *atrk_find_trkid(struct sanmsa *msa, uint16_t trkid,
 				       int fail_on_not_found)
 {
-	struct sanrt *rt = &ctx->rt;
 	struct sanatrk *atrk;
 	int i, newid;
 
 	newid = -1;
-	for (i = 0; i < rt->num_atrk; i++) {
-		atrk = &(rt->sanatrk[i]);
+	for (i = 0; i < msa->numtrk; i++) {
+		atrk = &(msa->atrk[i]);
 		if ((atrk->flags & ATRK_INUSE) && (trkid == atrk->trkid))
 			return atrk;
 		if ((newid < 0) && (0 == (atrk->flags & ATRK_INUSE)))
 			newid = i;
 	}
 	if ((newid > -1) && (!fail_on_not_found)) {
-		atrk = &(rt->sanatrk[newid]);
+		atrk = &(msa->atrk[newid]);
 		atrk_reset(atrk);
 		atrk->vol = 127;
 		return atrk;
@@ -3270,18 +3273,18 @@ static struct sanatrk *atrk_find_trkid(struct sanctx *ctx, uint16_t trkid,
 }
 
 /* clear the ATRK_MIXED flag from all tracks */
-static void atrk_reset_mixed(struct sanrt *rt)
+static void atrk_reset_mixed(struct sanmsa *msa)
 {
-	for (int i = 0; i < rt->num_atrk; i++)
-		rt->sanatrk[i].flags &= ~ATRK_MIXED;
+	for (int i = 0; i < msa->numtrk; i++)
+		msa->atrk[i].flags &= ~ATRK_MIXED;
 }
 
 /* get the FIRST mixable track. */
-static struct sanatrk *atrk_get_next_mixable(struct sanrt *rt)
+static struct sanatrk *atrk_get_next_mixable(struct sanmsa *msa)
 {
 	struct sanatrk *atrk;
-	for (int i = 0; i < rt->num_atrk; i++) {
-		atrk = &(rt->sanatrk[i]);
+	for (int i = 0; i < msa->numtrk; i++) {
+		atrk = &(msa->atrk[i]);
 		if ((ATRK_INUSE == (atrk->flags & (ATRK_INUSE | ATRK_MIXED | ATRK_BLOCKED)))
 			&& atrk->dstfavail)
 			return atrk;
@@ -3290,7 +3293,7 @@ static struct sanatrk *atrk_get_next_mixable(struct sanrt *rt)
 }
 
 /* count all mixable tracks, with shortest buffer size returned too */
-static int atrk_count_mixable(struct sanrt *rt, uint32_t *minlen)
+static int atrk_count_mixable(struct sanmsa *msa, uint32_t *minlen)
 {
 	struct sanatrk *atrk;
 	int i, mixable;
@@ -3298,8 +3301,8 @@ static int atrk_count_mixable(struct sanrt *rt, uint32_t *minlen)
 
 	ml = ~0U;
 	mixable = 0;
-	for (i = 0; i < rt->num_atrk; i++) {
-		atrk = &(rt->sanatrk[i]);
+	for (i = 0; i < msa->numtrk; i++) {
+		atrk = &(msa->atrk[i]);
 		df = _min(atrk->dstpavail, atrk->dstfavail);
 		if ((ATRK_INUSE == (atrk->flags & (ATRK_INUSE | ATRK_MIXED | ATRK_BLOCKED))) && df) {
 			mixable++;
@@ -3315,7 +3318,7 @@ static int atrk_count_mixable(struct sanrt *rt, uint32_t *minlen)
 }
 
 /* count all active tracks: tracks which are still allocated */
-static int atrk_count_active(struct sanrt *rt, int *voice)
+static int atrk_count_active(struct sanmsa *msa, int *voice)
 {
 	struct sanatrk *atrk;
 	int i, active;
@@ -3323,8 +3326,8 @@ static int atrk_count_active(struct sanrt *rt, int *voice)
 	active = 0;
 	if (voice)
 		*voice = 0;
-	for (i = 0; i < rt->num_atrk; i++) {
-		atrk = &(rt->sanatrk[i]);
+	for (i = 0; i < msa->numtrk; i++) {
+		atrk = &(msa->atrk[i]);
 		if (voice && (SAUD_FLAG_TRK_VOICE == (atrk->pflags & SAUD_FLAG_TRK_MASK)))
 			*voice = 1;
 		if (ATRK_INUSE == (atrk->flags & (ATRK_INUSE)))
@@ -3333,9 +3336,24 @@ static int atrk_count_active(struct sanrt *rt, int *voice)
 	return active;
 }
 
+static inline void atrk_finish_all(struct sanmsa *msa)
+{
+	struct sanatrk *atrk;
+	int i;
+
+	for (i = 0; i < msa->numtrk; i++) {
+		atrk = &(msa->atrk[i]);
+		if (0 == (atrk->flags & ATRK_INUSE))
+			continue;
+		if ((atrk->playlen / atrk->srate) > 60)
+			atrk_reset(atrk);
+		else
+			atrk->strksz = 0;
+	}
+}
+
 /* buffer the incoming data to the ringbuffer */
-static int atrk_read_pcmsrc(struct sanctx *ctx, struct sanatrk *atrk,
-			    uint32_t size, uint8_t *src)
+static int atrk_read_pcmsrc(struct sanatrk *atrk, uint32_t size, uint8_t *src)
 {
 	uint32_t toend;
 
@@ -3559,23 +3577,23 @@ static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
 
 static int aud_mix_tracks(struct sanctx *ctx)
 {
-	struct sanrt *rt = &ctx->rt;
-	int16_t *trkobuf = (int16_t *)rt->audrsb1;
+	struct sanmsa *msa = ctx->msa;
+	int16_t *trkobuf = (int16_t *)msa->audrsb1;
 	int active1, active2, mixable, voice;
 	uint32_t minlen1, dstlen, dff;
 	uint8_t *dstptr, *aptr;
 	struct sanatrk *atrk;
 
 	dstlen = 0;
-	dstptr = aptr = rt->atmpbuf1;
-	memset(dstptr, 0, rt->audminframes * 4);
+	dstptr = aptr = ctx->adstbuf1;
+	memset(dstptr, 0, msa->audminframes * 4);
 
-	dff = rt->audminframes;	/* amount of target samples to generate */
+	dff = msa->audminframes;	/* amount of target samples to generate */
 
-	active1 = atrk_count_active(rt, &voice);
+	active1 = atrk_count_active(msa, &voice);
 	while ((active1 != 0) && (dff != 0)) {
-		atrk_reset_mixed(rt);
-		mixable = atrk_count_mixable(rt, &minlen1);
+		atrk_reset_mixed(msa);
+		mixable = atrk_count_mixable(msa, &minlen1);
 		if (!mixable)
 			break;
 
@@ -3587,30 +3605,31 @@ static int aud_mix_tracks(struct sanctx *ctx)
 		if (minlen1 > dff)
 			minlen1 = dff;
 
-		while (NULL != (atrk = atrk_get_next_mixable(rt))) {
+		while (NULL != (atrk = atrk_get_next_mixable(msa))) {
 			const int m = atrk->pflags & SAUD_FLAG_TRK_MASK;
-			int vol = 0;
+			int vol = 0, pan;
 			if (m == 0) {
-				vol = (atrk->vol * rt->sou_vol_sfx) >> 7;
+				vol = (atrk->vol * msa->sou_vol_sfx) >> 7;
 			} else if (m == SAUD_FLAG_TRK_VOICE) {
-				vol = (atrk->vol * rt->sou_vol_voice) >> 7;
+				vol = (atrk->vol * msa->sou_vol_voice) >> 7;
 			} else if (m == SAUD_FLAG_TRK_MUSIC) {
-				vol = (atrk->vol * rt->sou_vol_music) >> 7;
+				vol = (atrk->vol * msa->sou_vol_music) >> 7;
 			}
-			vol = (vol * rt->sou_vol_global) >> 7;
+			vol = (vol * msa->sou_vol_global) >> 7;
 			if (m == SAUD_FLAG_TRK_MUSIC)
-				vol = ((vol * rt->sou_vol_damp) >> 8) & 0xff;
+				vol = ((vol * msa->sou_vol_damp) >> 8) & 0xff;
 
+			pan = (atrk->flags & ATRK_1CH) ? pan : 0;
 			atrk_convert_resample(atrk, trkobuf, minlen1);
 			aud_mixs16(dstptr, (uint8_t *)trkobuf, dstptr,
-				   minlen1 * 4, vol, atrk->pan, 127, 0);
+				   minlen1 * 4, vol, pan, ATRK_VOL_MAX, 0);
 			atrk->flags |= ATRK_MIXED;
 		}
 		dstlen += minlen1 * 4;
 		dstptr += dstlen;
 		dff -= minlen1;
 		if (dff) {
-			active2 = atrk_count_active(rt, NULL);
+			active2 = atrk_count_active(msa, NULL);
 			if (active2 < active1) {
 				/* the hopefully short track was done and freed,
 				 * try again to get the missing rest from the
@@ -3624,14 +3643,14 @@ static int aud_mix_tracks(struct sanctx *ctx)
 			 * Then we can clear its MIXED flag and reconsider it
 			 * for further processing.
 			 */
-			for (int i = 0; i < rt->num_atrk; i++) {
-				atrk = &(rt->sanatrk[i]);
+			for (int i = 0; i < msa->numtrk; i++) {
+				atrk = &(msa->atrk[i]);
 				if (atrk->flags & ATRK_REMIX)
 					atrk->flags &= ~ATRK_MIXED;
 				atrk->flags &= ~ATRK_REMIX;
 			}
 			/* final check: newly mixable tracks with data available */
-			mixable = atrk_count_mixable(rt, &minlen1);
+			mixable = atrk_count_mixable(msa, &minlen1);
 			if ((mixable > 0) && (minlen1 != -1)) {
 				/* ok, more data just appeared, try again with
 				 * all active tracks. */
@@ -3645,17 +3664,17 @@ static int aud_mix_tracks(struct sanctx *ctx)
 		ctx->io->queue_audio(ctx->io->userctx, aptr, dstlen);
 
 	if (voice) {
-		if (rt->sou_vol_damp != rt->sou_damp_min)
-			rt->sou_vol_damp -= rt->audminframes / rt->sou_damp_dip_rate;
-		if (rt->sou_vol_damp < rt->sou_damp_min)
-			rt->sou_vol_damp = rt->sou_damp_min;
+		if (msa->sou_vol_damp != msa->sou_damp_min)
+			msa->sou_vol_damp -= msa->audminframes / msa->sou_damp_dip_rate;
+		if (msa->sou_vol_damp < msa->sou_damp_min)
+			msa->sou_vol_damp = msa->sou_damp_min;
 	} else {
-		if (rt->sou_vol_damp != rt->sou_damp_max)
-			rt->sou_vol_damp += rt->audminframes / rt->sou_damp_rise_rate;
-		if (rt->sou_vol_damp > rt->sou_damp_max)
-			rt->sou_vol_damp = rt->sou_damp_max;
+		if (msa->sou_vol_damp != msa->sou_damp_max)
+			msa->sou_vol_damp += msa->audminframes / msa->sou_damp_rise_rate;
+		if (msa->sou_vol_damp > msa->sou_damp_max)
+			msa->sou_vol_damp = msa->sou_damp_max;
 	}
-	atrk_reset_mixed(rt);
+	atrk_reset_mixed(msa);
 	return (dstlen != 0);
 }
 
@@ -3684,14 +3703,14 @@ static void iact_audio_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		vol = uid * 2 - 600;
 	}
 
-	atrk = atrk_find_trkid(ctx, trkid, 0);
+	atrk = atrk_find_trkid(ctx->msa, trkid, 0);
 	if (!atrk)
 		return;
 	atrk->trkid = trkid;
 
 	if (vol > ATRK_VOL_MAX)
 		vol = ATRK_VOL_MAX;
-	rate = ctx->rt.samplerate;
+	rate = ctx->msa->samplerate;
 	bits = 12;
 	chnl = 1;
 
@@ -3746,18 +3765,18 @@ static void iact_audio_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 
 		atrk->flags |= ATRK_INUSE | ATRK_BLOCKED;	/* active track */
 		atrk->dataleft = csz;
-		atrk_set_srcfmt(ctx, atrk, rate, bits, chnl, vol, 0);
+		atrk_set_srcfmt(atrk, rate, bits, chnl, vol, 0);
 		atrk_set_default_strk(atrk, csz);
 		atrk_process_strk(atrk);
 	}
 
-	atrk_read_pcmsrc(ctx, atrk, size, src);
+	atrk_read_pcmsrc(atrk, size, src);
 	atrk->dataleft -= size;
 	if (atrk->dataleft <= 0) {
 		atrk->flags &= ~ATRK_BLOCKED;
 		atrk->dataleft = 0;
 	}
-	if (atrk->dstfavail >= ctx->rt.audminframes)
+	if (atrk->dstfavail >= ctx->msa->audminframes)
 		atrk->flags &= ~ATRK_BLOCKED;
 }
 
@@ -3777,7 +3796,7 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 				size = 0;
 			} else {
 				memcpy(ib + ctx->rt.iactpos, src, len);
-				dst = (int16_t *)ctx->rt.atmpbuf1;
+				dst = (int16_t *)ctx->adstbuf1;
 				src2 = ib + 2;
 				v1 = *src2++;
 				v2 = v1 >> 4;
@@ -3792,7 +3811,7 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 						*dst++ = cpu_to_le16((int8_t)v3) << ((count & 1) ? v1 : v2);
 					}
 				} while (--count);
-				ctx->io->queue_audio(ctx->io->userctx, ctx->rt.atmpbuf1, 4096);
+				ctx->io->queue_audio(ctx->io->userctx, ctx->adstbuf1, 4096);
 				size -= len;
 				src += len;
 				ctx->rt.iactpos = 0;
@@ -3840,7 +3859,7 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	uint16_t rate;
 	struct sanatrk *atrk;
 
-	atrk = atrk_find_trkid(ctx, tid, 0);
+	atrk = atrk_find_trkid(ctx->msa, tid, 0);
 	if (!atrk)
 		return;
 
@@ -3852,7 +3871,7 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	atrk->trkid = tid;
 	atrk->maxidx = maxidx;
 	atrk->pflags = pflags;
-	rate = ctx->rt.samplerate;
+	rate = ctx->msa->samplerate;
 	while (size > 7) {
 		cid = le32_to_cpu(ua32(src + 0));
 		csz = be32_to_cpu(ua32(src + 4));
@@ -3872,13 +3891,13 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		src += csz;
 		size -= csz;
 	}
-	atrk_set_srcfmt(ctx, atrk, rate, 8, 1, vol, pan);
-	atrk_read_pcmsrc(ctx, atrk, size, src);
+	atrk_set_srcfmt(atrk, rate, 8, 1, vol, pan);
+	atrk_read_pcmsrc(atrk, size, src);
 	atrk->dataleft -= size;
-	if (atrk->dataleft <= 0) {
+	if ((atrk->dataleft <= 0) || (maxidx < 2)) {
 		atrk->flags &= ~ATRK_BLOCKED;
 	}
-	if (atrk->dstfavail >= ctx->rt.audminframes)
+	if (atrk->dstfavail >= ctx->msa->audminframes)
 		atrk->flags &= ~ATRK_BLOCKED;
 	atrk_process_strk(atrk);
 }
@@ -3939,7 +3958,7 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 		/* handle_SAUD should have allocated it.  RA1 however
 		 * sometimes repeats the last index of a tid a few times.
 		 */
-		atrk = atrk_find_trkid(ctx, tid, 1);
+		atrk = atrk_find_trkid(ctx->msa, tid, 1);
 		if (!atrk) {
 			return;
 		}
@@ -3952,19 +3971,19 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 		atrk->vol = vol;
 		if (size > atrk->dataleft)
 			size = atrk->dataleft;
-		atrk_read_pcmsrc(ctx, atrk, size, src);
+		atrk_read_pcmsrc(atrk, size, src);
 		atrk->dataleft -= size;
 		if ((atrk->dataleft < 1) ||
-		    (atrk->dstfavail >= ctx->rt.audminframes)) {
+		    (atrk->dstfavail >= ctx->msa->audminframes)) {
 			atrk->flags &= ~ATRK_BLOCKED;
 		}
 	}
 }
 
-static void handle_IMA4(struct sanctx *ctx, uint32_t size, uint8_t *src,
+static int handle_IMA4(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			uint32_t samples, int ch)
 {
-	int16_t *dst = (int16_t *)ctx->rt.atmpbuf1;
+	int16_t *dst = (int16_t *)ctx->adstbuf1;
 	int i, j, nibsel, tblidx, adpcm_step, dat, delt;
 	uint8_t in, nib;
 
@@ -3973,7 +3992,7 @@ static void handle_IMA4(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	in = 0;
 
 	if (size < 3)
-		return;
+		return 89;
 	dat = (int16_t)le16_to_cpu(ua16(src));
 	src += 2;
 	tblidx = *src++;
@@ -4020,10 +4039,11 @@ static void handle_IMA4(struct sanctx *ctx, uint32_t size, uint8_t *src,
 
 		i++;
 	}
-	ctx->io->queue_audio(ctx->io->userctx, ctx->rt.atmpbuf1, i * 2 * ch);
+	ctx->io->queue_audio(ctx->io->userctx, ctx->adstbuf1, i * 2 * ch);
+	return 0;
 }
 
-static void handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
+static int handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	int i, j, v1, data, ch, inbits, numbits, bitsize;
 	int  hibit, lobits, tblidx, idx2, delt;
@@ -4032,7 +4052,7 @@ static void handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	uint32_t samples, sig;
 
 	if (size < 16)
-		return;
+		return 86;
 
 	samples = be32_to_cpu(ua32(src));
 	src += 4;
@@ -4062,13 +4082,16 @@ static void handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		size -= 2;
 	}
 
+	if ((samples * 2 * ch) > SZ_ADSTBUF)
+		return 87;
+
 	/* here could be IMA4 */
 	sig = be32_to_cpu(ua32(src));
 	if (sig == IMA4) {
 		src += 4;
 		size -= 4;
 		handle_IMA4(ctx, size, src, samples, ch);
-		return;
+		return 0;
 	}
 
 	inbits = be16_to_cpu(ua16(src));
@@ -4076,10 +4099,9 @@ static void handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	size -= 2;
 	numbits = 0;
 
-	/* starting after atmpbuf1 there's at least 1MB */
-	memset(ctx->rt.atmpbuf1, 0, samples * 2 * ch);
+	memset(ctx->adstbuf1, 0, samples * 2 * ch);
 	for (i = 0; i < ch; i++) {
-		dst = (int16_t *)ctx->rt.atmpbuf1 + i;
+		dst = (int16_t *)ctx->adstbuf1 + i;
 		tblidx = startpos[i];
 		data = startdata[i];
 
@@ -4139,7 +4161,8 @@ static void handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			break;
 	}
 
-	ctx->io->queue_audio(ctx->io->userctx, ctx->rt.atmpbuf1, samples * 2 * ch);
+	ctx->io->queue_audio(ctx->io->userctx, ctx->adstbuf1, samples * 2 * ch);
+	return 0;
 }
 
 /* subtitles: index of message in the Outlaws LOCAL.MSG file, 10000 - 12001.
@@ -4239,7 +4262,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		case PVOC: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_VOICE); break;
 		case PSD2: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_SFX);   break;
 		case PSAD: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_MUSIC); break;
-		case WAVE: handle_VIMA(ctx, csz, src); break;
+		case WAVE: ret = handle_VIMA(ctx, csz, src); break;
 		case BL16: handle_BL16(ctx, csz, src); break;
 		default:   ret = 0;		/* unknown chunk, ignore */
 		}
@@ -4278,7 +4301,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		}
 
 		/* mix multi-track audio and queue it up */
-		if (!(ctx->io->flags & SANDEC_FLAG_NO_AUDIO))
+		if (!(ctx->io->flags & SANDEC_FLAG_NO_AUDIO) && (ctx->msa))
 			aud_mix_tracks(ctx);
 
 		rt->currframe++;
@@ -4309,6 +4332,8 @@ static void vima_init(struct sanctx *ctx)
 
 static void sandec_free_memories(struct sanctx *ctx)
 {
+	if (ctx->msa)
+		free(ctx->msa);
 	/* delete existing FRME buffer */
 	if (ctx->rt.fcache)
 		free(ctx->rt.fcache);
@@ -4318,28 +4343,56 @@ static void sandec_free_memories(struct sanctx *ctx)
 	memset(&ctx->rt, 0, sizeof(struct sanrt));
 }
 
-static int sandec_alloc_memories(struct sanctx *ctx, const uint16_t maxx,
-				 const uint16_t maxy, int sanm)
+static int sandec_alloc_msa(struct sanmsa **msa_out, uint8_t num_trks,
+			    uint32_t audminframes)
 {
-	uint32_t vmem, cmem, mem, gb, grsb;
-	struct sanrt *rt = &ctx->rt;
+	struct sanmsa *msa;
+	uint32_t mem, grsb;
 	uint8_t *m;
 	int i;
 
-	rt->num_atrk = sanm ? 1 : ATRK_MAX;
+	/* ANM audio track buffers, resample structures */
+	mem = sizeof(struct sanmsa);
+	/* channels buffer memories */
+	mem += num_trks * ATRK_DATSZ;
+	
+	/* resampling/mixing buffer */
+	grsb = 4 * audminframes;
+	mem += grsb;
+
+	m = malloc(mem);
+	if (!m)
+		return 1;
+	memset(m, 0, mem);
+
+	msa = (struct sanmsa *)m;
+	m += sizeof(struct sanmsa);
+
+	msa->numtrk = num_trks;
+	msa->audminframes = audminframes;
+
+	/* PSAD/iMUS audio track buffers */;
+	for (i = 0; i < msa->numtrk; i++) {
+		msa->atrk[i].msa = msa;
+		msa->atrk[i].data = m;
+		m += ATRK_DATSZ;
+	}
+	msa->audrsb1 = (uint8_t *)m;	m += grsb;
+
+	atrk_init_volumes(msa);
+	*msa_out = msa;
+	return 0;
+}
+
+static int sandec_alloc_vidmem(struct sanctx *ctx, const uint16_t maxx,
+			        const uint16_t maxy, const int sanm)
+{
+	uint32_t vmem, cmem, mem, gb;
+	struct sanrt *rt = &ctx->rt;
+	uint8_t *m;
 
 	/* work buffers */
-	mem = sanm ? SZ_SNMBUFS : SZ_ANMBUFS;
-
-	/* 16bit 2ch for the frame duration */
-	if (!rt->audminframes)
-		rt->audminframes = 22050;
-
-	if (!sanm) {
-		/* resampling/mixing buffer */
-		grsb = 4 * rt->audminframes;
-		mem += grsb;
-	}
+	mem = sanm ? 0 : SZ_ANMBUFS;
 
 	/* codec buffers: 43 lines (max. c47 mv) top + bottom as guard bands
 	 * for stray motion vectors.
@@ -4369,9 +4422,6 @@ static int sandec_alloc_memories(struct sanctx *ctx, const uint16_t maxx,
 		mem += 32;
 	}
 
-	/* ANM audio track buffers, resample structures */
-	mem += (rt->num_atrk * ATRK_DATSZ);
-
 	/* allocate memory for work buffers */
 	m = (uint8_t *)malloc(mem);
 	if (!m)
@@ -4386,15 +4436,6 @@ static int sandec_alloc_memories(struct sanctx *ctx, const uint16_t maxx,
 		rt->deltapal = (int16_t *)m;	m += SZ_DELTAPAL;
 		rt->shiftpal = (int16_t *)m;	m += SZ_SHIFTPAL;
 		rt->c47ipoltbl = (uint8_t *)m;	m += SZ_C47IPTBL;
-		rt->atmpbuf1 = (uint8_t *)m;	m += SZ_AUDTMPBUF1;
-		rt->audrsb1 = (uint8_t *)m;	m += grsb;
-
-		/* PSAD/iMUS audio track buffers */
-		for (i = 0; i < rt->num_atrk; i++) {
-			rt->sanatrk[i].data = m;
-			rt->sanatrk[i].rt = rt;
-			m += ATRK_DATSZ;
-		}
 
 		/* set up video buffers for ANM */
 		rt->fbuf = (uint8_t *)(((uintptr_t)m + 15) & ~15);	/* front*/
@@ -4405,9 +4446,6 @@ static int sandec_alloc_memories(struct sanctx *ctx, const uint16_t maxx,
 		rt->buf4 = rt->buf3 + 32 + vmem;/* interpolation last frame buf */
 		rt->buf5 = rt->buf4 + vmem;	/* interpolated frame buffer	*/
 	} else {
-		/* VIMA output buffer */
-		rt->atmpbuf1 = (uint8_t *)m;	m += SZ_AUDTMPBUF1;
-
 		/* set up buffers for SNM: 3 video buffers for BL16 */
 		rt->fbuf = NULL;
 		rt->buf0 = (uint8_t *)(((uintptr_t)m + 15) & ~15); /* bl16 main */
@@ -4428,16 +4466,13 @@ static int sandec_alloc_memories(struct sanctx *ctx, const uint16_t maxx,
 static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
-	uint32_t maxframe;
+	uint32_t maxframe, audminframes, srate;
 	uint8_t *ahbuf, fps;
 
 	if (size > 794)
 		return 14;
 	if (size < 774)
 		return 15;
-
-	if (0 != sandec_alloc_memories(ctx, FOBJ_MAXX, FOBJ_MAXY, 0))
-		return 4;
 
 	ahbuf = (uint8_t *)malloc(size);
 	if (!ahbuf)
@@ -4450,13 +4485,18 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	rt->version = le16_to_cpu(*(uint16_t *)(ahbuf + 0));
 	rt->FRMEcnt = le16_to_cpu(*(uint16_t *)(ahbuf + 2));
 
+	if (0 != sandec_alloc_vidmem(ctx, FOBJ_MAXX, FOBJ_MAXY, 0)) {
+		free(ahbuf);
+		return 4;
+	}
+
 	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
 
 	if (rt->version > 1) {
 		rt->framedur  =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
 		fps = rt->framedur;
 		maxframe =       le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
-		rt->samplerate = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
+		srate	       = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
 
 		/* "maxframe" indicates the maximum size of one FRME object
 		 * including chunk ID and chunk size in the stream (usually the first)
@@ -4470,17 +4510,19 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		}
 	} else {
 		fps = 15;			/* ANIMv1 default */
-		rt->samplerate = 11025;		/* ANIMv1 default */
+		srate = 11025;			/* ANIMv1 default */
 		rt->frmebufsz = 0;
 	}
+	free(ahbuf);
 
 	if (!fps)
 		fps = 15;
 	rt->framedur = 1000000 / fps;	/* frame duration in microseconds */
+
 	/* minimum number of samples to generate when resampling a stream to the
 	 * output rate to supply enough data for the duration of a single frame.
 	 */
-	rt->audminframes = ((22050 / fps) + 1) & ~1U;
+	audminframes = ((22050 / fps) + 1) & ~1U;
 
 	/* for Full Throttle: the incoming audio data rate is not not enough
 	 * to sustain click-free playback at the requested 10fps.  It starts
@@ -4490,11 +4532,13 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	 */
 	if (fps < 11) {
 		rt->framedur = 10000000 / 105;
-		rt->audminframes = (((22050 * 10) / 105) + 1) & ~1U;
+		audminframes = (((22050 * 10) / 105) + 1) & ~1U;
 	}
 
-	atrk_init_volumes(ctx);
-	free(ahbuf);
+	if (sandec_alloc_msa(&ctx->msa, ATRK_MAX, audminframes))
+		return 14;
+	ctx->msa->samplerate = srate;
+	
 	return 0;
 }
 
@@ -4502,7 +4546,7 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 {
 	struct sanrt *rt = &ctx->rt;
 	uint16_t maxx, maxy, t16;
-	uint32_t c[2], sz;
+	uint32_t c[2], sz, srate, achans;
 	uint8_t *src, *sb;
 	int ret;
 
@@ -4575,11 +4619,17 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 			if (t16 > maxy)
 				maxy = t16;
 			break;
-		case WAVE: rt->samplerate = le32_to_cpu(ua32(src + 0));
-			   rt->audchans   = le32_to_cpu(ua32(src + 4));
-			   c[1] = 12;
-			   break;
-		default:   ret = 56;
+		case WAVE:
+			srate  = le32_to_cpu(ua32(src + 0));
+			achans = le32_to_cpu(ua32(src + 4));
+			if (srate != 22050)
+				ret = 57;
+			if ((achans < 1) || (achans > 2))
+				ret = 58;
+			c[1] = 12;
+			break;
+		default:
+			ret = 56;
 		}
 		if (c[1] & 1)
 			c[1]++;
@@ -4589,7 +4639,7 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 	}
 	free(sb);
 
-	if (0 != sandec_alloc_memories(ctx, maxx, maxy, 1))
+	if (0 != sandec_alloc_vidmem(ctx, maxx, maxy, 1))
 		return 4;
 
 	vima_init(ctx);
@@ -4604,7 +4654,7 @@ int sandec_decode_next_frame(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
 	uint32_t c[2];
-	int ret;
+	int ret, b;
 
 	if (!ctx)
 		return 1;
@@ -4627,6 +4677,14 @@ again:
 	if (ret) {
 		if (ctx->rt.currframe >= ctx->rt.FRMEcnt) {
 			ret = SANDEC_DONE;	/* seems we reached file end */
+			if (ctx->msa) {
+				atrk_finish_all(ctx->msa);
+				b = 1;
+				while (b && atrk_count_active(ctx->msa, NULL) &&
+					!(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)) {
+					b = aud_mix_tracks(ctx);
+				}
+			}
 		}
 		goto out;
 	}
@@ -4650,7 +4708,7 @@ again:
 		}
 		goto again;
 
-	} else if (atrk_count_active(&ctx->rt, NULL) && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)) {
+	} else if (atrk_count_active(ctx->msa, NULL) && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)) {
 		aud_mix_tracks(ctx);
 
 	} else {
@@ -4672,12 +4730,17 @@ int sandec_init(void **ctxout)
 	if (!ctx)
 		return 2;
 	memset(ctx, 0, sizeof(struct sanctx));
+	ctx->adstbuf1 = (uint8_t *)malloc(SZ_ADSTBUF);
+	if (!ctx->adstbuf1) {
+		free(ctx);
+		return 3;
+	}
 
 	/* set to error state initially until a valid file has been opened */
 	ctx->errdone = 44;
 
-	c47_make_glyphs(ctx->c47_glyph4x4[0], c47_glyph4_x, c47_glyph4_y, 4);
-	c47_make_glyphs(ctx->c47_glyph8x8[0], c47_glyph8_x, c47_glyph8_y, 8);
+	c47_make_glyphs(&ctx->c47_glyph4x4[0][0], c47_glyph4_x, c47_glyph4_y, 4);
+	c47_make_glyphs(&ctx->c47_glyph8x8[0][0], c47_glyph8_x, c47_glyph8_y, 8);
 	*ctxout = ctx;
 
 	return 0;
@@ -4687,7 +4750,6 @@ int sandec_open(void *sanctx, struct sanio *io)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
 	uint32_t c[2];
-	uint8_t *dat;
 	int ret;
 
 	if (!io || !sanctx) {
@@ -4720,11 +4782,14 @@ int sandec_open(void *sanctx, struct sanio *io)
 		}
 
 	} else if (c[0] == SAUD) {
+		uint8_t *dat;
 		uint32_t csz = be32_to_cpu(c[1]);
 		ret = 8;
 		if ((csz < 8) || (csz > (1 << 20))) {
 			goto out;
 		} else {
+			if (sandec_alloc_msa(&ctx->msa, 1, 22050))
+				goto out;
 			dat = malloc(csz);
 			if (!dat)
 				goto out;
@@ -4732,12 +4797,12 @@ int sandec_open(void *sanctx, struct sanio *io)
 				free(dat);
 				goto out;
 			}
-			sandec_alloc_memories(ctx, 0, 0, 0);
-			handle_SAUD(ctx, csz, dat, csz, ATRK_VOL_MAX, 0, 1, 0);
+			ctx->msa->samplerate = 11025;
+			handle_SAUD(ctx, csz, dat, 1, ATRK_VOL_MAX, 0, 1, 0);
 			free(dat);
-			ctx->rt.audminframes = 22050 / 10;
-			ret = atrk_count_active(&ctx->rt, NULL) > 0 ? 0 : 8;
-		}	
+			ret = atrk_count_active(ctx->msa, NULL) > 0 ? 0 : 8;
+		}
+
 	} else {
 		ret = 9;
 	}

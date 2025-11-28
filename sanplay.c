@@ -488,6 +488,7 @@ err:
 
 		/* let remaining audio finish playback: mainly for .SAD audio files */
 		if (ret == SANDEC_DONE && pp.as && speedmode < 2) {
+			SDL_ResumeAudioStreamDevice(pp.as);
 			SDL_FlushAudioStream(pp.as);
 			while (0 != SDL_GetAudioStreamQueued(pp.as))
 				SDL_Delay(10);
