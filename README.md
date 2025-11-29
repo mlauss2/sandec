@@ -55,12 +55,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
 # What does not work:
 - Mortimer and the Riddles of the Medallion
   - Most videos play, but issues with transparency and objects with only half width/height.
-- Audio
-  - SAUD/PSAD-based audio issues remaining:
-    - no support for fading and stream ducking yet:
-      The various game engines support fading in/out of a stream, distinguish between Background Music/SFX/Speech and apply attenuation to other
-      stream types when speech is playing.
-    - RA1 player speech is both genders simultaneously: the game engine filtered them using the SKIP chunks, which are not implemented (yet).
 
 # Build:
 - Have SDL3
@@ -73,4 +67,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -s: no audio (silent)
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-20251125
+20251129
