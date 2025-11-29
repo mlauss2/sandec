@@ -1,9 +1,9 @@
 /*
- * SAN ANIMv2 movie decoder, specifically tailored for LucasArts "Outlaws".
+ * Decoder library for LucasArts SMUSH/SAN videos.
  *
  * How to use:
  *
- * Prepare some callbacks:
+ * - Prepare some callbacks:
  *
  * Queue new audio data:  Audio is 22.05kHz 16bit Stereo LSB. This callback
  *  can be called multiple times during sandec_decode_next_frame(), always
@@ -49,7 +49,7 @@
  * }
  *
  *
- * Set up decoder context and handle frames:
+ * - Set up decoder context and handle frames:
  *
  * void *sancontext;
  * struct sanio myio;
