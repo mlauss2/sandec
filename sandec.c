@@ -932,24 +932,6 @@ static void blt_ipol(uint8_t *dst, uint8_t *src1, uint8_t *src2, int16_t left,
 	}
 }
 
-/* allocate memory for a full FRME */
-static int allocfrme(struct sanctx *ctx, uint32_t sz)
-{
-	if (sz > FRME_MAX_SIZE)	/* cap at 4MB */
-		return 99;
-	sz = (sz + 63) & ~63;
-	if (sz > ctx->rt.frmebufsz) {
-		if (ctx->rt.fcache)
-			free(ctx->rt.fcache);
-		ctx->rt.fcache = (uint8_t *)malloc(sz);
-		if (!ctx->rt.fcache) {
-			ctx->rt.frmebufsz = 0;
-			return 1;
-		}
-		ctx->rt.frmebufsz = sz;
-	}
-	return 0;
-}
 
 static inline int read_source(struct sanctx *ctx, void *dst, uint32_t sz)
 {
@@ -3353,12 +3335,9 @@ static inline void atrk_finish_all(struct sanmsa *msa)
 }
 
 /* buffer the incoming data to the ringbuffer */
-static int atrk_read_pcmsrc(struct sanatrk *atrk, uint32_t size, uint8_t *src)
+static void atrk_read_pcmsrc(struct sanatrk *atrk, uint32_t size, uint8_t *src)
 {
 	uint32_t toend;
-
-	if (0 == (atrk->flags & ATRK_INUSE))
-		return 50;
 
 	toend = ATRK_DATSZ - atrk->wrptr;
 	if (size <= toend) {
@@ -3371,8 +3350,6 @@ static int atrk_read_pcmsrc(struct sanatrk *atrk, uint32_t size, uint8_t *src)
 	atrk->wrptr += size;
 	atrk->wrptr &= ATRK_DATMASK;
 	atrk_update_dstframes_avail(atrk);
-
-	return 0;
 }
 
 static void atrk_consume(struct sanatrk *atrk, uint32_t bytes)
@@ -3791,10 +3768,14 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		if (ctx->rt.iactpos >= 2) {
 			len = be16_to_cpu(*(uint16_t *)ib) + 2 - ctx->rt.iactpos;
 			if (len > size) {  /* continued in next IACT chunk. */
+				if (ctx->rt.iactpos + size > SZ_IACT)
+					return;
 				memcpy(ib + ctx->rt.iactpos, src, size);
 				ctx->rt.iactpos += size;
 				size = 0;
 			} else {
+				if (ctx->rt.iactpos + len > SZ_IACT)
+					return;
 				memcpy(ib + ctx->rt.iactpos, src, len);
 				dst = (int16_t *)ctx->adstbuf1;
 				src2 = ib + 2;
@@ -4214,6 +4195,25 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	return ret;
 }
 
+/* allocate memory for a full FRME */
+static int allocfrme(struct sanctx *ctx, uint32_t sz)
+{
+	if (sz > FRME_MAX_SIZE)	/* cap at 4MB */
+		return 99;
+	sz = (sz + 4095) & ~4095U;
+	if (sz > ctx->rt.frmebufsz) {
+		if (ctx->rt.fcache)
+			free(ctx->rt.fcache);
+		ctx->rt.fcache = (uint8_t *)malloc(sz);
+		if (!ctx->rt.fcache) {
+			ctx->rt.frmebufsz = 0;
+			return 1;
+		}
+		ctx->rt.frmebufsz = sz;
+	}
+	return 0;
+}
+
 static int handle_FRME(struct sanctx *ctx, uint32_t size)
 {
 	struct sanrt *rt = &ctx->rt;
@@ -4250,23 +4250,27 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		if (csz > size)
 			return 15;
 
-		switch (cid)
-		{
-		case NPAL: handle_NPAL(ctx, csz, src); break;
-		case FOBJ: ret = handle_FOBJ(ctx, csz, src, 0, 0); break;
-		case IACT: handle_IACT(ctx, csz, src); break;
-		case TRES: handle_TRES(ctx, csz, src); break;
-		case STOR: handle_STOR(ctx, csz, src); break;
-		case FTCH: ret = handle_FTCH(ctx, csz, src); break;
-		case XPAL: handle_XPAL(ctx, csz, src); break;
-		case PVOC: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_VOICE); break;
-		case PSD2: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_SFX);   break;
-		case PSAD: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_MUSIC); break;
-		case WAVE: ret = handle_VIMA(ctx, csz, src); break;
-		case BL16: handle_BL16(ctx, csz, src); break;
-		default:   ret = 0;		/* unknown chunk, ignore */
+		if (rt->version > 2) {
+			switch (cid) {
+			case WAVE: ret = handle_VIMA(ctx, csz, src); break;
+			case BL16: handle_BL16(ctx, csz, src); break;
+			default:   ret = 0;
+			}
+		} else {	
+			switch (cid) {
+			case NPAL: handle_NPAL(ctx, csz, src); break;
+			case FOBJ: ret = handle_FOBJ(ctx, csz, src, 0, 0); break;
+			case IACT: handle_IACT(ctx, csz, src); break;
+			case TRES: handle_TRES(ctx, csz, src); break;
+			case STOR: handle_STOR(ctx, csz, src); break;
+			case FTCH: ret = handle_FTCH(ctx, csz, src); break;
+			case XPAL: handle_XPAL(ctx, csz, src); break;
+			case PVOC: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_VOICE); break;
+			case PSD2: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_SFX);   break;
+			case PSAD: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_MUSIC); break;
+			default:   ret = 0;		/* unknown chunk, ignore */
+			}
 		}
-
 		src += csz;
 		size -= csz;
 	}
@@ -4565,12 +4569,11 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 		return 51;
 	}
 
-	rt->version = 3;	/* HACK */
+	rt->version = 3;
 	rt->FRMEcnt = le32_to_cpu(ua32(src + 2));
 	rt->bufw = le16_to_cpu(*(uint16_t *)(src + 8));
 	rt->bufh = le16_to_cpu(*(uint16_t *)(src + 10));
 	rt->framedur = le32_to_cpu(ua32(src + 14));
-	rt->pitch = 2 * rt->bufw;	/* 16bit colors */
 	maxx = rt->bufw;
 	maxy = rt->bufh;
 	free(src);
@@ -4639,8 +4642,14 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 	}
 	free(sb);
 
+	if ((maxx > 1024) || (maxy > 768))
+		return 59;
 	if (0 != sandec_alloc_vidmem(ctx, maxx, maxy, 1))
 		return 4;
+
+	rt->bufw = maxx;
+	rt->bufh = maxy;
+	rt->pitch = 2 * rt->bufw;
 
 	vima_init(ctx);
 

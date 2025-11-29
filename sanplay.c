@@ -118,7 +118,7 @@ static int render_frame(struct playpriv *p)
 	if (p->sm == 2)
 		return 0;
 
-	if (p->pxw < 1 || p->pxh < 0) {
+	if (p->pxw < 1 || p->pxh < 1) {
 		p->err = 1100;
 		goto out;
 	}
