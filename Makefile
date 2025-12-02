@@ -3,7 +3,7 @@ INC=-I/usr/include/SDL3
 LIBS=-lSDL3
 CC=cc
 
-.PHONY: clean
+.PHONY: clean all zlib
 
 all: sanplay
 
