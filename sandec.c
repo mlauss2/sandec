@@ -3596,7 +3596,7 @@ static int aud_mix_tracks(struct sanctx *ctx)
 			if (m == SAUD_FLAG_TRK_MUSIC)
 				vol = ((vol * msa->sou_vol_damp) >> 8) & 0xff;
 
-			pan = (atrk->flags & ATRK_1CH) ? pan : 0;
+			pan = (atrk->flags & ATRK_1CH) ? atrk->pan : 0;
 			atrk_convert_resample(atrk, trkobuf, minlen1);
 			aud_mixs16(dstptr, (uint8_t *)trkobuf, dstptr,
 				   minlen1 * 4, vol, pan, ATRK_VOL_MAX, 0);
