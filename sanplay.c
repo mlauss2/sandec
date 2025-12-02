@@ -10,8 +10,22 @@
 #include <SDL3/SDL_render.h>
 #include <SDL3/SDL_audio.h>
 
+#ifdef HAVE_ZLIB
+#include <zlib.h>
+#define FOPEN(a, b)	gzopen(a, b)
+#define FCLOSE(a)	gzclose(a)
+#define FREAD(a, b, c)	gzread(a, b, c)
+#define IOHDL		gzFile
+#else
+#define FOPEN(a, b)	fopen(a, b)
+#define FCLOSE(a)	fclose(a)
+#define FREAD(a, b, c)	fread(b, 1, c, a)
+#define IOHDL		FILE*
+#endif
+
+
 struct playpriv {
-	FILE *fhdl;
+	IOHDL fhdl;
 	SDL_Renderer *ren;
 	SDL_Window *win;
 	SDL_Surface *lastimg;
@@ -258,7 +272,7 @@ static int init_sdl(struct playpriv *p)
 static int sio_read(void *ctx, void *dst, uint32_t size)
 {
 	struct playpriv *p = (struct playpriv *)ctx;
-	return fread(dst, 1, size, p->fhdl) == size;
+	return FREAD(p->fhdl, dst, size) == size;
 }
 
 int main(int a, char **argv)
@@ -321,7 +335,7 @@ int main(int a, char **argv)
 			fn = *argv;
 		}
 
-		pp.fhdl = fopen(fn, "r");
+		pp.fhdl = FOPEN(fn, "rb");
 		if (!pp.fhdl) {
 			if (verbose)
 				printf("cannot open file %s\n", fn);
@@ -484,7 +498,7 @@ err:
 			}
 		}
 
-		fclose(pp.fhdl);
+		FCLOSE(pp.fhdl);
 
 		/* let remaining audio finish playback: mainly for .SAD audio files */
 		if (ret == SANDEC_DONE && pp.as && speedmode < 2) {

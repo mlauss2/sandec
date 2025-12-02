@@ -28,8 +28,7 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - X-Wing Alliance
   - Indiana Jones and the Infernal Machine
   - Grim Fandango
-  - Force Commander
-    - you need to unzip the .znm files first to play them.
+  - Force Commander (need Zlib or unpack the .znm files)
 - Video decoding
   - Handles all 8-bit codecs found in LucasArts DOS/Windows titles.
   - BL16 video in .snm/.znm files.
@@ -58,7 +57,8 @@ If you find this useful, I'd be very happy if you dropped me a line!
 
 # Build:
 - Have SDL3
-- run "make"
+- Zlib (optional)
+- run "make" or "make zlib" (to support the .znm files from Force Commander without unpacking)
 
 # Use:
 - sanplay [-f] [-v] [-s] [-[0..3]] <file1.san/anm> [file2.san] [file3.san]...
@@ -67,4 +67,4 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - -s: no audio (silent)
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
 
-20251129
+20251202
