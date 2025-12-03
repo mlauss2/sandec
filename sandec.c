@@ -242,6 +242,7 @@ struct sanrt {
 	uint8_t  have_itable:1;	/* 1 have c47/48 interpolation table    */
 	uint8_t  can_ipol:1;	/* 1 do an interpolation                */
 	uint8_t  have_ipframe:1;/* 1 we have an interpolated frame      */
+	void	 *membase;	/* 8 base to allocated mem block	*/
 };
 
 /* internal context: static stuff. */
@@ -4342,8 +4343,8 @@ static void sandec_free_memories(struct sanctx *ctx)
 	if (ctx->rt.fcache)
 		free(ctx->rt.fcache);
 	/* delete work + video buffers, iactbuf is entry point */
-	if (ctx->rt.iactbuf)
-		free(ctx->rt.iactbuf);
+	if (ctx->rt.membase)
+		free(ctx->rt.membase);
 	memset(&ctx->rt, 0, sizeof(struct sanrt));
 }
 
@@ -4395,20 +4396,16 @@ static int sandec_alloc_vidmem(struct sanctx *ctx, const uint16_t maxx,
 	struct sanrt *rt = &ctx->rt;
 	uint8_t *m;
 
-	/* work buffers */
-	mem = sanm ? 0 : SZ_ANMBUFS;
+	mem = 0;
+	vmem = 0;
 
 	/* codec buffers: 43 lines (max. c47 mv) top + bottom as guard bands
 	 * for stray motion vectors.
 	 */
 	cmem = (sanm ? 2 : 1) * maxx * (maxy + 88);
-	cmem = (cmem + 63) & ~63;		/* align to 64 bytes */
+	cmem = (cmem + 63) & ~63;		/* 4k align */
 	gb = (sanm ? 2 : 1) * 43 * maxx;	/* guard band size */
 	gb = (gb + 63) & ~63;			/* align */
-
-	/* image/aux buffers */
-	vmem = (sanm ? 2 : 1) * maxx * maxy;
-	vmem = (vmem + 63) & ~63;		/* align */
 
 	/* we need 3 private buffers for codec37/47/48 and bl16 */
 	mem += (cmem * 3);
@@ -4420,18 +4417,26 @@ static int sandec_alloc_vidmem(struct sanctx *ctx, const uint16_t maxx,
 	 * plus space for the PSAD/iMUS audio tracks.
 	 */
 	if (!sanm) {
-		/* ANM aux buffers */
+		/* Palettes/Interpolation Table/IACT-scaled-audio buf */
+		mem += SZ_ANMBUFS;
+		/* ANM aux buffers: fbuf, buf3/4/5 */
+		vmem = maxx * maxy;
+		vmem = (vmem + 63) & ~63;		/* align */
 		mem += vmem * 4;
 		/* STOR buffer c20 FOBJ header + data size */
 		mem += 32;
+		mem = (mem + 4095) & ~4095;
 	}
 
 	/* allocate memory for work buffers */
 	m = (uint8_t *)malloc(mem);
 	if (!m)
 		return 1;
-
+	rt->membase = m;
 	memset(m, 0, mem);
+
+	/* align start to cacheline size */
+	m = (uint8_t *)((((uintptr_t)m) + 63) & ~63);
 
 	if (!sanm) {
 		/* ANIM/ANM misc buffers */
@@ -4442,17 +4447,18 @@ static int sandec_alloc_vidmem(struct sanctx *ctx, const uint16_t maxx,
 		rt->c47ipoltbl = (uint8_t *)m;	m += SZ_C47IPTBL;
 
 		/* set up video buffers for ANM */
-		rt->fbuf = (uint8_t *)(((uintptr_t)m + 15) & ~15);	/* front*/
+		m = (uint8_t *)((((uintptr_t)m) + 63) & ~63);
+		rt->fbuf = m;			/* front buffer 		*/
 		rt->buf0 = rt->fbuf + vmem;	/* codec37/47/48/bl16 main buf	*/
 		rt->buf1 = rt->buf0 + cmem;	/* delta buf 2 (c47/bl16),	*/
 		rt->buf2 = rt->buf1 + cmem;	/* delta buf 1 (c37/47/48/bl16)	*/
-		rt->buf3 = rt->buf2 + cmem;	/* STOR buffer			*/
-		rt->buf4 = rt->buf3 + 32 + vmem;/* interpolation last frame buf */
-		rt->buf5 = rt->buf4 + vmem;	/* interpolated frame buffer	*/
+		rt->buf4 = rt->buf2 + vmem;	/* interpolated frame buffer	*/
+		rt->buf5 = rt->buf4 + vmem;	/* interpolation last frame buf */
+		rt->buf3 = rt->buf5 + cmem;	/* STOR buffer			*/
 	} else {
 		/* set up buffers for SNM: 3 video buffers for BL16 */
 		rt->fbuf = NULL;
-		rt->buf0 = (uint8_t *)(((uintptr_t)m + 15) & ~15); /* bl16 main */
+		rt->buf0 = m;			/* bl16 main 			*/
 		rt->buf1 = rt->buf0 + cmem;	/* bl16 delta buffer 1		*/
 		rt->buf2 = rt->buf1 + cmem;	/* bl16 delta buffer 2		*/
 	}
