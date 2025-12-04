@@ -3656,7 +3656,7 @@ static int aud_mix_tracks(struct sanctx *ctx)
 	return (dstlen != 0);
 }
 
-static void iact_audio_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
+static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 			      uint16_t trkid, uint16_t uid)
 {
 	uint32_t cid, csz, mapsz;
@@ -3681,14 +3681,13 @@ static void iact_audio_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		vol = uid * 2 - 600;
 	}
 
-	atrk = atrk_find_trkid(ctx->msa, trkid, 0);
+	atrk = atrk_find_trkid(msa, trkid, 0);
 	if (!atrk)
 		return;
-	atrk->trkid = trkid;
 
 	if (vol > ATRK_VOL_MAX)
 		vol = ATRK_VOL_MAX;
-	rate = ctx->msa->samplerate;
+	rate = msa->samplerate;
 	bits = 12;
 	chnl = 1;
 
@@ -3742,6 +3741,7 @@ static void iact_audio_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			return;
 
 		atrk->flags |= ATRK_INUSE | ATRK_BLOCKED;	/* active track */
+		atrk->trkid = trkid;
 		atrk->dataleft = csz;
 		atrk_set_srcfmt(atrk, rate, bits, chnl, vol, 0);
 		atrk_set_default_strk(atrk, csz);
@@ -3754,7 +3754,7 @@ static void iact_audio_imuse(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		atrk->flags &= ~ATRK_BLOCKED;
 		atrk->dataleft = 0;
 	}
-	if (atrk->dstfavail >= ctx->msa->audminframes)
+	if (atrk->dstfavail >= msa->audminframes)
 		atrk->flags &= ~ATRK_BLOCKED;
 }
 
@@ -3828,7 +3828,7 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			iact_audio_scaled(ctx, size - 18, src + 18);
 		} else {
 			/* imuse-type */
-			iact_audio_imuse(ctx, size - 18, src + 18, p[4], p[3]);
+			iact_audio_imuse(ctx->msa, size - 18, src + 18, p[4], p[3]);
 		}
 	}
 }
