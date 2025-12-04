@@ -3833,7 +3833,7 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
-static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
+static void handle_SAUD(struct sanmsa *msa, uint32_t size, uint8_t *src,
 			const uint32_t tid, const uint8_t vol, const int8_t pan,
 			const uint32_t maxidx, const uint16_t pflags)
 {
@@ -3841,7 +3841,7 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	uint16_t rate;
 	struct sanatrk *atrk;
 
-	atrk = atrk_find_trkid(ctx->msa, tid, 0);
+	atrk = atrk_find_trkid(msa, tid, 0);
 	if (!atrk)
 		return;
 
@@ -3853,7 +3853,7 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	atrk->trkid = tid;
 	atrk->maxidx = maxidx;
 	atrk->pflags = pflags;
-	rate = ctx->msa->samplerate;
+	rate = msa->samplerate;
 	while (size > 7) {
 		cid = le32_to_cpu(ua32(src + 0));
 		csz = be32_to_cpu(ua32(src + 4));
@@ -3879,7 +3879,7 @@ static void handle_SAUD(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	if ((atrk->dataleft <= 0) || (maxidx < 2)) {
 		atrk->flags &= ~ATRK_BLOCKED;
 	}
-	if (atrk->dstfavail >= ctx->msa->audminframes)
+	if (atrk->dstfavail >= msa->audminframes)
 		atrk->flags &= ~ATRK_BLOCKED;
 	atrk_process_strk(atrk);
 }
@@ -3934,7 +3934,7 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 		 */
 		t1 = le32_to_cpu(ua32(src + 0));
 		if (t1 == SAUD) {
-			handle_SAUD(ctx, size - 8, src + 8, tid, vol, pan, mid, flg);
+			handle_SAUD(ctx->msa, size - 8, src + 8, tid, vol, pan, mid, flg);
 		}
 	} else {
 		/* handle_SAUD should have allocated it.  RA1 however
@@ -4813,7 +4813,7 @@ int sandec_open(void *sanctx, struct sanio *io)
 				goto out;
 			}
 			ctx->msa->samplerate = 11025;
-			handle_SAUD(ctx, csz, dat, 1, ATRK_VOL_MAX, 0, 1, 0);
+			handle_SAUD(ctx->msa, csz, dat, 1, ATRK_VOL_MAX, 0, 1, 0);
 			free(dat);
 			ret = atrk_count_active(ctx->msa, NULL) > 0 ? 0 : 8;
 		}
