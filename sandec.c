@@ -138,7 +138,7 @@ static const uint32_t ATRK_DATSZ = _ATRK_DATSZ;
 static const uint32_t ATRK_DATMASK = (_ATRK_DATSZ - 1);
 
 #define ATRK_MAX	10
-#define ATRK_MAX_STRK_SIZE	3072
+#define ATRK_MAX_STRK_SIZE	3584
 
 /* PSAD flags defining audio track type (voice/music/sfx).
  * ANIMv1 could only differentiate between them based on the chunk name,
