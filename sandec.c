@@ -4452,9 +4452,9 @@ static int sandec_alloc_vidmem(struct sanctx *ctx, const uint16_t maxx,
 		rt->buf0 = rt->fbuf + vmem;	/* codec37/47/48/bl16 main buf	*/
 		rt->buf1 = rt->buf0 + cmem;	/* delta buf 2 (c47/bl16),	*/
 		rt->buf2 = rt->buf1 + cmem;	/* delta buf 1 (c37/47/48/bl16)	*/
-		rt->buf4 = rt->buf2 + vmem;	/* interpolated frame buffer	*/
+		rt->buf4 = rt->buf2 + cmem;	/* interpolated frame buffer	*/
 		rt->buf5 = rt->buf4 + vmem;	/* interpolation last frame buf */
-		rt->buf3 = rt->buf5 + cmem;	/* STOR buffer			*/
+		rt->buf3 = rt->buf5 + vmem;	/* STOR buffer			*/
 	} else {
 		/* set up buffers for SNM: 3 video buffers for BL16 */
 		rt->fbuf = NULL;
