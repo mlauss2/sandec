@@ -3324,11 +3324,14 @@ static inline void atrk_finish_all(struct sanmsa *msa)
 	struct sanatrk *atrk;
 	int i;
 
+	/* let tracks with up to 10 seconds of playback data left play out,
+	 * but terminate all longer streams.
+	 */
 	for (i = 0; i < msa->numtrk; i++) {
 		atrk = &(msa->atrk[i]);
 		if (0 == (atrk->flags & ATRK_INUSE))
 			continue;
-		if ((atrk->playlen / atrk->srate) > 60)
+		if ((atrk->playlen / atrk->srate) > 10)
 			atrk_reset(atrk);
 		else
 			atrk->strksz = 0;
