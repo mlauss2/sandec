@@ -4340,8 +4340,10 @@ static void vima_init(struct sanctx *ctx)
 
 static void sandec_free_memories(struct sanctx *ctx)
 {
-	if (ctx->msa)
+	if (ctx->msa) {
 		free(ctx->msa);
+		ctx->msa = NULL;
+	}
 	/* delete existing FRME buffer */
 	if (ctx->rt.fcache)
 		free(ctx->rt.fcache);
@@ -4841,6 +4843,8 @@ void sandec_exit(void **sanctx)
 		return;
 
 	sandec_free_memories(ctx);
+	if (ctx->adstbuf1)
+		free(ctx->adstbuf1);
 	free(ctx);
 	*sanctx = NULL;
 }
