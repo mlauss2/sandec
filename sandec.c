@@ -4745,19 +4745,16 @@ out:
 
 int sandec_init(void **ctxout)
 {
+	const int sz = sizeof(struct sanctx) + SZ_ADSTBUF;
 	struct sanctx *ctx;
 
 	if (!ctxout)
 		return 1;
-	ctx = (struct sanctx *)malloc(sizeof(struct sanctx));
+	ctx = (struct sanctx *)malloc(sz);
 	if (!ctx)
 		return 2;
-	memset(ctx, 0, sizeof(struct sanctx));
-	ctx->adstbuf1 = (uint8_t *)malloc(SZ_ADSTBUF);
-	if (!ctx->adstbuf1) {
-		free(ctx);
-		return 3;
-	}
+	memset(ctx, 0, sizeof(sz));
+	ctx->adstbuf1 = (uint8_t *)(ctx) + sizeof(struct sanctx);
 
 	/* set to error state initially until a valid file has been opened */
 	ctx->errdone = 44;
@@ -4846,8 +4843,7 @@ void sandec_exit(void **sanctx)
 		return;
 
 	sandec_free_memories(ctx);
-	if (ctx->adstbuf1)
-		free(ctx->adstbuf1);
+
 	free(ctx);
 	*sanctx = NULL;
 }
