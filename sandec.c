@@ -3863,9 +3863,12 @@ static void handle_SAUD(struct sanmsa *msa, uint32_t size, uint8_t *src,
 		src += 8;
 		size -= 8;
 		if (cid == STRK) {
-			if (csz < ATRK_MAX_STRK_SIZE) {
+			if ((csz <= ATRK_MAX_STRK_SIZE) && (csz <= size)) {
 				memcpy(atrk->strk, src, csz);
 				atrk->strksz = csz;
+			} else {
+				atrk_reset(atrk);
+				return;
 			}
 
 		} else if (cid == SDAT) {
