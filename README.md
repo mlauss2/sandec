@@ -69,7 +69,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
 
 # Notes
 - The following Tags won't be implemented:
-  - FADE: similar to XPAL.  The algorithm operates directly on VGA memory, copying only parts of the dest buffer to VGA, based on the FFRM data. It's present in RA1 v1.3 (00115bb), but was removed in the lastest v1.7.
   - GOST: codec1-objects with flipped x/y coordinates (based on GOST param). Only used in 2 videos of RA1 only; not worth the hassle to implement in codec1 IMO.
   - TEXT: maybe later; this requires a lot of additional infrastructure to fully support, esp. font loading/parsing/fontstore handling (since some texts have commands to switch to another font, ...) which doesn't belong here.
   - LOAD: preload bits of another ANM/SAN, used in RA1/2 for branchpoints (i.e. fly left for easy, stay right for hard).
@@ -77,4 +76,5 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - GAME/GAM2: RA1 game progress feedback.
   - RAW!/SBL /SBL2/Crea: Raw PCM/VOC file support, it's in the (RA1) code but not used in any ANM/SAN file.
 
-20251210
+20251222
+
