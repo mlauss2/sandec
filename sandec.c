@@ -96,6 +96,9 @@ static inline uint32_t ua32(uint8_t *p)
 #define WAVE	0x65766157
 #define ANNO	0x4f4e4e41
 #define IMA4	0x494d4134
+#define FADE	0x45444146
+#define FDHD	0x44484446
+#define FFRM	0x4d524646
 
 /* reasonable maximum size of a FRME */
 #define FRME_MAX_SIZE	(4 << 20)
@@ -4175,6 +4178,76 @@ static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	ctx->rt.to_store = (src[0] == 3 ? 2 : 1);
 }
 
+static void handle_FADE(struct sanctx *ctx, uint32_t size, uint8_t *src)
+{
+	uint32_t csz, cid, count, remaining;
+	uint8_t *vga = ctx->rt.buf5;
+	int32_t dstoff, dstoff2;
+	int16_t fadestride;
+	int8_t c;
+
+	if (size < 8)
+		return;
+
+	/* FDHD header first */
+	cid = le32_to_cpu(*(uint32_t *)(src + 0));
+	csz = be32_to_cpu(*(uint32_t *)(src + 4));
+	size -= 8;
+	src += 8;
+	if ((csz > size) || (csz < 8) || (cid != FDHD))
+		return;
+	/* 2 unknown 16bit values, xres, yres in the header */
+	fadestride = le16_to_cpu(*(uint16_t *)(src + 4));	/* xres, 320 */
+
+	/* followed by FFRM chunk with the actual copy instructions */
+	size -= csz;
+	src += csz;
+	if (size < 8)
+		return;
+	cid = le32_to_cpu(*(uint32_t *)(src + 0));
+	csz = be32_to_cpu(*(uint32_t *)(src + 4));
+	size -= 8;
+	src += 8;
+	if ((csz > size) || (cid != FFRM))
+		return;
+
+	dstoff = 0;
+	while (size > 0) {
+		c = *src++;
+		size--;
+
+		if ((c & 0x7f) == 0) {
+			if (size < 2)
+				break;
+			count = le16_to_cpu(ua16(src));
+			src += 2;
+			size -= 2;
+		} else {
+			count = c & 0x7f;
+		}
+
+		if (c & 0x80) {
+			dstoff += count;
+		} else {
+			remaining = count;
+			while (remaining > 0) {
+				/* translate from source stride to our buffer stride */
+				uint32_t x = dstoff % fadestride;
+				uint32_t y = dstoff / fadestride;
+				uint32_t can_copy = fadestride - x;
+				uint32_t chunk = (remaining < can_copy) ? remaining : can_copy;
+				dstoff2 = (y * ctx->rt.bufw) + x;
+				memcpy(vga + dstoff2, ctx->rt.fbuf + dstoff2, chunk);
+				dstoff += chunk;
+				remaining -= chunk;
+			}
+		}
+	}
+
+	ctx->rt.vbuf = ctx->rt.buf5;
+	return;
+}
+
 static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint8_t *vb = ctx->rt.buf3;
@@ -4275,6 +4348,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 			case PVOC: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_VOICE); break;
 			case PSD2: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_SFX);   break;
 			case PSAD: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_MUSIC); break;
+			case FADE: handle_FADE(ctx, csz, src); break;
 			default:   ret = 0;		/* unknown chunk, ignore */
 			}
 		}
