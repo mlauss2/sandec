@@ -3418,7 +3418,7 @@ static void atrk_set_srcfmt(struct sanatrk *atrk, uint16_t rate,
  * not yet valid, or optionally return NULLptr if trkid is unknown.
  */
 static struct sanatrk *atrk_find_trkid(struct sanmsa *msa, uint16_t trkid,
-				       int fail_on_not_found)
+				       int16_t idx, int16_t maxidx, int fnf)
 {
 	struct sanatrk *atrk;
 	int i, newid;
@@ -3426,12 +3426,14 @@ static struct sanatrk *atrk_find_trkid(struct sanmsa *msa, uint16_t trkid,
 	newid = -1;
 	for (i = 0; i < msa->numtrk; i++) {
 		atrk = &(msa->atrk[i]);
-		if ((atrk->flags & ATRK_INUSE) && (trkid == atrk->trkid))
-			return atrk;
+		if ((atrk->flags & ATRK_INUSE) && (trkid == atrk->trkid)) {
+			if ((idx == -1) || ((atrk->maxidx == maxidx) && (atrk->curridx + 1 == idx)))
+				return atrk;
+		}
 		if ((newid < 0) && (0 == (atrk->flags & ATRK_INUSE)))
 			newid = i;
 	}
-	if ((newid > -1) && (!fail_on_not_found)) {
+	if ((newid > -1) && (!fnf)) {
 		atrk = &(msa->atrk[newid]);
 		atrk_reset(atrk);
 		atrk->vol = 127;
@@ -3869,7 +3871,7 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 		vol = uid * 2 - 600;
 	}
 
-	atrk = atrk_find_trkid(msa, trkid, 0);
+	atrk = atrk_find_trkid(msa, trkid, -1, 0, 0);
 	if (!atrk)
 		return;
 
@@ -4029,13 +4031,15 @@ static void handle_SAUD(struct sanmsa *msa, uint32_t size, uint8_t *src,
 	uint16_t rate;
 	struct sanatrk *atrk;
 
-	atrk = atrk_find_trkid(msa, tid, 0);
+	atrk = atrk_find_trkid(msa, tid, -1, 0, 0);
 	if (!atrk)
 		return;
 
-	/* RA1 does this */
+	/* RA1 sometimes has identical TIDs for different tracks */
 	if (atrk->flags != 0) {
-		atrk_reset(atrk);
+		atrk = atrk_find_trkid(msa, tid, 0, maxidx, 0);
+		if (!atrk)
+			return;
 	}
 
 	atrk->trkid = tid;
@@ -4131,13 +4135,10 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 		/* handle_SAUD should have allocated it.  RA1 however
 		 * sometimes repeats the last index of a tid a few times.
 		 */
-		atrk = atrk_find_trkid(ctx->msa, tid, 1);
+		atrk = atrk_find_trkid(ctx->msa, tid, idx, mid, 1);
 		if (!atrk) {
 			return;
 		}
-		/* sou_engine_start_stream() does this in all engines */
-		if (((atrk->curridx + 1) != idx) || (atrk->maxidx != mid))
-			return;
 
 		atrk->curridx = idx;
 		atrk->pan = pan;
