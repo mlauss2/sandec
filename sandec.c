@@ -129,13 +129,9 @@ static inline uint32_t ua32(uint8_t *p)
 #define ATRK_VOL_MAX	127
 
 /* PSAD/iMUS multistream audio track */
-#define ATRK_INUSE	(1 << 0)
-#define ATRK_1CH	(1 << 1)
-#define ATRK_SRC8BIT	(1 << 2)
-#define ATRK_SRC12BIT	(1 << 3)
-#define ATRK_MIXED	(1 << 4)
-#define ATRK_BLOCKED	(1 << 5)
-#define ATRK_REMIX	(1 << 6)
+#define ATRK_1CH	(1 << 0)
+#define ATRK_SRC8BIT	(1 << 1)
+#define ATRK_SRC12BIT	(1 << 2)
 
 /* 1M for Dig */
 #define _ATRK_DATSZ	(1 << 20)
@@ -172,7 +168,8 @@ struct sanatrk {
 	uint32_t rdptr;		/* read pointer				*/
 	uint32_t wrptr;		/* write pointer			*/
 	int32_t datacnt;	/* currently held data in buffer	*/
-	uint32_t flags;		/* ATRK_ flags				*/
+	uint32_t flags;		/* source format flags			*/
+	uint32_t state;		/* Track state				*/
 	atrk_decode decode;	/* upmix function			*/
 	int32_t dataleft;	/* SAUD data left until track ends	*/
 	uint32_t dstfavail;	/* frames in dest format available	*/
@@ -3221,7 +3218,8 @@ static inline void atrk_set_playpos(struct sanatrk *atrk, uint32_t ofs, uint32_t
 	atrk->playlen = len;
 	atrk->src_accum = 0;
 	atrk->dstpavail = atrk_bytes_to_dstframes(atrk, atrk->playlen);
-	atrk->flags |= ATRK_REMIX;
+	if (atrk->state == 4)
+		atrk->state = 5;
 }
 
 /* create a default STRK script which plays the whole stream, then terminates,
@@ -3426,11 +3424,11 @@ static struct sanatrk *atrk_find_trkid(struct sanmsa *msa, uint16_t trkid,
 	newid = -1;
 	for (i = 0; i < msa->numtrk; i++) {
 		atrk = &(msa->atrk[i]);
-		if ((atrk->flags & ATRK_INUSE) && (trkid == atrk->trkid)) {
+		if ((atrk->state > 0) && (trkid == atrk->trkid)) {
 			if ((idx == -1) || ((atrk->maxidx == maxidx) && (atrk->curridx + 1 == idx)))
 				return atrk;
 		}
-		if ((newid < 0) && (0 == (atrk->flags & ATRK_INUSE)))
+		if ((newid < 0) && (atrk->state == 0))
 			newid = i;
 	}
 	if ((newid > -1) && (!fnf)) {
@@ -3445,8 +3443,12 @@ static struct sanatrk *atrk_find_trkid(struct sanmsa *msa, uint16_t trkid,
 /* clear the ATRK_MIXED flag from all tracks */
 static void atrk_reset_mixed(struct sanmsa *msa)
 {
-	for (int i = 0; i < msa->numtrk; i++)
-		msa->atrk[i].flags &= ~ATRK_MIXED;
+	struct sanatrk *atrk;
+	for (int i = 0; i < msa->numtrk; i++) {
+		atrk = &(msa->atrk[i]);
+		if (atrk->state >= 4)
+			atrk->state = 3;
+	}
 }
 
 /* get the FIRST mixable track. */
@@ -3455,8 +3457,7 @@ static struct sanatrk *atrk_get_next_mixable(struct sanmsa *msa)
 	struct sanatrk *atrk;
 	for (int i = 0; i < msa->numtrk; i++) {
 		atrk = &(msa->atrk[i]);
-		if ((ATRK_INUSE == (atrk->flags & (ATRK_INUSE | ATRK_MIXED | ATRK_BLOCKED)))
-			&& atrk->dstfavail)
+		if ((atrk->state == 3) && atrk->dstfavail)
 			return atrk;
 	}
 	return NULL;
@@ -3474,7 +3475,7 @@ static int atrk_count_mixable(struct sanmsa *msa, uint32_t *minlen)
 	for (i = 0; i < msa->numtrk; i++) {
 		atrk = &(msa->atrk[i]);
 		df = _min(atrk->dstpavail, atrk->dstfavail);
-		if ((ATRK_INUSE == (atrk->flags & (ATRK_INUSE | ATRK_MIXED | ATRK_BLOCKED))) && df) {
+		if ((atrk->state == 3) && df) {
 			mixable++;
 			if (ml > df) {
 				ml = df;
@@ -3500,7 +3501,7 @@ static int atrk_count_active(struct sanmsa *msa, int *voice)
 		atrk = &(msa->atrk[i]);
 		if (voice && (SAUD_FLAG_TRK_VOICE == (atrk->pflags & SAUD_FLAG_TRK_MASK)))
 			*voice = 1;
-		if (ATRK_INUSE == (atrk->flags & (ATRK_INUSE)))
+		if (atrk->state > 1)
 			active++;
 	}
 	return active;
@@ -3516,7 +3517,7 @@ static inline void atrk_finish_all(struct sanmsa *msa)
 	 */
 	for (i = 0; i < msa->numtrk; i++) {
 		atrk = &(msa->atrk[i]);
-		if (0 == (atrk->flags & ATRK_INUSE))
+		if (atrk->state < 3)
 			continue;
 		if ((atrk->playlen / atrk->srate) > 10)
 			atrk_reset(atrk);
@@ -3787,11 +3788,11 @@ static int aud_mix_tracks(struct sanctx *ctx)
 			if (m == SAUD_FLAG_TRK_MUSIC)
 				vol = ((vol * msa->sou_vol_damp) >> 8) & 0xff;
 
+			atrk->state = 4;
 			pan = (atrk->flags & ATRK_1CH) ? atrk->pan : 0;
 			atrk_convert_resample(atrk, trkobuf, minlen1);
 			aud_mixs16(dstptr, (uint8_t *)trkobuf, dstptr,
 				   minlen1 * 4, vol, pan, ATRK_VOL_MAX, 0);
-			atrk->flags |= ATRK_MIXED;
 		}
 		dstlen += minlen1 * 4;
 		dstptr += dstlen;
@@ -3813,9 +3814,8 @@ static int aud_mix_tracks(struct sanctx *ctx)
 			 */
 			for (int i = 0; i < msa->numtrk; i++) {
 				atrk = &(msa->atrk[i]);
-				if (atrk->flags & ATRK_REMIX)
-					atrk->flags &= ~ATRK_MIXED;
-				atrk->flags &= ~ATRK_REMIX;
+				if (atrk->state == 5)
+					atrk->state = 3;
 			}
 			/* final check: newly mixable tracks with data available */
 			mixable = atrk_count_mixable(msa, &minlen1);
@@ -3842,6 +3842,7 @@ static int aud_mix_tracks(struct sanctx *ctx)
 		if (msa->sou_vol_damp > msa->sou_damp_max)
 			msa->sou_vol_damp = msa->sou_damp_max;
 	}
+
 	atrk_reset_mixed(msa);
 	return (dstlen != 0);
 }
@@ -3884,7 +3885,7 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 	/*
 	 * read header of new track. NOTE: subchunks aren't 16bit aligned!
 	 */
-	if (0 == (atrk->flags & ATRK_INUSE)) {
+	if (atrk->state == 0) {
 		if (size < 24)
 			return;
 		cid = le32_to_cpu(ua32(src + 0));
@@ -3930,7 +3931,7 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 		if (cid != DATA)
 			return;
 
-		atrk->flags |= ATRK_INUSE | ATRK_BLOCKED;	/* active track */
+		atrk->state = 2;
 		atrk->trkid = trkid;
 		atrk->dataleft = csz;
 		atrk_set_srcfmt(atrk, rate, bits, chnl, vol, 0);
@@ -3941,11 +3942,11 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 	atrk_read_pcmsrc(atrk, size, src);
 	atrk->dataleft -= size;
 	if (atrk->dataleft <= 0) {
-		atrk->flags &= ~ATRK_BLOCKED;
 		atrk->dataleft = 0;
+		atrk->state = 3;
 	}
 	if (atrk->dstfavail >= msa->audminframes)
-		atrk->flags &= ~ATRK_BLOCKED;
+		atrk->state = 3;
 }
 
 static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
@@ -4036,7 +4037,7 @@ static void handle_SAUD(struct sanmsa *msa, uint32_t size, uint8_t *src,
 		return;
 
 	/* RA1 sometimes has identical TIDs for different tracks */
-	if (atrk->flags != 0) {
+	if (atrk->state != 0) {
 		atrk = atrk_find_trkid(msa, tid, 0, maxidx, 0);
 		if (!atrk)
 			return;
@@ -4061,7 +4062,7 @@ static void handle_SAUD(struct sanmsa *msa, uint32_t size, uint8_t *src,
 			}
 
 		} else if (cid == SDAT) {
-			atrk->flags |= ATRK_INUSE | ATRK_BLOCKED;
+			atrk->state = 2;
 			atrk->dataleft = csz;
 			break;
 		}
@@ -4071,12 +4072,14 @@ static void handle_SAUD(struct sanmsa *msa, uint32_t size, uint8_t *src,
 	atrk_set_srcfmt(atrk, rate, 8, 1, vol, pan);
 	atrk_read_pcmsrc(atrk, size, src);
 	atrk->dataleft -= size;
+	if (atrk->state > 1)
+		atrk_process_strk(atrk);
 	if ((atrk->dataleft <= 0) || (maxidx < 2)) {
-		atrk->flags &= ~ATRK_BLOCKED;
+		atrk->state = 3;
 	}
-	if (atrk->dstfavail >= msa->audminframes)
-		atrk->flags &= ~ATRK_BLOCKED;
-	atrk_process_strk(atrk);
+	if (atrk->dstfavail >= msa->audminframes) {
+		atrk->state = 3;
+	}
 }
 
 static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t v1flag)
@@ -4136,7 +4139,7 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 		 * sometimes repeats the last index of a tid a few times.
 		 */
 		atrk = atrk_find_trkid(ctx->msa, tid, idx, mid, 1);
-		if (!atrk) {
+		if (!atrk || atrk->state < 1) {
 			return;
 		}
 
@@ -4149,7 +4152,7 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 		atrk->dataleft -= size;
 		if ((atrk->dataleft < 1) ||
 		    (atrk->dstfavail >= ctx->msa->audminframes)) {
-			atrk->flags &= ~ATRK_BLOCKED;
+			atrk->state = 3;
 		}
 	}
 }
