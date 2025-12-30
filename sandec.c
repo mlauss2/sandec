@@ -142,7 +142,7 @@ static const uint32_t ATRK_DATSZ = _ATRK_DATSZ;
 static const uint32_t ATRK_DATMASK = (_ATRK_DATSZ - 1);
 
 #define ATRK_MAX	10
-#define ATRK_MAX_STRK_SIZE	4096
+#define ATRK_MAX_STRK_SIZE	5120
 
 /* PSAD flags defining audio track type (voice/music/sfx).
  * ANIMv1 could only differentiate between them based on the chunk name,
@@ -3541,7 +3541,8 @@ static void atrk_read_pcmsrc(struct sanatrk *atrk, uint32_t size, uint8_t *src)
 	atrk->datacnt += size;
 	atrk->wrptr += size;
 	atrk->wrptr &= ATRK_DATMASK;
-	atrk_update_dstframes_avail(atrk);
+	if (atrk->state > 1)
+		atrk_update_dstframes_avail(atrk);
 }
 
 static void atrk_consume(struct sanatrk *atrk, uint32_t bytes)
@@ -3854,6 +3855,9 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 	uint16_t rate, bits, chnl, vol;
 	struct sanatrk *atrk;
 
+	if (size > (_ATRK_DATSZ / 2))
+		return;
+
 	vol = ATRK_VOL_MAX;
 	if (uid == 1)
 		trkid += 100;
@@ -3939,14 +3943,16 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 		atrk_process_strk(atrk);
 	}
 
+	if (atrk->state < 2)
+		return;
+	if (size > atrk->dataleft)
+		size = atrk->dataleft;
 	atrk_read_pcmsrc(atrk, size, src);
 	atrk->dataleft -= size;
-	if (atrk->dataleft <= 0) {
-		atrk->dataleft = 0;
+	if ((atrk->state < 3) &&
+	    ((atrk->dataleft < 1) || (atrk->dstfavail >= msa->audminframes))) {
 		atrk->state = 3;
 	}
-	if (atrk->dstfavail >= msa->audminframes)
-		atrk->state = 3;
 }
 
 static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
@@ -4024,70 +4030,69 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
-static void handle_SAUD(struct sanmsa *msa, uint32_t size, uint8_t *src,
-			const uint32_t tid, const uint8_t vol, const int8_t pan,
-			const uint32_t maxidx, const uint16_t pflags)
+static void handle_SAUD(struct sanatrk *atrk, const uint16_t rate)
 {
-	uint32_t cid, csz;
-	uint16_t rate;
-	struct sanatrk *atrk;
+	uint32_t cid, csz, size = atrk->datacnt;
+	uint8_t *src = atrk->data;
 
-	atrk = atrk_find_trkid(msa, tid, -1, 0, 0);
-	if (!atrk)
+	if ((atrk->state > 1) || (size < 16))
 		return;
 
-	/* RA1 sometimes has identical TIDs for different tracks */
-	if (atrk->state != 0) {
-		atrk = atrk_find_trkid(msa, tid, 0, maxidx, 0);
-		if (!atrk)
-			return;
-	}
+	/* need to find: SAUD____STRK____<ssss>SDAT____  */
+	cid = le32_to_cpu(ua32(src + 0));
+	if (cid != SAUD)
+		return;
 
-	atrk->trkid = tid;
-	atrk->maxidx = maxidx;
-	atrk->pflags = pflags;
-	rate = msa->samplerate;
-	while (size > 7) {
-		cid = le32_to_cpu(ua32(src + 0));
-		csz = be32_to_cpu(ua32(src + 4));
-		src += 8;
-		size -= 8;
-		if (cid == STRK) {
-			if ((csz <= ATRK_MAX_STRK_SIZE) && (csz <= size)) {
-				memcpy(atrk->strk, src, csz);
-				atrk->strksz = csz;
-			} else {
-				atrk_reset(atrk);
-				return;
-			}
+	src += 8;
+	size -= 8;
+	cid = le32_to_cpu(ua32(src + 0));
+	csz = be32_to_cpu(ua32(src + 4));
+	if (cid != STRK)
+		return;
 
-		} else if (cid == SDAT) {
-			atrk->state = 2;
-			atrk->dataleft = csz;
-			break;
-		}
-		src += csz;
-		size -= csz;
-	}
-	atrk_set_srcfmt(atrk, rate, 8, 1, vol, pan);
-	atrk_read_pcmsrc(atrk, size, src);
-	atrk->dataleft -= size;
-	if (atrk->state > 1)
-		atrk_process_strk(atrk);
-	if ((atrk->dataleft <= 0) || (maxidx < 2)) {
-		atrk->state = 3;
-	}
-	if (atrk->dstfavail >= msa->audminframes) {
-		atrk->state = 3;
-	}
+	src += 8;
+	size -= 8;
+	/* don't copy unless the source has space for the SDAT____ as well */
+	if ((csz > size + 9) || (csz >= ATRK_MAX_STRK_SIZE))
+		return;
+
+	memcpy(atrk->strk, src, csz);
+	atrk->strksz = csz;
+	src += csz;
+	size -= csz;
+
+	cid = le32_to_cpu(ua32(src + 0));	/* SDAT */
+	csz = be32_to_cpu(ua32(src + 4));	/* total PCM bytes */
+	if (cid != SDAT)
+		return;
+
+	src += 8;
+	size -= 8;
+
+	atrk->state = (atrk->maxidx == 1) ? 3 : 2;
+
+	/* Move the remaining PCM data to the start of the buffer */
+	size = (size > csz) ? csz : size;
+	memmove(atrk->data, src, size);
+	atrk->datacnt = size;
+	atrk->wrptr = size;
+	atrk->dataleft = csz - size;
+
+	atrk_set_srcfmt(atrk, rate, 8, 1, atrk->vol, atrk->pan);
+	atrk_process_strk(atrk);
+	atrk_update_dstframes_avail(atrk);
 }
 
 static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t v1flag)
 {
-	uint32_t t1, tid, idx, vol, pan, mid, flg;
+	uint32_t tid, idx, vol, pan, mid, flg;
+	struct sanmsa *msa = ctx->msa;
 	struct sanatrk *atrk;
 
 	if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
+		return;
+
+	if (size > (_ATRK_DATSZ / 2))
 		return;
 
 	/* dig.exe 4332f */
@@ -4127,31 +4132,37 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 	}
 
 	if (idx == 0) {
-		/* should be a "SAUD____" here; the "size" is the size of the
-		 * _complete_ SAUD in all the PSAD chunks.
-		 */
-		t1 = le32_to_cpu(ua32(src + 0));
-		if (t1 == SAUD) {
-			handle_SAUD(ctx->msa, size - 8, src + 8, tid, vol, pan, mid, flg);
+		atrk = atrk_find_trkid(msa, tid, -1, 0, 0);
+		/* RA1 sometimes has identical TIDs for different tracks */
+		if (atrk->state != 0) {
+			atrk = atrk_find_trkid(msa, tid, 0, mid, 0);
+			if (!atrk)
+				return;
 		}
+		atrk->trkid = tid;
+		atrk->maxidx = mid;
+		atrk->pflags = flg;
+		atrk->state = 1;
 	} else {
-		/* handle_SAUD should have allocated it.  RA1 however
-		 * sometimes repeats the last index of a tid a few times.
-		 */
 		atrk = atrk_find_trkid(ctx->msa, tid, idx, mid, 1);
-		if (!atrk || atrk->state < 1) {
+		if (!atrk || (atrk->state < 1))
 			return;
-		}
+	}
 
-		atrk->curridx = idx;
-		atrk->pan = pan;
-		atrk->vol = vol;
+	atrk->curridx = idx;
+	atrk->pan = pan;
+	atrk->vol = vol;
+	if (atrk->state > 2) {
 		if (size > atrk->dataleft)
 			size = atrk->dataleft;
-		atrk_read_pcmsrc(atrk, size, src);
-		atrk->dataleft -= size;
-		if ((atrk->dataleft < 1) ||
-		    (atrk->dstfavail >= ctx->msa->audminframes)) {
+	}
+	atrk_read_pcmsrc(atrk, size, src);
+	if (atrk->state < 2)
+		handle_SAUD(atrk, msa->samplerate);
+
+	if (atrk->state == 2) {
+		if ((atrk->dataleft < 1) || (atrk->maxidx < 2)
+		    || (atrk->dstfavail >= ctx->msa->audminframes)) {
 			atrk->state = 3;
 		}
 	}
@@ -5075,6 +5086,7 @@ int sandec_init(void **ctxout)
 int sandec_open(void *sanctx, struct sanio *io)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
+	struct sanatrk *atrk;
 	uint32_t c[2];
 	int ret;
 
@@ -5108,7 +5120,6 @@ int sandec_open(void *sanctx, struct sanio *io)
 		}
 
 	} else if (c[0] == SAUD) {
-		uint8_t *dat;
 		uint32_t csz = be32_to_cpu(c[1]);
 		ret = 8;
 		if ((csz < 8) || (csz > (1 << 20))) {
@@ -5116,16 +5127,22 @@ int sandec_open(void *sanctx, struct sanio *io)
 		} else {
 			if (sandec_alloc_msa(&ctx->msa, 1, 22050))
 				goto out;
-			dat = malloc(csz);
-			if (!dat)
+			if (csz > ATRK_DATSZ)
 				goto out;
-			if (read_source(ctx, dat, csz)) {
-				free(dat);
+			atrk = atrk_find_trkid(ctx->msa, 1, 0, 1, 0);
+			if (!atrk)
 				goto out;
-			}
+			memcpy(atrk->data, c, 8);
+			if (read_source(ctx, atrk->data + 8, csz))
+				goto out;
+			atrk->vol = ATRK_VOL_MAX;
+			atrk->pan = 0;
+			atrk->wrptr = csz + 8;
+			atrk->datacnt = csz + 8;
+			atrk->trkid = 1;
+			atrk->maxidx = 1;
 			ctx->msa->samplerate = 11025;
-			handle_SAUD(ctx->msa, csz, dat, 1, ATRK_VOL_MAX, 0, 1, 0);
-			free(dat);
+			handle_SAUD(atrk, ctx->msa->samplerate);
 			ret = atrk_count_active(ctx->msa, NULL) > 0 ? 0 : 8;
 		}
 
