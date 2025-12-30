@@ -125,8 +125,8 @@ static inline uint32_t ua32(uint8_t *p)
 #define GLYPH_COORD_VECT_SIZE 16
 #define NGLYPHS 256
 
-/* maximum volume. This is the maximum found in PSAD/iMUS streams */
-#define ATRK_VOL_MAX	127
+/* maximum volume. */
+#define ATRK_VOL_MAX	255
 
 /* PSAD/iMUS multistream audio track */
 #define ATRK_1CH	(1 << 0)
@@ -160,7 +160,7 @@ static const uint32_t ATRK_DATMASK = (_ATRK_DATSZ - 1);
 struct sanatrk;
 struct sanmsa;
 
-typedef int16_t(*atrk_decode)(struct sanatrk*, uint32_t i, uint8_t c);
+typedef uint32_t (*atrk_resample)(struct sanatrk*, int16_t*, uint32_t);
 
 struct sanatrk {
 	/* ATRK fields */
@@ -170,7 +170,7 @@ struct sanatrk {
 	int32_t datacnt;	/* currently held data in buffer	*/
 	uint32_t flags;		/* source format flags			*/
 	uint32_t state;		/* Track state				*/
-	atrk_decode decode;	/* upmix function			*/
+	atrk_resample resample;	/* upmix function			*/
 	int32_t dataleft;	/* SAUD data left until track ends	*/
 	uint32_t dstfavail;	/* frames in dest format available	*/
 	uint32_t src_accum;	/* SRC accumulator 16.16		*/
@@ -3149,55 +3149,174 @@ static void atrk_update_dstframes_avail(struct sanatrk *atrk)
 	atrk->dstpavail = atrk_bytes_to_dstframes(atrk, atrk->playlen);
 }
 
-/* extract a sample for channel "ch" from frame at offset "frameofs" in the source
- * at the readpointer.  For 16bit-LE source data format.
- */
-static int16_t atrk_decode_src16le(struct sanatrk *atrk, uint32_t frameofs, uint8_t ch)
+static uint32_t atrk_resample_8(struct sanatrk *atrk, int16_t *dst, uint32_t count)
 {
-	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;	/* channel mult */
-	uint32_t srcofs;
-	uint8_t lo, hi;
+	const uint32_t mask = ATRK_DATMASK;
+	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;
+	uint32_t acc = atrk->src_accum;
+	int16_t s1, s2;
 
-	srcofs = (atrk->rdptr + (frameofs * chm * 2) + (ch * 2));
-	srcofs &= ATRK_DATMASK;
-	lo = atrk->data[srcofs];
-	hi = atrk->data[(srcofs + 1) & ATRK_DATMASK];
-	return (int16_t)((hi << 8) | lo);
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t isidx = acc >> 16;
+		uint32_t frac = acc & 0xFFFF;
+		uint32_t pos = (atrk->rdptr + (isidx * chm)) & mask;
+
+		if (atrk->flags & ATRK_1CH) {
+			/* Mono 8-bit */
+			s1 = (atrk->data[pos] << 8) ^ 0x8000;
+			if (frac) {
+				int16_t next = (atrk->data[(pos + 1) & mask] << 8) ^ 0x8000;
+				s1 += ((next - s1) * (int32_t)frac) >> 16;
+			}
+			dst[0] = dst[1] = s1;
+		} else {
+			/* Stereo 8-bit */
+			s1 = (atrk->data[pos] << 8) ^ 0x8000;
+			s2 = (atrk->data[(pos + 1) & mask] << 8) ^ 0x8000;
+			if (frac) {
+				int16_t n1 = (atrk->data[(pos + 2) & mask] << 8) ^ 0x8000;
+				int16_t n2 = (atrk->data[(pos + 3) & mask] << 8) ^ 0x8000;
+				s1 += ((n1 - s1) * (int32_t)frac) >> 16;
+				s2 += ((n2 - s2) * (int32_t)frac) >> 16;
+			}
+			dst[0] = s1;
+			dst[1] = s2;
+		}
+		dst += 2;
+		acc += atrk->src_cnvrate;
+	}
+
+	atrk->src_accum = acc & 0xFFFF;
+
+	return ((acc >> 16) * chm);	/* source bytes consumed */
 }
 
-/* extract a sample for channel "ch" from frame at offset "frameofs" in the source
- * at the readpointer.  For unsigned 8bit source data format.
- */
-static int16_t atrk_decode_src8(struct sanatrk *atrk, uint32_t frameofs, uint8_t ch)
+static uint32_t atrk_resample_16(struct sanatrk *atrk, int16_t *dst, uint32_t count)
 {
-	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;	/* channel mult */
-	uint32_t srcofs;
+	const uint32_t mask = ATRK_DATMASK;
+	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;
+	uint32_t acc = atrk->src_accum;
+	int16_t s1, s2;
 
-	srcofs = (atrk->rdptr + (frameofs * chm * 1) + (ch * 1));
-	srcofs &= ATRK_DATMASK;
-	return ((atrk->data[srcofs]) << 8) ^ 0x8000;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t isidx = acc >> 16;
+		uint32_t frac = acc & 0xFFFF;
+		uint32_t pos = (atrk->rdptr + (isidx * chm * 2)) & mask;
+
+		if (atrk->flags & ATRK_1CH) {
+			/* Mono 16-bit Little Endian */
+			s1 = (int16_t)(atrk->data[pos] | (atrk->data[(pos + 1) & mask] << 8));
+			if (frac) {
+				uint32_t pos2 = (pos + 2) & mask;
+				int16_t next = (int16_t)(atrk->data[pos2] | (atrk->data[(pos2 + 1) & mask] << 8));
+				s1 += ((next - s1) * (int32_t)frac) >> 16;
+			}
+			dst[0] = dst[1] = s1;
+		} else {
+			/* Stereo 16-bit Little Endian */
+			s1 = (int16_t)(atrk->data[pos] | (atrk->data[(pos + 1) & mask] << 8));
+			uint32_t posR = (pos + 2) & mask;
+			s2 = (int16_t)(atrk->data[posR] | (atrk->data[(posR + 1) & mask] << 8));
+
+			if (frac) {
+				/* Next frame Left */
+				uint32_t posN = (pos + 4) & mask;
+				int16_t n1 = (int16_t)(atrk->data[posN] | (atrk->data[(posN + 1) & mask] << 8));
+				/* Next frame Right */
+				uint32_t posNR = (pos + 6) & mask;
+				int16_t n2 = (int16_t)(atrk->data[posNR] | (atrk->data[(posNR + 1) & mask] << 8));
+
+				s1 += ((n1 - s1) * (int32_t)frac) >> 16;
+				s2 += ((n2 - s2) * (int32_t)frac) >> 16;
+			}
+			dst[0] = s1;
+			dst[1] = s2;
+		}
+		dst += 2;
+		acc += atrk->src_cnvrate;
+	}
+
+	atrk->src_accum = acc & 0xFFFF;
+
+	return ((acc >> 16) * 2 * chm);	/* source bytes consumed */
 }
 
-/* extract a sample for channel "ch" from frame at offset "frameofs" in the source
- * at the readpointer.  For packed 12bit source data format.
- */
-static int16_t atrk_decode_src12(struct sanatrk *atrk, uint32_t frameofs, uint8_t ch)
+static inline int16_t _aud_decode_12bit(const uint8_t *data, uint32_t ptr, int hinib)
 {
-	const uint32_t ch1 = atrk->flags & ATRK_1CH;
-	uint8_t b0, b1 ,b2;
-	uint32_t srcofs;
-	int16_t s[2];
+	uint32_t pos = ptr & ATRK_DATMASK;
+	uint8_t b0 = data[pos];
+	uint8_t b1 = data[(pos + 1) & ATRK_DATMASK];
+	uint8_t b2 = data[(pos + 2) & ATRK_DATMASK];
 
-	/*   mono: 3 src bytes for 2 16bit frames.
-	 * stereo: 3 src bytes for 1 16bit-2ch frame */
-	srcofs = atrk->rdptr + (ch1 ? (frameofs / 2) * 3 : frameofs * 3);
-	b0 = atrk->data[(srcofs + 0) & ATRK_DATMASK];
-	b1 = atrk->data[(srcofs + 1) & ATRK_DATMASK];
-	b2 = atrk->data[(srcofs + 2) & ATRK_DATMASK];
-	s[0] = ((((b1 & 0x0f) << 8) | b0) << 4) - 0x8000;
-	s[1] = ((((b1 & 0xf0) << 4) | b2) << 4) - 0x8000;
+	if (!hinib) {
+		return ((((b1 & 0x0f) << 8) | b0) << 4) - 0x8000;
+	} else {
+		return ((((b1 & 0xf0) << 4) | b2) << 4) - 0x8000;
+	}
+}
 
-	return (ch1) ? s[frameofs & 1] : s[!!ch];
+static uint32_t atrk_resample_12(struct sanatrk *atrk, int16_t *dst, uint32_t count)
+{
+	uint32_t acc = atrk->src_accum;
+	int16_t s1, s2;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t isidx = acc >> 16;
+		uint32_t frac = acc & 0xFFFF;
+
+		if (atrk->flags & ATRK_1CH) {
+			/* Mono 12-bit: 3 bytes = 2 samples */
+			uint32_t block = isidx / 2;
+			uint32_t rem = isidx & 1;
+			uint32_t pos = (atrk->rdptr + (block * 3));
+
+			s1 = _aud_decode_12bit(atrk->data, pos, rem);
+
+			if (frac) {
+				int16_t next;
+				/* If rem was 0 (low nibble), next is same block rem 1 (high nibble)
+				 *              If rem was 1 (high nibble), next is next block (block+1) rem 0 */
+				if (rem == 0) {
+					next = _aud_decode_12bit(atrk->data, pos, 1);
+				} else {
+					next = _aud_decode_12bit(atrk->data, pos + 3, 0);
+				}
+				s1 += ((next - s1) * (int32_t)frac) >> 16;
+			}
+			dst[0] = dst[1] = s1;
+		} else {
+			/* Stereo 12-bit: 3 bytes = 1 frame (L+R) */
+			uint32_t pos = (atrk->rdptr + (isidx * 3));
+
+			/* L is always low nibble type, R is always high nibble type */
+			s1 = _aud_decode_12bit(atrk->data, pos, 0);
+			s2 = _aud_decode_12bit(atrk->data, pos, 1);
+
+			if (frac) {
+				int16_t n1 = _aud_decode_12bit(atrk->data, pos + 3, 0);
+				int16_t n2 = _aud_decode_12bit(atrk->data, pos + 3, 1);
+
+				s1 += ((n1 - s1) * (int32_t)frac) >> 16;
+				s2 += ((n2 - s2) * (int32_t)frac) >> 16;
+			}
+			dst[0] = s1;
+			dst[1] = s2;
+		}
+		dst += 2;
+		acc += atrk->src_cnvrate;
+	}
+
+	atrk->src_accum = acc & 0xFFFF;
+
+	/* calculate source bytes consumed */
+	uint32_t bytes_consumed;
+	if (atrk->flags & ATRK_1CH) {
+		bytes_consumed = (((acc >> 16) + 1) / 2) * 3;
+	} else {
+		bytes_consumed = (acc >> 16) * 3;
+	}
+
+	return bytes_consumed;
 }
 
 static inline void atrk_reset(struct sanatrk *atrk)
@@ -3293,8 +3412,8 @@ static void atrk_process_strk(struct sanatrk *atrk)
 				*r += (int8_t)s[3];	/* "register" */
 			} else if (s[2] == 0xfe) {
 				atrk->vol += (int8_t)s[3];
-				if (atrk->vol > 127)
-					atrk->vol = 127;
+				if (atrk->vol > ATRK_VOL_MAX)
+					atrk->vol = ATRK_VOL_MAX;
 			} else if (s[2] == 0xfd) {
 				atrk->pan += (int8_t)s[3];
 				if (atrk->pan & 0x80)
@@ -3397,12 +3516,12 @@ static void atrk_set_srcfmt(struct sanatrk *atrk, uint16_t rate,
 	atrk->flags &= ~(ATRK_1CH | ATRK_SRC8BIT | ATRK_SRC12BIT);
 	if (bits == 8) {
 		atrk->flags |= ATRK_SRC8BIT;
-		atrk->decode = atrk_decode_src8;
+		atrk->resample = atrk_resample_8;
 	} else if (bits == 12) {
 		atrk->flags |= ATRK_SRC12BIT;
-		atrk->decode = atrk_decode_src12;
+		atrk->resample = atrk_resample_12;
 	} else {
-		atrk->decode = atrk_decode_src16le;
+		atrk->resample = atrk_resample_16;
 	}
 	if (ch < 2)
 		atrk->flags |= ATRK_1CH;
@@ -3557,191 +3676,91 @@ static void atrk_consume(struct sanatrk *atrk, uint32_t bytes)
 		atrk_process_strk(atrk);
 }
 
-static int atrk_frame_data_avail(struct sanatrk *atrk, uint32_t frameidx)
-{
-	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;
-	uint32_t n1, n2;
-	int ret = 0;
-
-	if (atrk->flags & ATRK_SRC8BIT) {
-		n1 = (frameidx + 1) * chm;
-		n2 = (frameidx + 2) * chm;
-	} else if (atrk->flags & ATRK_SRC12BIT) {
-		if (atrk->flags & ATRK_1CH) {
-			n1 = (((frameidx + 0) / 2) + 1) * 3;
-			n2 = (((frameidx + 1) / 2) + 1) * 3;
-		} else {
-			n1 = ((frameidx + 0) + 1) * 3;
-			n2 = ((frameidx + 1) + 1) * 3;
-		}
-	} else {
-		n1 = ((frameidx + 0) + 1) * chm * 2;
-		n2 = ((frameidx + 1) + 1) * chm * 2;
-	}
-	ret  = (n1 <= atrk->datacnt) ? 1 : 0;
-	ret |= (n2 <= atrk->datacnt) ? 2 : 0;
-	return ret;
-}
-
-/* convert the ATRK src data to 16bit 2ch and resample it to get the desired
- * number of target frames.
- */
-static void atrk_convert_resample(struct sanatrk *atrk, int16_t *dst,
-				  uint32_t dest_frame_count)
-{
-	const uint32_t chm = (atrk->flags & ATRK_1CH) ? 1 : 2;
-	uint32_t isidx, frac, tc, bc;
-	int32_t l, r, s1, s2, s3, s4;
-	int fda;
-
-	for (uint32_t i = 0; i < dest_frame_count; i++) {
-		/* input sample real index and fractional part */
-		isidx = atrk->src_accum >> 16;
-		frac = atrk->src_accum & 0xFFFF;
-
-		/* get info about source availability of current and next frame.
-		 * bitmask: bit 1 = have source data at index frame,
-		 * bit 2 = have source data at next index frame.
-		 */
-		fda = atrk_frame_data_avail(atrk, isidx);
-
-		if (!(fda & 1)) {
-			/* no CURRENT data, this should not happen, but
-			 * generate silence.
-			 */
-			dst[i * 2 + 0] = 0;
-			dst[i * 2 + 1] = 0;
-		} else {
-			if (atrk->flags & ATRK_1CH) {
-				/* mono: get 2 samples if possible, then inter-
-				 * polate between them and write it to both
-				 * output channels.
-				 */
-				s1 = atrk->decode(atrk, isidx, 0);
-				s2 = (fda & 2) ? atrk->decode(atrk, isidx + 1, 0) : s1;
-				l = r = s1 + (((s2 - s1) * (int32_t)frac) >> 16);
-			} else {
-				/* stereo: get a sample for both channels */
-				s1 = atrk->decode(atrk, isidx, 0);
-				s2 = atrk->decode(atrk, isidx, 1);
-
-				if (fda & 2) {
-					/* have next frame: get it an interpolate */
-					s3 = atrk->decode(atrk, isidx + 1, 0);
-					s4 = atrk->decode(atrk, isidx + 1, 1);
-
-					l = s1 + (((s3 - s1) * (int32_t)frac) >> 16);
-					r = s2 + (((s4 - s2) * (int32_t)frac) >> 16);
-				} else {
-					/* no next frame: duplicate existing data */
-					l = s1;
-					r = s2;
-				}
-			}
-
-			/* clamp */
-			if (l > 32767)
-				l = 32767;
-			if (l < -32768)
-				l = -32768;
-			if (r > 32767)
-				r = 32767;
-			if (r < -32768)
-				r = -32768;
-
-			/* write */
-			dst[i * 2 + 0] = (int16_t)l;
-			dst[i * 2 + 1] = (int16_t)r;
-		}
-
-		/* advance input sample position */
-		atrk->src_accum += atrk->src_cnvrate;
-	}
-
-	/* update track pointers/counters, need to calculate how many bytes of
-	 * the INPUT format have been consumed.
-	 */
-	tc = atrk->src_accum >> 16;	/* how many source frames read */
-	if (atrk->flags & ATRK_SRC8BIT) {
-		bc = tc * chm;		/* bytes = frames * channels */
-	} else if (atrk->flags & ATRK_SRC12BIT) {
-		if (atrk->flags & ATRK_1CH) {
-			bc = ((tc + 1) / 2) * 3;	/* 3 bytes per 2 frames */
-		} else {
-			bc = tc * 3;	/* 3 bytes per frame */
-		}
-	} else {
-		bc = tc * 2 * chm;	/* 2bytes per frame * channels */
-	}
-	atrk_consume(atrk, bc);
-	/* we've advanced rdptr, keep only the fractional part of accumulator */
-	atrk->src_accum &= 0x0000ffff;
-}
-
 static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
 		       uint8_t vol1, int8_t pan1, uint8_t vol2, int8_t pan2)
 {
-	int32_t vol1_l, vol1_r, vol2_l, vol2_r;
-	int16_t *src1 = (int16_t *)s1;
-	int16_t *src2 = (int16_t *)s2;
-	int16_t *dst = (int16_t *)ds1;
-	int d1, d2, d3;
+	/* my attempt at a autovect-friendly mixing function. use __restrict to
+	 * indicate to the compiler that these buffers don't overlap
+	 */
+	int16_t * __restrict src1 = (int16_t *)s1;
+	int16_t * __restrict src2 = (int16_t *)s2;
+	int16_t * __restrict dst  = (int16_t *)ds1;
+	int32_t v1l, v1r, v2l, v2r;
 
+	/* calculate volume/pan */
 	if (pan1 == 0) {
-		vol1_l = vol1_r = vol1;
+		v1l = v1r = vol1;
 	} else if (pan1 < 0) {
-		vol1_l = vol1;
-		vol1_r = (vol1 * (ATRK_VOL_MAX + pan1)) / ATRK_VOL_MAX;
+		v1l = vol1;
+		v1r = (vol1 * (128 + pan1)) >> 7;
 	} else {
-		vol1_l = (vol1 * (ATRK_VOL_MAX - pan1)) / ATRK_VOL_MAX;
-		vol1_r = vol1;
+		v1l = (vol1 * (128 - pan1)) >> 7;
+		v1r = vol1;
 	}
 
 	if (pan2 == 0) {
-		vol2_l = vol2_r = vol2;
+		v2l = v2r = vol2;
 	} else if (pan2 < 0) {
-		vol2_l = vol2;
-		vol2_r = (vol2 * (ATRK_VOL_MAX + pan2)) / ATRK_VOL_MAX;
+		v2l = vol2;
+		v2r = (vol2 * (128 + pan2)) >> 7;
 	} else {
-		vol2_l = (vol2 * (ATRK_VOL_MAX - pan2)) / ATRK_VOL_MAX;
-		vol2_r = vol2;
+		v2l = (vol2 * (128 - pan2)) >> 7;
+		v2r = vol2;
 	}
 
-	while (bytes > 3) {
-		/* LEFT SAMPLE */
-		d1 = src1 ? (*src1++) : 0;
-		d2 = src2 ? (*src2++) : 0;
-		bytes -= 2;
+	/* loop in sample pairs */
+	for (int i = 0; i < bytes/4; i++) {
+		int32_t raw1_L = src1 ? src1[0] : 0;
+		int32_t raw1_R = src1 ? src1[1] : 0;
+		int32_t raw2_L = src2 ? src2[0] : 0;
+		int32_t raw2_R = src2 ? src2[1] : 0;
 
-		d1 = (d1 * vol1_l) / ATRK_VOL_MAX;
-		d2 = (d2 * vol2_l) / ATRK_VOL_MAX;
-		d1 = d1 + 32768;	/* s16 sample to u16 */
-		d2 = d2 + 32768;
+		if (src1)
+			src1 += 2;
+		if (src2)
+			src2 += 2;
 
-		if (d1 < 32768 && d2 < 32768) {
-			d3 = (d1 * d2) / 32768;
-		} else {
-			d3 = (2 * (d1 + d2)) - ((d1 * d2) / 32768) - 65536;
-		}
-		*dst++ = (d3 - 32768);	/* mixed u16 back to s16 and write */
+		/* apply volume */
+		int32_t d1_L = (raw1_L * v1l) >> 8;
+		int32_t d1_R = (raw1_R * v1r) >> 8;
+		int32_t d2_L = (raw2_L * v2l) >> 8;
+		int32_t d2_R = (raw2_R * v2r) >> 8;
 
-		/* RIGHT SAMPLE */
-		d1 = src1 ? (*src1++) : 0;
-		d2 = src2 ? (*src2++) : 0;
-		bytes -= 2;
+		/* s16 to u16 */
+		d1_L += 32768; d1_R += 32768;
+		d2_L += 32768; d2_R += 32768;
 
-		d1 = (d1 * vol1_r) / ATRK_VOL_MAX;
-		d2 = (d2 * vol2_r) / ATRK_VOL_MAX;
-		d1 = d1 + 32768;		/* s16 sample to u16 */
-		d2 = d2 + 32768;
+		/* both silent path */
+		int32_t dark_L = (d1_L * d2_L) >> 15;
+		int32_t dark_R = (d1_R * d2_R) >> 15;
 
-		if (d1 < 32768 && d2 < 32768) {
-			d3 = (d1 * d2) / 32768;
-		} else {
-			d3 = (2 * (d1 + d2)) - ((d1 * d2) / 32768) - 65536;
-		}
+		/* one louder path */
+		int32_t light_L = ((d1_L + d2_L) << 1) - dark_L - 65536;
+		int32_t light_R = ((d1_R + d2_R) << 1) - dark_R - 65536;
 
-		*dst++ = (d3 - 32768);	/* mixed u16 back to s16 and write */
+		/* selection condition */
+		int cond_L = (d1_L < 32768) && (d2_L < 32768);
+		int cond_R = (d1_R < 32768) && (d2_R < 32768);
+
+		/* and select */
+		int32_t res_L = cond_L ? dark_L : light_L;
+		int32_t res_R = cond_R ? dark_R : light_R;
+
+		/* clamp */
+		if (res_L > 65535)
+			res_L = 65535;
+		else if (res_L < 0)
+			res_L = 0;
+		if (res_R > 65535)
+			res_R = 65535;
+		else if (res_R < 0)
+			res_R = 0;
+
+		/* mixed u16 back to s16 */
+		dst[0] = (int16_t)(res_L - 32768);
+		dst[1] = (int16_t)(res_R - 32768);
+
+		dst += 2;
 	}
 }
 
@@ -3750,7 +3769,7 @@ static int aud_mix_tracks(struct sanctx *ctx)
 	struct sanmsa *msa = ctx->msa;
 	int16_t *trkobuf = (int16_t *)msa->audrsb1;
 	int active1, active2, mixable, voice;
-	uint32_t minlen1, dstlen, dff;
+	uint32_t minlen1, dstlen, dff, consumed;
 	uint8_t *dstptr, *aptr;
 	struct sanatrk *atrk;
 
@@ -3791,7 +3810,8 @@ static int aud_mix_tracks(struct sanctx *ctx)
 
 			atrk->state = 4;
 			pan = (atrk->flags & ATRK_1CH) ? atrk->pan : 0;
-			atrk_convert_resample(atrk, trkobuf, minlen1);
+			consumed = atrk->resample(atrk, trkobuf, minlen1);
+			atrk_consume(atrk, consumed);
 			aud_mixs16(dstptr, (uint8_t *)trkobuf, dstptr,
 				   minlen1 * 4, vol, pan, ATRK_VOL_MAX, 0);
 		}
