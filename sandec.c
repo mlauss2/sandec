@@ -339,7 +339,7 @@ static const int8_t ima4_tab[16] = {
 };
 
 /* Codec37/Codec48 motion vectors */
-static const int8_t c37_mv[3][510] = {
+static const int8_t c37_mv[3][512] = {
 	{
 	0,   0,   1,   0,   2,   0,   3,   0,   5,   0,   8,   0,  13,   0,  21,
 	0,  -1,   0,  -2,   0,  -3,   0,  -5,   0,  -8,   0, -13,   0, -17,   0,
@@ -374,7 +374,8 @@ static const int8_t c37_mv[3][510] = {
 	1, -17,   2, -17,   3, -17,   5, -17,   8, -17,  13, -17,  21, -17,  -1,
 	-17,  -2, -17,  -3, -17,  -5, -17,  -8, -17, -13, -17, -17, -17, -21, -17,
 	0, -21,   1, -21,   2, -21,   3, -21,   5, -21,   8, -21,  13, -21,  21,
-	-21,  -1, -21,  -2, -21,  -3, -21,  -5, -21,  -8, -21, -13, -21, -17, -21
+	-21,  -1, -21,  -2, -21,  -3, -21,  -5, -21,  -8, -21, -13, -21, -17, -21,
+	0, 0
 	},
 	 {
 	0,   0,  -8, -29,   8, -29, -18, -25,  17, -25,   0, -23,  -6, -22,   6,
@@ -410,7 +411,8 @@ static const int8_t c37_mv[3][510] = {
 	-4,  10,   4,  10,  15,  10,  -8,  11,  -2,  11,   0,  11,   2,  11,   8,
 	11,  19,  12, -19,  13,  -4,  13,   4,  13,   0,  14, -10,  15,  10,  15,
 	-5,  17,   5,  17,  25,  17, -25,  18,   0,  18, -12,  19,  13,  19,  -6,
-	22,   6,  22,   0,  23, -17,  25,  18,  25,  -8,  29,   8,  29,   0,  31
+	22,   6,  22,   0,  23, -17,  25,  18,  25,  -8,  29,   8,  29,   0,  31,
+	0, 0
 	}, {
 	0,   0,  -6, -22,   6, -22, -13, -19,  12, -19,   0, -18,  -5, -17,   5,
 	-17, -10, -15,  10, -15,   0, -14,  -4, -13,   4, -13,  19, -13, -19, -12,
@@ -445,7 +447,8 @@ static const int8_t c37_mv[3][510] = {
 	8,   8,  11,   8,  -6,   9,  -1,   9,   1,   9,   6,   9, -15,  10,  -4,
 	10,   4,  10,  15,  10,  -8,  11,  -2,  11,   0,  11,   2,  11,   8,  11,
 	19,  12, -19,  13,  -4,  13,   4,  13,   0,  14, -10,  15,  10,  15,  -5,
-	17,   5,  17,   0,  18, -12,  19,  13,  19,  -6,  22,   6,  22,   0,  23
+	17,   5,  17,   0,  18, -12,  19,  13,  19,  -6,  22,   6,  22,   0,  23,
+	0, 0
 	}
 };
 
@@ -788,10 +791,10 @@ static void c4_5_param2(struct sanctx *ctx, uint8_t *src, uint16_t cnt,
 
 /******************************************************************************/
 
-static void blt_solid(uint8_t *dst, uint8_t *src, int16_t left, int16_t top,
-		      uint16_t srcxoff, uint16_t srcyoff, uint16_t srcwidth,
-		      uint16_t srcheight, uint16_t srcpitch, uint16_t dstpitch,
-		      uint16_t dstheight, int32_t size)
+static void blt_solid(uint8_t * __restrict dst, uint8_t * __restrict src,
+		      int16_t left, int16_t top, uint16_t srcxoff, uint16_t srcyoff,
+		      uint16_t srcwidth, uint16_t srcheight, uint16_t srcpitch,
+		      uint16_t dstpitch, uint16_t dstheight, int32_t size)
 {
 	if ((srcwidth == 0) || (srcheight == 0) || (size < 1))
 		return;
@@ -838,10 +841,11 @@ static void blt_solid(uint8_t *dst, uint8_t *src, int16_t left, int16_t top,
 		memcpy(dst, src, size);
 }
 
-static void blt_mask(uint8_t *dst, uint8_t *src, int16_t left, int16_t top,
-		     uint16_t srcxoff, uint16_t srcyoff, uint16_t srcwidth,
-		     uint16_t srcheight, uint16_t srcpitch, uint16_t dstpitch,
-		     uint16_t dstheight, int32_t size, uint8_t skipcolor)
+static void blt_mask(uint8_t * __restrict dst, uint8_t * __restrict src,
+		     int16_t left, int16_t top, uint16_t srcxoff, uint16_t srcyoff,
+		     uint16_t srcwidth, uint16_t srcheight, uint16_t srcpitch,
+		     uint16_t dstpitch, uint16_t dstheight, int32_t size,
+		     uint8_t skipcolor)
 {
 	if ((srcwidth == 0) || (srcheight == 0) || (size < 1))
 		return;
@@ -888,8 +892,9 @@ static void blt_mask(uint8_t *dst, uint8_t *src, int16_t left, int16_t top,
 	}
 }
 
-static void blt_ipol(uint8_t *dst, uint8_t *src1, uint8_t *src2, int16_t left,
-		     int16_t top, uint16_t srcxoff, uint16_t srcyoff,
+static void blt_ipol(uint8_t * __restrict dst, uint8_t * __restrict src1,
+		     uint8_t * __restrict src2, int16_t left, int16_t top,
+		     uint16_t srcxoff, uint16_t srcyoff,
 		     uint16_t srcwidth, uint16_t srcheight, uint16_t srcpitch,
 		     uint16_t dstpitch, uint16_t dstheight, int32_t size,
 		     uint8_t *itbl)
@@ -968,7 +973,9 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 		rt->palette[0] = 0xffU << 24;
 }
 
-static void interpolate_frame(uint8_t *dst, const uint8_t *sr1, const uint8_t *srs,
+static void interpolate_frame(uint8_t * __restrict dst,
+			      const uint8_t * __restrict sr1,
+			      const uint8_t * __restrict srs,
 			      const uint8_t *itbl, const uint16_t w, const uint16_t h)
 {
 	int i, j, k;
@@ -998,7 +1005,8 @@ static void c47_swap_bufs(struct sanctx *ctx, uint8_t rotcode)
 	}
 }
 
-static void codec47_comp1(uint8_t *src, uint8_t *dst_in, uint8_t *itbl, uint16_t w, uint16_t h)
+static void codec47_comp1(uint8_t * __restrict src, uint8_t * __restrict dst_in,
+			  const uint8_t *itbl, uint16_t w, uint16_t h)
 {
 	/* input data is i-frame with half width and height. combining 2 pixels
 	 * into a 16bit value, one can then use this value as an index into
@@ -1043,9 +1051,11 @@ static void codec47_comp1(uint8_t *src, uint8_t *dst_in, uint8_t *itbl, uint16_t
 	}
 }
 
-static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
-			      uint8_t *p1, uint8_t *p2, const uint16_t w,
-			      const uint8_t *coltbl, uint16_t size, uint32_t *dsize)
+static uint8_t* codec47_block(struct sanctx *ctx, uint8_t * __restrict src,
+			      uint8_t * __restrict dst, uint8_t * __restrict p1,
+			      uint8_t * __restrict p2, const uint16_t w,
+			      const uint8_t * __restrict coltbl, uint16_t size,
+			      uint32_t *dsize)
 {
 	uint8_t opc, col[2], c;
 	uint16_t i, j;
@@ -1122,8 +1132,9 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 	return src;
 }
 
-static int codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
-			 const uint16_t w, const uint16_t h, const uint8_t *coltbl, uint32_t size)
+static int codec47_comp2(struct sanctx *ctx, uint8_t * __restrict src,
+			 uint8_t * __restrict dst, const uint16_t w, const uint16_t h,
+			 const uint8_t * __restrict coltbl, uint32_t size)
 {
 	uint8_t *b1 = ctx->rt.buf1, *b2 = ctx->rt.buf2;
 	unsigned int i, j;
@@ -1139,7 +1150,8 @@ static int codec47_comp2(struct sanctx *ctx, uint8_t *src, uint8_t *dst,
 	return (src == 0) ? 1 : 0;
 }
 
-static void codec47_comp5(uint8_t *src, uint32_t size, uint8_t *dst, uint32_t left)
+static void codec47_comp5(uint8_t * __restrict src, uint32_t size,
+			  uint8_t * __restrict dst, uint32_t left)
 {
 	uint8_t opc, rlen, col, j;
 
@@ -1255,7 +1267,7 @@ static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, 
 /******************************************************************************/
 
 /* scale 4x4 input block to 8x8 output block */
-static void c48_4to8(uint8_t *dst, uint8_t *src, uint16_t w)
+static void c48_4to8(uint8_t * __restrict dst, uint8_t * __restrict src, uint16_t w)
 {
 	uint16_t p;
 	/* dst is always aligned, so we can do at least 16bit stores */
@@ -1271,7 +1283,9 @@ static void c48_4to8(uint8_t *dst, uint8_t *src, uint16_t w)
 }
 
 /* process an 8x8 block */
-static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_t w, const uint8_t *itbl, uint32_t *size)
+static uint8_t *c48_block(uint8_t * __restrict src, uint8_t * __restrict dst,
+			  uint8_t * __restrict db, const uint16_t w,
+			  const uint8_t *itbl, uint32_t *size)
 {
 	uint8_t opc, sb[16];
 	int16_t mvofs;
@@ -1344,7 +1358,6 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 		for (i = 0; i < 8; i += 4) {
 			for (k = 0; k < 8; k += 4) {
 				opc = *src++;
-				opc = (opc == 255) ? 0 : opc;
 				mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
 				for (j = 0; j < 4; j++) {
 					ofs = (w * (j + i)) + k;
@@ -1384,7 +1397,6 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 			for (j = 0; j < 8; j += 2) {			/* 4 */
 				ofs = (w * i) + j;
 				opc = *src++;
-				opc = (opc == 255) ? 0 : opc;
 				mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
 				for (l = 0; l < 2; l++) {
 					*(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
@@ -1431,7 +1443,7 @@ static uint8_t *c48_block(uint8_t *src, uint8_t *dst, uint8_t *db, const uint16_
 	return src;
 }
 
-static int codec48_comp3(uint8_t *src, uint8_t *dst, uint8_t *db,
+static int codec48_comp3(uint8_t * __restrict src, uint8_t * __restrict dst, uint8_t * __restrict db,
 			 uint8_t *itbl, uint16_t w, uint16_t h, uint32_t size)
 {
 	int i, j;
@@ -1555,7 +1567,7 @@ static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 
 /******************************************************************************/
 
-static void codec37_comp1(uint8_t *src, uint32_t size, uint8_t *dst, uint8_t *db,
+static void codec37_comp1(uint8_t * __restrict src, uint32_t size, uint8_t * __restrict dst, uint8_t * __restrict db,
 			  uint16_t w, uint16_t h, uint8_t mvidx)
 {
 	uint8_t opc, run, skip;
@@ -1616,7 +1628,6 @@ static void codec37_comp1(uint8_t *src, uint32_t size, uint8_t *dst, uint8_t *db
 				}
 			}
 			/* 4x4 block copy from prev with MV */
-			opc = (opc == 255) ? 0 : opc;
 			mvofs = c37_mv[mvidx][opc*2] + (c37_mv[mvidx][opc*2 + 1] * w);
 			for (k = 0; k < 4; k++) {
 				ofs = j + (k * w);
@@ -1630,7 +1641,7 @@ static void codec37_comp1(uint8_t *src, uint32_t size, uint8_t *dst, uint8_t *db
 	}
 }
 
-static void codec37_comp3(uint8_t *src, uint8_t *dst, uint8_t *db, uint16_t w, uint16_t h,
+static void codec37_comp3(uint8_t * __restrict src, uint8_t * __restrict dst, uint8_t * __restrict db, uint16_t w, uint16_t h,
 			  uint8_t mvidx, const uint8_t f4, const uint8_t c4, uint32_t size)
 {
 	uint8_t opc, c, copycnt;
@@ -1995,9 +2006,10 @@ static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	}
 }
 
-static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, const uint16_t w,
-		    const uint16_t h, int16_t top, int16_t left, uint32_t size,
-		    uint16_t srcstride)
+static void codec20(struct sanctx *ctx, uint8_t * __restrict dst,
+		    uint8_t * __restrict src, const uint16_t w, const uint16_t h,
+		    const int16_t top, const int16_t left, uint32_t size,
+		    const uint16_t srcstride)
 {
 	if (((left + w) < 0) || (left >= ctx->rt.bufw) || ((top + h) < 0)
 	    || (top >= ctx->rt.bufh) || (w < 1) || (h < 1))
@@ -2007,12 +2019,13 @@ static void codec20(struct sanctx *ctx, uint8_t *dst, uint8_t *src, const uint16
 		  ctx->rt.bufh, size);
 }
 
-static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-			uint16_t h, int16_t top, int16_t left, uint32_t size,
-			uint8_t param, uint16_t param2, int c5)
+static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
+			const uint16_t w, const uint16_t h, const int16_t top,
+			const int16_t left, uint32_t size, const uint8_t param,
+			const uint16_t param2, const int c5)
 {
 	const uint16_t p = ctx->rt.pitch, mx = ctx->rt.bufw, my = ctx->rt.bufh;
-	uint8_t mask, bits, idx, *gs, c4t;
+	uint8_t mask, bits, *gs, idx, c4t;
 	uint32_t dstoff;
 	int i, j, k, l, bit, x, y;
 
@@ -2642,7 +2655,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 }
 
 /* like c47_comp5 but adjusted for tbl2 lookups */
-static void bl16_comp8(uint16_t *dst, uint8_t *src, uint32_t left, uint16_t *tbl2)
+static void bl16_comp8(uint16_t *dst, uint8_t *src, uint32_t left, const uint16_t *tbl2)
 {
 	uint8_t opc, rlen, j;
 	uint16_t col;
@@ -2666,7 +2679,7 @@ static void bl16_comp8(uint16_t *dst, uint8_t *src, uint32_t left, uint16_t *tbl
 }
 
 /* TGSMUSH.DLL 1000c690 */
-static inline uint16_t bl16_c7_avg_col(uint16_t c1, uint16_t c2)
+static inline uint16_t bl16_c7_avg_col(const uint16_t c1, const uint16_t c2)
 {
 	return	(((c2 & 0x07e0) + (c1 & 0x07e0)) & 0x00fc0) |
 		(((c2 & 0xf800) + (c1 & 0xf800)) & 0x1f000) |
@@ -2677,8 +2690,8 @@ static inline uint16_t bl16_c7_avg_col(uint16_t c1, uint16_t c2)
  * instead of the interpolation table.
  * TGSMUSH.DLL c6f0
  */
-static void bl16_comp7(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
-		       uint16_t *tbl2)
+static void bl16_comp7(uint16_t *dst, uint8_t *src, const uint16_t w,
+		       const uint16_t h, const uint16_t *tbl2)
 {
 	uint16_t hh, hw, c1, c2;
 	uint8_t *dst1, *dst2;
@@ -2719,8 +2732,8 @@ static void bl16_comp7(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 }
 
 /* TGSMUSH.DLL c0b4 */
-static void bl16_comp6(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
-		       uint16_t *tbl2)
+static void bl16_comp6(uint16_t *dst, uint8_t *src, const uint16_t w,
+		       const uint16_t h, const uint16_t *tbl2)
 {
 	int i;
 	for (i = 0; i < w * h; i++) {
@@ -2729,7 +2742,7 @@ static void bl16_comp6(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 }
 
 /* TGSMUSH.DLL c5a0 */
-static void bl16_comp1(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h)
+static void bl16_comp1(uint16_t *dst, uint8_t *src, const uint16_t w, const uint16_t h)
 {
 	const uint32_t stride = 2 * w;
 	uint8_t *dst1, *dst2;
@@ -2778,8 +2791,8 @@ static void bl16_comp1(uint16_t *dst, uint8_t *src, uint16_t w, uint16_t h)
 }
 
 static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db2,
-			   uint16_t *tbl1, uint16_t *tbl2, uint16_t w,
-			   uint32_t stride, uint8_t blksize, struct sanctx *ctx)
+			   const uint16_t *tbl1, const uint16_t *tbl2, const uint16_t w,
+			   const uint32_t stride, uint8_t blksize, struct sanctx *ctx)
 {
 	int32_t mvofs, ofs;
 	int8_t *pglyph;
@@ -2940,7 +2953,7 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 }
 
 static void bl16_comp2(uint8_t *dst, uint8_t *src, uint16_t w, uint16_t h,
-		       uint8_t *db1, uint8_t *db2, uint16_t *tbl1, uint16_t *tbl2,
+		       uint8_t *db1, uint8_t *db2, const uint16_t *tbl1, const uint16_t *tbl2,
 		       struct sanctx *ctx)
 {
 	const uint32_t stride = w * 2;
