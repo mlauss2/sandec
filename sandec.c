@@ -140,7 +140,7 @@ _Static_assert((_ATRK_DATSZ > 0) && ((_ATRK_DATSZ & (_ATRK_DATSZ - 1)) == 0),
 static const uint32_t ATRK_DATSZ = _ATRK_DATSZ;
 static const uint32_t ATRK_DATMASK = (_ATRK_DATSZ - 1);
 
-#define ATRK_MAX	10
+#define ATRK_MAX		16
 #define ATRK_MAX_STRK_SIZE	5120
 
 /* PSAD flags defining audio track type (voice/music/sfx).
