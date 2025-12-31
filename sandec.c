@@ -101,9 +101,12 @@ static inline uint32_t ua32(uint8_t *p)
 #define FFRM	0x4d524646
 #define GOST	0x54534f47
 
+/* ANM_FLAGS: various flags passed to the fob decoders and font renderer */
+#define ANM_FLAG_IGN_FOB_OFS		0x0001
+#define ANM_FLAG_ORIGIN_CENTER		0X0002
 /* GOST codec mirroring flags */
-#define ANM_FLAG_FLIPX	0x2000
-#define ANM_FLAG_FLIPY	0x4000
+#define ANM_FLAG_FLIPX			0x2000
+#define ANM_FLAG_FLIPY			0x4000
 
 /* reasonable maximum size of a FRME */
 #define FRME_MAX_SIZE	(4 << 20)
@@ -1204,7 +1207,7 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 }
 
 static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, uint16_t h,
-		   int16_t top, int16_t left, uint32_t size)
+		   int16_t xoff, int16_t yoff, uint32_t size)
 {
 	uint8_t *coltbl, comp, newrot, flag, *dst;
 	uint32_t decsize;
@@ -1258,7 +1261,7 @@ static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, 
 	default: break;
 	}
 
-	blt_solid(dbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch, ctx->rt.bufh, w * h);
+	blt_solid(dbuf, dst, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch, ctx->rt.bufh, w * h);
 
 	if (seq == ctx->rt.lastseq + 1)
 		c47_swap_bufs(ctx, newrot);
@@ -1465,7 +1468,7 @@ static int codec48_comp3(uint8_t * __restrict src, uint8_t * __restrict dst, uin
 }
 
 static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
-		   uint16_t h, int16_t top, int16_t left, uint32_t size)
+		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size)
 {
 	uint32_t pktsize, decsize;
 	uint8_t comp, flag, *dst;
@@ -1555,16 +1558,16 @@ static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 
 	if ((flag & 2) == 0) {
 		if (flag & 0x10) {
-			blt_ipol(dbuf, ctx->rt.buf0, ctx->rt.buf2, left, top,
+			blt_ipol(dbuf, ctx->rt.buf0, ctx->rt.buf2, xoff, yoff,
 				 0, 0, w, h, w, ctx->rt.pitch, ctx->rt.bufh, w * h,
 				 ctx->rt.c47ipoltbl);
 			ctx->rt.can_ipol = 0;
 			return 0;
 		}
-		blt_solid(dbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
+		blt_solid(dbuf, dst, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
 			  ctx->rt.bufh, w * h);
 	} else {
-		blt_mask(dbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
+		blt_mask(dbuf, dst, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
 			 ctx->rt.bufh, w * h, 0);
 	}
 
@@ -1732,7 +1735,7 @@ static void codec37_comp3(uint8_t * __restrict src, uint8_t * __restrict dst, ui
 }
 
 static int codec37(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
-		   uint16_t h, int16_t top, int16_t left, uint32_t size)
+		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size)
 {
 	uint8_t comp, mvidx, flag, *dst, *db;
 	uint32_t decsize;
@@ -1779,10 +1782,10 @@ static int codec37(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 	ctx->rt.lastseq = seq;
 
 	if ((flag & 2) == 0) {
-		blt_solid(dbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
+		blt_solid(dbuf, dst, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
 			  ctx->rt.bufh, w * h);
 	} else {
-		blt_mask(dbuf, dst, left, top, 0, 0, w, h, w, ctx->rt.pitch,
+		blt_mask(dbuf, dst, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
 			 ctx->rt.bufh, w * h, 0);
 	}
 
@@ -1792,13 +1795,12 @@ static int codec37(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 /******************************************************************************/
 
 static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w, uint16_t h,
-		    int16_t top, int16_t left, uint16_t size, uint8_t param,
+		    int16_t xoff, int16_t yoff, uint16_t size, uint8_t param,
 		    uint16_t param2)
 {
 	uint8_t *tbl1 = ctx->c45tbl1, *tbl2 = ctx->c45tbl2, *dst;
 	const uint16_t pitch = ctx->rt.pitch;
 	unsigned int t1, c1, c2, w1, w2, w3;
-	int32_t xoff, yoff;
 	int i, b1, b2, xd;
 
 	/* RA2 32b00 */
@@ -1831,9 +1833,6 @@ static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 	}
 	if (!dst_in)
 		return;
-
-	xoff = left;
-	yoff = top;
 
 	while (size > 3) {
 		xd = le16_to_cpu(*(int16_t *)(src + 0));
@@ -1871,7 +1870,7 @@ static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 /******************************************************************************/
 
 static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-		    uint16_t h, int16_t top, int16_t left, uint16_t size,
+		    uint16_t h, int16_t xoff, int16_t yoff, uint16_t size,
 		    uint8_t param, int16_t param2)
 {
 	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
@@ -1903,11 +1902,11 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		}
 	}
 
-	if ((size < 1) || ((top + h) < 0) || (top >= my) || (left + w < 0) || (left >= mx))
+	if ((size < 1) || ((yoff + h) < 0) || (yoff >= my) || (xoff + w < 0) || (xoff >= mx))
 		return;
 
-	if (top < 0) {
-		y = -top;
+	if (yoff < 0) {
+		y = -yoff;
 		while (y-- && size > 1) {
 			ls = le16_to_cpu(ua16(src));
 			size -= 2;
@@ -1916,18 +1915,18 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 			size -= ls;
 			src += 2 + ls;
 		}
-		h += top;
-		top = 0;
+		h += yoff;
+		yoff = 0;
 	}
 
-	y = top;
+	y = yoff;
 	for (; (size > 1) && (h > 0) && (y < my); h--, y++) {
 		ls = le16_to_cpu(ua16(src));
 		src += 2;
 		size -= 2;
 		skip = 1;
-		pc = left;
-		while ((size > 0) && (ls > 0) && (pc <= (w + left))) {
+		pc = xoff;
+		while ((size > 0) && (ls > 0) && (pc <= (w + xoff))) {
 			j = *src++;
 			size--;
 			ls--;
@@ -1965,18 +1964,18 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 }
 
 static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-		    uint16_t h, int16_t top, int16_t left, uint16_t size,
+		    uint16_t h, int16_t xoff, int16_t yoff, uint16_t size,
 		    uint8_t param)
 {
 	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
 	int j, y, pc, skip, ls;
 	uint8_t c, *nsrc;
 
-	if ((size < 1) || ((top + h) < 0) || (top >= my) || (left + w < 0) || (left >= mx))
+	if ((size < 1) || ((yoff + h) < 0) || (yoff >= my) || (xoff + w < 0) || (xoff >= mx))
 		return;
 
 	nsrc = src;
-	y = top;
+	y = yoff;
 	for (; (size > 2) && (h > 0) && (y < my); y++, h--) {
 		src = nsrc;
 		ls = le16_to_cpu(ua16(src));
@@ -1990,8 +1989,8 @@ static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 			continue;
 		}
 		skip = 1;
-		pc = left;
-		while ((size > 1) && (ls > 1) && (pc <= (w + left))) {
+		pc = xoff;
+		while ((size > 1) && (ls > 1) && (pc <= (w + xoff))) {
 			j = le16_to_cpu(ua16(src));
 			src += 2;
 			size -= 2;
@@ -2014,20 +2013,20 @@ static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 
 static void codec20(struct sanctx *ctx, uint8_t * __restrict dst,
 		    uint8_t * __restrict src, const uint16_t w, const uint16_t h,
-		    const int16_t top, const int16_t left, uint32_t size,
+		    const int16_t xoff, const int16_t yoff, uint32_t size,
 		    const uint16_t srcstride)
 {
-	if (((left + w) < 0) || (left >= ctx->rt.bufw) || ((top + h) < 0)
-	    || (top >= ctx->rt.bufh) || (w < 1) || (h < 1))
+	if (((xoff + w) < 0) || (xoff >= ctx->rt.bufw) || ((yoff + h) < 0)
+	    || (yoff >= ctx->rt.bufh) || (w < 1) || (h < 1))
 		return;
 
-	blt_solid(dst, src, left, top, 0, 0, w, h, srcstride, ctx->rt.pitch,
+	blt_solid(dst, src, xoff, yoff, 0, 0, w, h, srcstride, ctx->rt.pitch,
 		  ctx->rt.bufh, size);
 }
 
 static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
-			const uint16_t w, const uint16_t h, const int16_t top,
-			const int16_t left, uint32_t size, const uint8_t param,
+			const uint16_t w, const uint16_t h, const int16_t xoff,
+			const int16_t yoff, uint32_t size, const uint8_t param,
 			const uint16_t param2, const int c5)
 {
 	const uint16_t p = ctx->rt.pitch, mx = ctx->rt.bufw, my = ctx->rt.bufh;
@@ -2046,9 +2045,9 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 
 	for (j = 0; j < w; j += 4) {
 		mask = bits = 0;
-		x = left + j;
+		x = xoff + j;
 		for (i = 0; i < h; i += 4) {
-			y = top + i;
+			y = yoff + i;
 			if (param2 > 0) {
 				if (bits == 0) {
 					if (!size--)
@@ -2110,37 +2109,37 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 }
 
 static void codec33(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-		    uint16_t h, int16_t top, int16_t left, uint32_t size,
+		    uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
 		    uint8_t param, uint16_t param2, int c5)
 {
 	if (ctx->c4tblparam != (param + 0x100))
 		c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
 	ctx->c4tblparam = param + 0x100;
-	codec4_main(ctx, dst, src, w, h, top, left, size, param, param2, c5);
+	codec4_main(ctx, dst, src, w, h, xoff, yoff, size, param, param2, c5);
 }
 
 static void codec4(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-		   uint16_t h, int16_t top, int16_t left, uint32_t size,
+		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
 		   uint8_t param, uint16_t param2, int c5)
 {
 	if (ctx->c4tblparam != param)
 		c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
 	ctx->c4tblparam = param;
-	codec4_main(ctx, dst, src, w, h, top, left, size, param, param2, c5);
+	codec4_main(ctx, dst, src, w, h, xoff, yoff, size, param, param2, c5);
 }
 
 static void codec1_normal(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w,
-			  uint16_t h, int16_t top, int16_t left, uint32_t size, int transp)
+			  uint16_t h, int16_t xoff, int16_t yoff, uint32_t size, int transp)
 {
 	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh;
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
 	int j, x, y;
 
-	if (((top + h) < 0) || (top >= my) || (left + w < 0) || (left >= mx))
+	if (((yoff + h) < 0) || (yoff >= my) || (xoff + w < 0) || (xoff >= mx))
 		return;
-	if (top < 0) {
-		y = -top;
+	if (yoff < 0) {
+		y = -yoff;
 		while (y-- && size > 1) {
 			dlen = le16_to_cpu(ua16(src));
 			size -= 2;
@@ -2149,16 +2148,16 @@ static void codec1_normal(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uin
 			size -= dlen;
 			src += 2 + dlen;
 		}
-		h += top;
-		top = 0;
+		h += yoff;
+		yoff = 0;
 	}
 
-	y = top;
+	y = yoff;
 	for (; (size > 1) && (h > 0) && (y < my); h--, y++) {
 		dlen = le16_to_cpu(ua16(src));
 		src += 2;
 		size -= 2;
-		x = left;
+		x = xoff;
 		while (dlen && size) {
 			code = *src++;
 			dlen--;
@@ -2219,7 +2218,7 @@ static void codec1_normal(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uin
 }
 
 static void codec1_flipx(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-			 uint16_t h, int16_t top, int16_t left, uint32_t size, int transp)
+			 uint16_t h, int16_t xoff, int16_t yoff, uint32_t size, int transp)
 {
 	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh;
 	uint8_t code, col;
@@ -2230,7 +2229,7 @@ static void codec1_flipx(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_
 		dlen = le16_to_cpu(ua16(src));
 		src += 2;
 		size -= 2;
-		int draw_y = top + y;
+		int draw_y = yoff + y;
 
 		if (draw_y < 0 || draw_y >= my) {
 			src += dlen;
@@ -2250,7 +2249,7 @@ static void codec1_flipx(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_
 				size--;
 				if (col || !transp) {
 					for (j = 0; j < rlen; j++) {
-						int draw_x = (left + w - 1) - (x_rel + j);
+						int draw_x = (xoff + w - 1) - (x_rel + j);
 						if (draw_x >= 0 && draw_x < mx)
 							dst[draw_y * ctx->rt.pitch + draw_x] = col;
 					}
@@ -2259,7 +2258,7 @@ static void codec1_flipx(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_
 			} else {
 				for (j = 0; j < rlen; j++) {
 					col = *src++;
-					int draw_x = (left + w - 1) - (x_rel + j);
+					int draw_x = (xoff + w - 1) - (x_rel + j);
 					if ((col || !transp) && draw_x >= 0 && draw_x < mx)
 						dst[draw_y * ctx->rt.pitch + draw_x] = col;
 				}
@@ -2272,7 +2271,7 @@ static void codec1_flipx(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_
 }
 
 static void codec1_flipy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-			 uint16_t h, int16_t top, int16_t left, uint32_t size, int transp)
+			 uint16_t h, int16_t xoff, int16_t yoff, uint32_t size, int transp)
 {
 	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh;
 	uint8_t code, col;
@@ -2282,7 +2281,7 @@ static void codec1_flipy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_
 	for (y = 0; (size > 1) && (y < h); y++) {
 		dlen = le16_to_cpu(ua16(src));
 		src += 2; size -= 2;
-		int draw_y = (top + h - 1) - y;
+		int draw_y = (yoff + h - 1) - y;
 
 		if (draw_y < 0 || draw_y >= my) {
 			src += dlen;
@@ -2290,7 +2289,7 @@ static void codec1_flipy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_
 			continue;
 		}
 
-		x = left;
+		x = xoff;
 		while (dlen && size) {
 			code = *src++;
 			dlen--;
@@ -2328,7 +2327,7 @@ static void codec1_flipy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_
 }
 
 static void codec1_flipxy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-			  uint16_t h, int16_t top, int16_t left, uint32_t size, int transp)
+			  uint16_t h, int16_t xoff, int16_t yoff, uint32_t size, int transp)
 {
 	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh;
 	uint8_t code, col;
@@ -2339,7 +2338,7 @@ static void codec1_flipxy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16
 		dlen = le16_to_cpu(ua16(src));
 		src += 2;
 		size -= 2;
-		int draw_y = (top + h - 1) - y;
+		int draw_y = (yoff + h - 1) - y;
 
 		if (draw_y < 0 || draw_y >= my) {
 			src += dlen;
@@ -2359,7 +2358,7 @@ static void codec1_flipxy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16
 				size--;
 				if (col || !transp) {
 					for (j = 0; j < rlen; j++) {
-						int draw_x = (left + w - 1) - (x_rel + j);
+						int draw_x = (xoff + w - 1) - (x_rel + j);
 						if (draw_x >= 0 && draw_x < mx)
 							dst[draw_y * ctx->rt.pitch + draw_x] = col;
 					}
@@ -2368,7 +2367,7 @@ static void codec1_flipxy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16
 			} else {
 				for (j = 0; j < rlen; j++) {
 					col = *src++;
-					int draw_x = (left + w - 1) - (x_rel + j);
+					int draw_x = (xoff + w - 1) - (x_rel + j);
 					if ((col || !transp) && draw_x >= 0 && draw_x < mx)
 						dst[draw_y * ctx->rt.pitch + draw_x] = col;
 				}
@@ -2381,38 +2380,35 @@ static void codec1_flipxy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16
 }
 
 static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w,
-		   uint16_t h, int16_t top, int16_t left, uint32_t size, int transp,
+		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size, int transp,
 		   uint16_t anm_flags)
 {
 	switch (anm_flags & (ANM_FLAG_FLIPX | ANM_FLAG_FLIPY)) {
-	case 0: codec1_normal(ctx, dst_in, src, w, h, top, left, size, transp); break;
-	case ANM_FLAG_FLIPX: codec1_flipx(ctx, dst_in, src, w, h, top, left, size, transp); break;
-	case ANM_FLAG_FLIPY: codec1_flipy(ctx, dst_in, src, w, h, top, left, size, transp); break;
-	default: codec1_flipxy(ctx, dst_in, src, w, h, top, left, size, transp); break;
+	case 0: codec1_normal(ctx, dst_in, src, w, h, xoff, yoff, size, transp); break;
+	case ANM_FLAG_FLIPX: codec1_flipx(ctx, dst_in, src, w, h, xoff, yoff, size, transp); break;
+	case ANM_FLAG_FLIPY: codec1_flipy(ctx, dst_in, src, w, h, xoff, yoff, size, transp); break;
+	default: codec1_flipxy(ctx, dst_in, src, w, h, xoff, yoff, size, transp); break;
 	}
 }
 
 static void codec2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-		   uint16_t h, int16_t top, int16_t left, uint32_t size,
+		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
 		   uint8_t param, uint16_t param2)
 {
 	const uint16_t pitch = ctx->rt.pitch, maxx = ctx->rt.bufw, maxy = ctx->rt.bufh;
-	int16_t xpos, ypos;
 
 	/* RA2 31a10; but there are no codec2 fobjs in RA2 at all.. */
 	if (param2 != 0 && ctx->rt.version == 2) {
-		codec1_normal(ctx, dst, src, w, h, top, left, size, 1);
+		codec1_normal(ctx, dst, src, w, h, xoff, yoff, size, 1);
 		return;
 	}
 
 	/* ASSAULT.EXE 110f8 */
-	xpos = left;	/* original:  - param7(xoff) */
-	ypos = top;	/* original:  - param8(yoff) */
 	while (size > 3) {
-		xpos += (int16_t)le16_to_cpu(ua16(src));
-		ypos += (int8_t)src[2];
-		if (xpos >= 0 && ypos >= 0 && xpos < maxx && ypos < maxy) {
-			*(dst + xpos + ypos * pitch) = src[3]; /* 110ff: pitch 320 */
+		xoff += (int16_t)le16_to_cpu(ua16(src));
+		yoff += (int8_t)src[2];
+		if (xoff >= 0 && yoff >= 0 && xoff < maxx && yoff < maxy) {
+			*(dst + xoff + yoff * pitch) = src[3];
 		}
 		src += 4;
 		size -= 4;
@@ -2420,7 +2416,7 @@ static void codec2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 }
 
 static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
-		    uint16_t h, int16_t top, int16_t left, uint32_t size, uint8_t p1,
+		    uint16_t h, int16_t xoff, int16_t yoff, uint32_t size, uint8_t p1,
 		    int opaque)
 {
 	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
@@ -2428,10 +2424,10 @@ static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	uint16_t rlen, dlen;
 	int j, x, y;
 
-	if (((top + h) < 0) || (top >= my) || (left + w < 0) || (left >= mx))
+	if (((yoff + h) < 0) || (yoff >= my) || (xoff + w < 0) || (xoff >= mx))
 		return;
-	if (top < 0) {
-		y = -top;
+	if (yoff < 0) {
+		y = -yoff;
 		while (y-- && size > 1) {
 			dlen = le16_to_cpu(ua16(src));
 			size -= 2;
@@ -2440,16 +2436,16 @@ static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 			size -= dlen;
 			src += 2 + dlen;
 		}
-		h += top;
-		top = 0;
+		h += yoff;
+		yoff = 0;
 	}
 
-	y = top;
+	y = yoff;
 	for (; (size > 1) && (h > 0) && (y < my); h--, y++) {
 		dlen = le16_to_cpu(ua16(src));
 		src += 2;
 		size -= 2;
-		x = left;
+		x = xoff;
 		while (dlen && size) {
 			code = *src++;
 			dlen--;
@@ -2618,26 +2614,34 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	size -= 14;
 	ret = 0;
 
-	left += xoff;
-	top += yoff;
+	if ((anm_flags & ANM_FLAG_IGN_FOB_OFS) == 0) {
+		xoff += left;
+		yoff += top;
+	}
+	
+	if (anm_flags & ANM_FLAG_ORIGIN_CENTER) {
+		xoff -= w >> 1;
+		yoff -= h >> 1;
+	}
+	
 	switch (codec) {
 	case 1:
-	case 3:   codec1(ctx, dst, src, w, h, top, left, size, (codec == 1), anm_flags); break;
-	case 2:   codec2(ctx, dst, src, w, h, top, left, size, param, param2); break;
+	case 3:   codec1(ctx, dst, src, w, h, xoff, yoff, size, (codec == 1), anm_flags); break;
+	case 2:   codec2(ctx, dst, src, w, h, xoff, yoff, size, param, param2); break;
 	case 4:
-	case 5:   codec4(ctx, dst, src, w, h, top, left, size, param, param2, codec == 5); break;
-	case 20: codec20(ctx, dst, src, w, h, top, left, size, w); break;
+	case 5:   codec4(ctx, dst, src, w, h, xoff, yoff, size, param, param2, codec == 5); break;
+	case 20: codec20(ctx, dst, src, w, h, xoff, yoff, size, w); break;
 	case 44:
-	case 21: codec21(ctx, dst, src, w, h, top ,left, size, param); break;
-	case 23: codec23(ctx, dst, src, w, h, top, left, size, param, param2); break;
+	case 21: codec21(ctx, dst, src, w, h, xoff, yoff, size, param); break;
+	case 23: codec23(ctx, dst, src, w, h, xoff, yoff, size, param, param2); break;
 	case 31:
-	case 32: codec31(ctx, dst, src, w, h, top, left, size, param, codec == 32); break;
+	case 32: codec31(ctx, dst, src, w, h, xoff, yoff, size, param, codec == 32); break;
 	case 33:
-	case 34: codec33(ctx, dst, src, w, h, top, left, size, param, param2, codec == 34); break;
-	case 45: codec45(ctx, dst, src, w, h, top, left, size, param, param2); break;
-	case 37: ret = codec37(ctx, dst, src, w, h, top, left, size); break;
-	case 47: ret = codec47(ctx, dst, src, w, h, top, left, size); break;
-	case 48: ret = codec48(ctx, dst, src, w, h, top, left, size); break;
+	case 34: codec33(ctx, dst, src, w, h, xoff, yoff, size, param, param2, codec == 34); break;
+	case 45: codec45(ctx, dst, src, w, h, xoff, yoff, size, param, param2); break;
+	case 37: ret = codec37(ctx, dst, src, w, h, xoff, yoff, size); break;
+	case 47: ret = codec47(ctx, dst, src, w, h, xoff, yoff, size); break;
+	case 48: ret = codec48(ctx, dst, src, w, h, xoff, yoff, size); break;
 	default: ret = 18;
 	}
 
