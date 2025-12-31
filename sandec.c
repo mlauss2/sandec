@@ -160,7 +160,7 @@ static const uint32_t ATRK_DATMASK = (_ATRK_DATSZ - 1);
 struct sanatrk;
 struct sanmsa;
 
-typedef uint32_t (*atrk_resample)(struct sanatrk*, int16_t*, uint32_t);
+typedef uint32_t (*atrk_rsp_fn)(struct sanatrk*, int16_t*, uint32_t);
 
 struct sanatrk {
 	/* ATRK fields */
@@ -170,7 +170,7 @@ struct sanatrk {
 	int32_t datacnt;	/* currently held data in buffer	*/
 	uint32_t flags;		/* source format flags			*/
 	uint32_t state;		/* Track state				*/
-	atrk_resample resample;	/* upmix function			*/
+	atrk_rsp_fn resample;	/* destformat conversion function	*/
 	int32_t dataleft;	/* SAUD data left until track ends	*/
 	uint32_t dstfavail;	/* frames in dest format available	*/
 	uint32_t src_accum;	/* SRC accumulator 16.16		*/
@@ -3677,18 +3677,6 @@ static void atrk_read_pcmsrc(struct sanatrk *atrk, uint32_t size, uint8_t *src)
 		atrk_update_dstframes_avail(atrk);
 }
 
-static void atrk_consume(struct sanatrk *atrk, uint32_t bytes)
-{
-	atrk->rdptr += bytes;
-	atrk->rdptr &= ATRK_DATMASK;
-	if (bytes > atrk->playlen)
-		bytes = atrk->playlen;
-	atrk->playlen -= bytes;
-	atrk_update_dstframes_avail(atrk);
-	if (atrk->dstpavail < 1)
-		atrk_process_strk(atrk);
-}
-
 static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
 		       uint8_t vol1, int8_t pan1, uint8_t vol2, int8_t pan2)
 {
@@ -3777,12 +3765,30 @@ static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
 	}
 }
 
+static void atrk_resample(struct sanatrk *atrk, int16_t *destbuf, uint32_t len)
+{
+	uint32_t bytes;
+	
+	bytes = atrk->resample(atrk, destbuf, len);
+	atrk->state = 4;
+
+	/* update read/play pointers */
+	atrk->rdptr += bytes;
+	atrk->rdptr &= ATRK_DATMASK;
+	if (bytes > atrk->playlen)
+		bytes = atrk->playlen;
+	atrk->playlen -= bytes;
+	atrk_update_dstframes_avail(atrk);
+	if (atrk->dstpavail < 1)
+		atrk_process_strk(atrk);
+}
+
 static int aud_mix_tracks(struct sanctx *ctx)
 {
 	struct sanmsa *msa = ctx->msa;
 	int16_t *trkobuf = (int16_t *)msa->audrsb1;
 	int active1, active2, mixable, voice;
-	uint32_t minlen1, dstlen, dff, consumed;
+	uint32_t minlen1, dstlen, dff;
 	uint8_t *dstptr, *aptr;
 	struct sanatrk *atrk;
 
@@ -3809,7 +3815,8 @@ static int aud_mix_tracks(struct sanctx *ctx)
 
 		while (NULL != (atrk = atrk_get_next_mixable(msa))) {
 			const int m = atrk->pflags & SAUD_FLAG_TRK_MASK;
-			int vol = 0, pan;
+			int vol = 0, pan = (atrk->flags & ATRK_1CH) ? atrk->pan : 0;
+
 			if (m == 0) {
 				vol = (atrk->vol * msa->sou_vol_sfx) >> 7;
 			} else if (m == SAUD_FLAG_TRK_VOICE) {
@@ -3821,10 +3828,7 @@ static int aud_mix_tracks(struct sanctx *ctx)
 			if (m == SAUD_FLAG_TRK_MUSIC)
 				vol = ((vol * msa->sou_vol_damp) >> 8) & 0xff;
 
-			atrk->state = 4;
-			pan = (atrk->flags & ATRK_1CH) ? atrk->pan : 0;
-			consumed = atrk->resample(atrk, trkobuf, minlen1);
-			atrk_consume(atrk, consumed);
+			atrk_resample(atrk, trkobuf, minlen1);
 			aud_mixs16(dstptr, (uint8_t *)trkobuf, dstptr,
 				   minlen1 * 4, vol, pan, ATRK_VOL_MAX, 0);
 		}
@@ -3842,9 +3846,8 @@ static int aud_mix_tracks(struct sanctx *ctx)
 				continue;
 			}
 			/* see if any of the tracks had a reset of their play
-			 * position/length, indicated by the ATRK_REMIX flag.
-			 * Then we can clear its MIXED flag and reconsider it
-			 * for further processing.
+			 * position/length, indicated by state 5: then we can
+			 * reconsider it for further processing.
 			 */
 			for (int i = 0; i < msa->numtrk; i++) {
 				atrk = &(msa->atrk[i]);
