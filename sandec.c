@@ -4179,6 +4179,8 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 
 	if (idx == 0) {
 		atrk = atrk_find_trkid(msa, tid, -1, 0, 0);
+		if (!atrk)
+			return;		/* too many active tracks, bail */
 		/* RA1 sometimes has identical TIDs for different tracks */
 		if (atrk->state != STATE_UNUSED) {
 			atrk = atrk_find_trkid(msa, tid, 0, mid, 0);
