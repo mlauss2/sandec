@@ -957,6 +957,43 @@ static void blt_ipol(uint8_t * __restrict dst, uint8_t * __restrict src1,
 	}
 }
 
+/* draw a solid-filled rectangle, for codec44 (NUT fonts) */
+static void fillrect(uint8_t *dst, int16_t xoff, int16_t yoff, uint16_t width,
+		     uint16_t height, uint16_t maxwidth, uint16_t maxheight, uint8_t color)
+{
+	if (yoff < 0) {
+		if (height <= -yoff)
+			return;
+		height += yoff;
+		yoff = 0;
+	}
+	
+	if ((int32_t)yoff + height > maxheight) {
+		if (yoff >= maxheight)
+			return;
+		height = maxheight - yoff;
+	}
+
+	if (xoff < 0) {
+		if (width <= -xoff)
+			return;
+		width += xoff;
+		xoff = 0;
+	}
+
+	if ((int32_t)xoff + width > maxwidth) {
+		if (xoff >= maxwidth)
+			return;
+		width = maxwidth - xoff;
+	}
+
+	uint8_t *p = dst + ((int32_t)yoff * maxwidth) + xoff;
+	
+	while (height-- > 0) {
+		memset(p, color, width);
+		p += maxwidth;
+	}
+}
 
 static inline int read_source(struct sanctx *ctx, void *dst, uint32_t sz)
 {
@@ -2523,14 +2560,22 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	 */
 	if (codec == 1) {
 		switch (*anm_flags & (ANM_FLAG_FLIPX | ANM_FLAG_FLIPY)) {
-		case 0: codec = (*anm_flags & ANM_FLAG_CODEC_OPAQUE) ? 3 : 1; break;
+		case 0: break;
 		case ANM_FLAG_FLIPX: codec = 28; break;
 		case ANM_FLAG_FLIPY: codec = 29; break;
 		default: codec = 30; break;
 		}
 	}
-	if ((codec == 31) && (*anm_flags & ANM_FLAG_CODEC_OPAQUE))
-		codec = 32;
+
+	if (*anm_flags & ANM_FLAG_CODEC_OPAQUE) {
+		if (codec == 1)
+			codec = 3;
+		else if (codec == 31)
+			codec = 32;
+		else if (codec == 44) {
+			fillrect(dst, left, top, fobw, fobh, ctx->rt.bufw, ctx->rt.bufh, 0);
+		}
+	}
 
 	src += 14;
 	size -= 14;
