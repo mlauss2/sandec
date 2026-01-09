@@ -105,6 +105,7 @@ static inline uint32_t ua32(uint8_t *p)
 #define ANM_FLAG_IGN_FOB_OFS		0x0001
 #define ANM_FLAG_ORIGIN_CENTER		0x0002
 #define ANM_FLAG_CLR_DST		0x0020
+#define ANM_FLAG_CODEC_OPAQUE		0x0100
 /* GOST codec mirroring flags */
 #define ANM_FLAG_FLIPX			0x2000
 #define ANM_FLAG_FLIPY			0x4000
@@ -2522,12 +2523,14 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	 */
 	if (codec == 1) {
 		switch (*anm_flags & (ANM_FLAG_FLIPX | ANM_FLAG_FLIPY)) {
-		case 0: codec = 1; break;
+		case 0: codec = (*anm_flags & ANM_FLAG_CODEC_OPAQUE) ? 3 : 1; break;
 		case ANM_FLAG_FLIPX: codec = 28; break;
 		case ANM_FLAG_FLIPY: codec = 29; break;
 		default: codec = 30; break;
 		}
 	}
+	if ((codec == 31) && (*anm_flags & ANM_FLAG_CODEC_OPAQUE))
+		codec = 32;
 
 	src += 14;
 	size -= 14;
