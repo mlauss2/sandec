@@ -2596,8 +2596,10 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	/* SotE: all videos have top==60 to center the video in the
 	 * 640x400 game window.  We don't need that.
 	 */
-	if ((w == 640) && (h == 272) && (top == 60) && (codec == 47))
+	if ((w == 640) && (h == 272) && (top == 60) && (codec == 47)) {
 		left = top = 0;
+		*anm_flags |= ANM_FLAG_IGN_FOB_OFS;
+	}
 
 	/* decide on a buffer size */
 	if (!rt->have_vdims) {
