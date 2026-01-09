@@ -238,6 +238,7 @@ struct sanrt {
 	uint16_t pitch;		/* 2 image pitch			*/
 	uint16_t bufw;		/* 2 alloc'ed buffer width/pitch	*/
 	uint16_t bufh;		/* 2 alloc'ed buffer height		*/
+	uint16_t def_anm_flags;	/* 2 movie default anm flags		*/
 	int16_t  lastseq;	/* 2 c47 last sequence id		*/
 	uint16_t subid;		/* 2 subtitle message number		*/
 	uint16_t to_store;	/* 2 STOR encountered			*/
@@ -2622,6 +2623,11 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			    ((wr == 640) && (hr == 480)) ||	/* COMI/OL/.. */
 			    ((left == 0) && (top == 0) && (codec == 20) && (w > 3) && (h > 3))) {
 				rt->have_vdims = 1;
+				if (w == 424) {
+					/* some RA2 videos need this */
+					rt->def_anm_flags |= ANM_FLAG_CLR_DST;
+					*anm_flags |= rt->def_anm_flags;
+				}
 			}
 
 			rt->pitch = wr;
@@ -4629,7 +4635,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		return 14;
 
 	ret = 0;
-	anm_flags = ANM_FLAG_CLR_DST;
+	anm_flags = rt->def_anm_flags;
 	rt->last_fobj = NULL;
 	rt->last_fobj_size = 0;
 	while ((size > 7) && (ret == 0)) {
@@ -4927,6 +4933,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		fps = 15;			/* ANIMv1 default */
 		srate = 11025;			/* ANIMv1 default */
 		rt->frmebufsz = 0;
+		rt->def_anm_flags = ANM_FLAG_CLR_DST;
 	}
 	free(ahbuf);
 
