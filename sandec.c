@@ -2734,8 +2734,9 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		 * to the front buffer now.
 		 */
 		if (rt->to_store) {
+			uint16_t anm_flags2 = 0;
 			rt->to_store = 0;
-			ret = fob_decode_render(ctx, rt->fbuf, rt->buf3 + 4, *(uint32_t *)rt->buf3, 0, 0, 0);
+			ret = fob_decode_render(ctx, rt->fbuf, rt->buf3 + 4, *(uint32_t *)rt->buf3, 0, 0, &anm_flags2);
 			if (ret)
 				return ret;
 		}
