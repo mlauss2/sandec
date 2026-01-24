@@ -118,7 +118,7 @@ static inline uint32_t ua32(uint8_t *p)
 #define SZ_SHIFTPAL	(768 * sizeof(int16_t))
 #define SZ_C47IPTBL	(256 * 256)
 #define SZ_ADSTBUF	(393216)
-#define SZ_ANMBUFS (SZ_IACT + SZ_PAL + SZ_DELTAPAL + SZ_C47IPTBL + SZ_SHIFTPAL)
+#define SZ_ANMBUFS (SZ_IACT + (2 * SZ_PAL) + SZ_DELTAPAL + SZ_C47IPTBL + SZ_SHIFTPAL)
 
 /* codec47 glyhps */
 #define GLYPH_COORD_VECT_SIZE 16
@@ -244,6 +244,7 @@ struct sanrt {
 	int16_t  *deltapal;	/* 8 768x 16bit for XPAL chunks		*/
 	int16_t *shiftpal;	/* 8 256x shifted pal			*/
 	uint32_t *palette;	/* 8 256x ABGR				*/
+	uint32_t *iactpal;	/* 8 IACT-8 palette copy		*/
 	uint32_t fbsize;	/* 4 size of the framebuffers		*/
 	uint32_t framedur;	/* 4 standard frame duration		*/
 	uint16_t FRMEcnt;	/* 2 number of FRMEs in SAN		*/
@@ -254,6 +255,10 @@ struct sanrt {
 	uint8_t  can_ipol:1;	/* 1 do an interpolation                */
 	uint8_t  have_ipframe:1;/* 1 we have an interpolated frame      */
 	uint8_t  iactimus:1;	/* 1 is TheDig/IACT 8/0/0/x>0 is audio	*/
+	uint8_t  iact8c4x:1;	/* 1 IACT 8 for codec47/48 titles	*/
+	uint8_t  iactpal1;	/* 1 number of crossfade steps		*/
+	uint8_t  iactpal2;	/* 1 stepsize				*/
+	uint16_t iactpalfrme;	/* 2 curre FRME num at iactpal cmd	*/
 	void	 *membase;	/* 8 base to allocated mem block	*/
 	uint8_t *last_fobj;	/* 8 ptr to last FOBJ, for GOST		*/
 	uint32_t last_fobj_size;/* 4 size of last FOBJ			*/
@@ -2670,6 +2675,10 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 				rt->have_vdims = 1;
 			}
 
+			/* IACT 8/././x>0 is used by c47/48 titles for Palette crossfading */
+			if (codec >= 47)
+				rt->iact8c4x = 1;
+
 			rt->pitch = wr;
 		}
 		if (!rt->fbsize || (wr > rt->bufw) || (hr > rt->bufh)) {
@@ -4133,6 +4142,40 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	}
 }
 
+/* JKM.EXE 005656a3, LECSMUSH.DLL 100018d0 */
+static void iact_pal_do_crossfade(struct sanctx *ctx)
+{
+	struct sanrt *rt = &ctx->rt;
+	uint16_t elapsed, remaining;
+	uint32_t *pal, *ipa;
+	int v[3], w[3];
+
+	if (rt->iactpal1 == 0)
+		return;
+	elapsed = rt->currframe - rt->iactpalfrme;
+	remaining = rt->iactpal2 - elapsed;
+	pal = rt->palette;
+	ipa = rt->iactpal;
+
+	for (int i = 0; i < 256; i++) {
+		v[0] = (*pal >>  0) & 0xff;
+		v[1] = (*pal >>  8) & 0xff;
+		v[2] = (*pal >> 16) & 0xff;
+		w[0] = (*ipa >>  0) & 0xff;
+		w[1] = (*ipa >>  8) & 0xff;
+		w[2] = (*ipa >> 16) & 0xff;
+		for (int j = 0; j < 3; j++)
+			v[j] = (((v[j] * remaining) + (w[j] * elapsed)) / rt->iactpal2);
+
+		*pal++ = 0xffU << 24 | v[2] << 16 | v[1] << 8 | v[0];
+		ipa++;
+	}
+	rt->iactpal1--;
+	if (rt->iactpal1 == 0) {
+		memcpy(rt->palette, rt->iactpal, 768);
+	}
+}
+
 static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint16_t p[7];
@@ -4160,6 +4203,25 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 				ret = iact_audio_imuse(ctx->msa, size - 18, src + 18, p[4], p[3]);
 				if (ret != 0)
 					ctx->rt.iactimus = 0;
+			}
+
+			if ((ctx->rt.iactimus == 0) && ctx->rt.iact8c4x) {
+				/* palette crossfading: p[3] == number of steps,
+				 * see JKM.EXE 10565deb, LECSMUSH.DLL 10001ba4
+				 */
+				if (p[3] > 5 || p[3] < 1)
+					return;
+
+				memcpy(ctx->rt.iactpal, ctx->rt.palette, SZ_PAL);
+				if (size >= 768) {
+					uint32_t *ip = ctx->rt.iactpal;
+					for (int i = 0; i < 256; i++) {
+						*ip++ = 0xffU | src[0] << 16 | src[1] << 8 | src[2];
+						src += 3;
+					}
+					ctx->rt.iactpal1 = ctx->rt.iactpal2 = p[3];
+					ctx->rt.iactpalfrme = ctx->rt.currframe;
+				}
 			}
 		}
 	}
@@ -4739,6 +4801,10 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 	/* OK case: all usable bytes of the FRME read, no errors */
 	if (ret == 0) {
+		if (rt->iact8c4x) {
+			iact_pal_do_crossfade(ctx);
+		}
+
 		if (ctx->rt.have_frame) {
 			/* if possible, interpolate a frame using the itable,
 			 * and queue that plus the decoded one.
@@ -4905,6 +4971,7 @@ static int sandec_alloc_vidmem(struct sanctx *ctx, const uint16_t maxx,
 		/* ANIM/ANM misc buffers */
 		rt->iactbuf = (uint8_t *)m;	m += SZ_IACT;
 		rt->palette = (uint32_t *)m; 	m += SZ_PAL;
+		rt->iactpal = (uint32_t *)m;	m += SZ_PAL;
 		rt->deltapal = (int16_t *)m;	m += SZ_DELTAPAL;
 		rt->shiftpal = (int16_t *)m;	m += SZ_SHIFTPAL;
 		rt->c47ipoltbl = (uint8_t *)m;	m += SZ_C47IPTBL;
