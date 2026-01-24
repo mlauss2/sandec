@@ -104,7 +104,7 @@ static inline uint32_t ua32(uint8_t *p)
 /* ANM_FLAGS: various flags passed to the fob decoders and font renderer */
 #define ANM_FLAG_IGN_FOB_OFS		0x0001
 #define ANM_FLAG_ORIGIN_CENTER		0x0002
-#define ANM_FLAG_CLR_DST		0x0020
+#define ANM_FLAG_SKIP_CLR_DST		0x0020
 #define ANM_FLAG_CODEC_OPAQUE		0x0100
 /* GOST codec mirroring flags */
 #define ANM_FLAG_FLIPX			0x2000
@@ -2521,7 +2521,7 @@ static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 
 static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 			     uint32_t size, int16_t xoff, int16_t yoff,
-			     uint16_t *anm_flags)
+			     uint16_t anm_flags)
 {
 	uint16_t fobw, fobh, param2;
 	uint8_t codec, param;
@@ -2539,27 +2539,21 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	fobh   = le16_to_cpu(ua16(src + 8));
 	param2 = le16_to_cpu(ua16(src + 12));
 
-	if ((*anm_flags & ANM_FLAG_IGN_FOB_OFS) == 0) {
+	if ((anm_flags & ANM_FLAG_IGN_FOB_OFS) == 0) {
 		xoff += left;
 		yoff += top;
 	}
 
-	if (*anm_flags & ANM_FLAG_ORIGIN_CENTER) {
+	if (anm_flags & ANM_FLAG_ORIGIN_CENTER) {
 		xoff -= fobw >> 1;
 		yoff -= fobh >> 1;
-	}
-
-	if (*anm_flags & ANM_FLAG_CLR_DST) {
-		*anm_flags &= ~ANM_FLAG_CLR_DST;
-		if (ctx->rt.fbsize)
-			memset(dst, 0, ctx->rt.fbsize);
 	}
 
 	/* based on the GOST parameter in the v1 engine, I think these flipped
 	 * variants of codec1 were codecs28-30.
 	 */
 	if (codec == 1) {
-		switch (*anm_flags & (ANM_FLAG_FLIPX | ANM_FLAG_FLIPY)) {
+		switch (anm_flags & (ANM_FLAG_FLIPX | ANM_FLAG_FLIPY)) {
 		case 0: break;
 		case ANM_FLAG_FLIPX: codec = 28; break;
 		case ANM_FLAG_FLIPY: codec = 29; break;
@@ -2567,7 +2561,7 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 		}
 	}
 
-	if (*anm_flags & ANM_FLAG_CODEC_OPAQUE) {
+	if (anm_flags & ANM_FLAG_CODEC_OPAQUE) {
 		if (codec == 1)
 			codec = 3;
 		else if (codec == 31)
@@ -2609,7 +2603,7 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 }
 
 static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
-		       int16_t xoff, int16_t yoff, uint16_t *anm_flags)
+		       int16_t xoff, int16_t yoff, uint16_t anm_flags)
 {
 	struct sanrt *rt = &ctx->rt;
 	uint16_t w, h, wr, hr, param2;
@@ -2647,7 +2641,15 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	 */
 	if ((w == 640) && (h == 272) && (top == 60) && (codec == 47)) {
 		left = top = 0;
-		*anm_flags |= ANM_FLAG_IGN_FOB_OFS;
+		anm_flags |= ANM_FLAG_IGN_FOB_OFS;
+	}
+	/* most videos which use codec37/47/48 work on the full buffer; except
+	 * for MM which has a full-buffer codec3 object as first in a FRME,
+	 * so we can skip clearing the main buffer since it gets fully overwritten
+	 * anyway.
+	 */
+	if (fsc) {
+		rt->def_anm_flags |= ANM_FLAG_SKIP_CLR_DST;
 	}
 
 	/* decide on a buffer size */
@@ -2671,11 +2673,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			    ((wr == 640) && (hr == 480)) ||	/* COMI/OL/.. */
 			    ((left == 0) && (top == 0) && (codec == 20) && (w > 3) && (h > 3))) {
 				rt->have_vdims = 1;
-				if (w == 424) {
-					/* some RA2 videos need this */
-					rt->def_anm_flags |= ANM_FLAG_CLR_DST;
-					*anm_flags |= rt->def_anm_flags;
-				}
 			}
 
 			rt->pitch = wr;
@@ -2734,9 +2731,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		 * to the front buffer now.
 		 */
 		if (rt->to_store) {
-			uint16_t anm_flags2 = 0;
 			rt->to_store = 0;
-			ret = fob_decode_render(ctx, rt->fbuf, rt->buf3 + 4, *(uint32_t *)rt->buf3, 0, 0, &anm_flags2);
+			ret = fob_decode_render(ctx, rt->fbuf, rt->buf3 + 4, *(uint32_t *)rt->buf3, 0, 0, 0);
 			if (ret)
 				return ret;
 		}
@@ -4580,7 +4576,7 @@ static void handle_FADE(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	return;
 }
 
-static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t *anm_flags)
+static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t anm_flags)
 {
 	uint8_t *vb = ctx->rt.buf3;
 	int16_t xoff, yoff;
@@ -4607,15 +4603,13 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t
 	return ret;
 }
 
-static void handle_GOST(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t *anm_flags)
+static void handle_GOST(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t anm_flags)
 {
 	int16_t xoff, yoff;
-	uint16_t flags2;
 
 	if ((0 == ctx->rt.last_fobj) || (0 == ctx->rt.last_fobj_size))
 		return;
 
-	flags2 = 0;
 	if (size == 12) {
 		/* ASSAULT.EXE 18e7d, for FNFINAL.ANM and a few others */
 		uint32_t cmd = be32_to_cpu(ua32(src + 0));
@@ -4623,29 +4617,27 @@ static void handle_GOST(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_
 		yoff = (int16_t)(be32_to_cpu(ua32(src + 8)));
 
 		if (cmd == 28)
-			flags2 = ANM_FLAG_FLIPX;
+			anm_flags |= ANM_FLAG_FLIPX;
 		else if (cmd == 29)
-			flags2 = ANM_FLAG_FLIPY;
+			anm_flags |= ANM_FLAG_FLIPY;
 		else if (cmd == 30)
-			flags2 = ANM_FLAG_FLIPX | ANM_FLAG_FLIPY;
+			anm_flags |= ANM_FLAG_FLIPX | ANM_FLAG_FLIPY;
 	} else if (size == 6) {
 		/* RA2.EXE 37596 */
 		uint16_t cmd = le16_to_cpu(*(uint16_t *)(src + 0));
 		xoff = (int16_t)(le16_to_cpu(*(uint16_t *)(src + 2)));
 		yoff = (int16_t)(le16_to_cpu(*(uint16_t *)(src + 4)));
 		if (cmd == 0)
-			flags2 = ANM_FLAG_FLIPX;
+			anm_flags |= ANM_FLAG_FLIPX;
 		else if (cmd == 1)
-			flags2 = ANM_FLAG_FLIPY;
+			anm_flags |= ANM_FLAG_FLIPY;
 		else if (cmd == 2)
-			flags2 = ANM_FLAG_FLIPX | ANM_FLAG_FLIPY;
+			anm_flags |= ANM_FLAG_FLIPX | ANM_FLAG_FLIPY;
 	} else
 		return;
 
-	*anm_flags |= flags2;
 	fob_decode_render(ctx, ctx->rt.fbuf, ctx->rt.last_fobj, ctx->rt.last_fobj_size,
 			  xoff, yoff, anm_flags);
-	*anm_flags &= ~flags2;
 }
 
 /* allocate memory for a full FRME */
@@ -4685,6 +4677,10 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 	ret = 0;
 	anm_flags = rt->def_anm_flags;
+
+	if ((0 == (anm_flags & ANM_FLAG_SKIP_CLR_DST)) && rt->fbsize)
+		memset(rt->fbuf, 0, rt->fbsize);
+
 	rt->last_fobj = NULL;
 	rt->last_fobj_size = 0;
 	while ((size > 7) && (ret == 0)) {
@@ -4716,12 +4712,12 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		} else {	
 			switch (cid) {
 			case NPAL: handle_NPAL(ctx, csz, src); break;
-			case FOBJ: ret = handle_FOBJ(ctx, csz, src, 0, 0, &anm_flags); break;
-			case GOST: handle_GOST(ctx, csz, src, &anm_flags); break;
+			case FOBJ: ret = handle_FOBJ(ctx, csz, src, 0, 0, anm_flags); break;
+			case GOST: handle_GOST(ctx, csz, src, anm_flags); break;
 			case IACT: handle_IACT(ctx, csz, src); break;
 			case TRES: handle_TRES(ctx, csz, src); break;
 			case STOR: handle_STOR(ctx, csz, src); break;
-			case FTCH: ret = handle_FTCH(ctx, csz, src, &anm_flags); break;
+			case FTCH: ret = handle_FTCH(ctx, csz, src, anm_flags); break;
 			case XPAL: handle_XPAL(ctx, csz, src); break;
 			case PVOC: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_VOICE); break;
 			case PSD2: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_SFX);   break;
@@ -4982,7 +4978,6 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		fps = 15;			/* ANIMv1 default */
 		srate = 11025;			/* ANIMv1 default */
 		rt->frmebufsz = 0;
-		rt->def_anm_flags = ANM_FLAG_CLR_DST;
 	}
 	free(ahbuf);
 
