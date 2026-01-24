@@ -253,6 +253,7 @@ struct sanrt {
 	uint8_t  have_itable:1;	/* 1 have c47/48 interpolation table    */
 	uint8_t  can_ipol:1;	/* 1 do an interpolation                */
 	uint8_t  have_ipframe:1;/* 1 we have an interpolated frame      */
+	uint8_t  iactimus:1;	/* 1 is TheDig/IACT 8/0/0/x>0 is audio	*/
 	void	 *membase;	/* 8 base to allocated mem block	*/
 	uint8_t *last_fobj;	/* 8 ptr to last FOBJ, for GOST		*/
 	uint32_t last_fobj_size;/* 4 size of last FOBJ			*/
@@ -3971,7 +3972,7 @@ static int aud_mix_tracks(struct sanctx *ctx)
 	return (dstlen != 0);
 }
 
-static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
+static int iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 			      uint16_t trkid, uint16_t uid)
 {
 	uint32_t cid, csz, mapsz;
@@ -3979,7 +3980,7 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 	struct sanatrk *atrk;
 
 	if (size > (_ATRK_DATSZ / 2))
-		return;
+		return 1;
 
 	vol = ATRK_VOL_MAX;
 	if (uid == 1)
@@ -4001,7 +4002,7 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 
 	atrk = atrk_find_trkid(msa, trkid, -1, 0, 0);
 	if (!atrk)
-		return;
+		return 1;
 
 	if (vol > ATRK_VOL_MAX)
 		vol = ATRK_VOL_MAX;
@@ -4014,10 +4015,10 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 	 */
 	if (atrk->state == STATE_UNUSED) {
 		if (size < 24)
-			return;
+			return 1;
 		cid = le32_to_cpu(ua32(src + 0));
 		if (cid != iMUS)
-			return;
+			return 1;
 
 		cid = le32_to_cpu(ua32(src + 8));
 		mapsz = be32_to_cpu(ua32(src + 12));
@@ -4026,7 +4027,7 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 		src += 16;
 
 		if (cid != MAP_ || mapsz > size)
-			return;
+			return 1;
 
 		/* the MAP_ chunk again has a few subchuks, need the FRMT tag */
 		while (mapsz > 7 && size > 7) {
@@ -4050,13 +4051,13 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 
 		/* now there should be "DATA" with the TOTAL len of sound of the whole track */
 		if (size < 8)
-			return;
+			return 1;
 		cid = le32_to_cpu(ua32(src + 0));
 		csz = be32_to_cpu(ua32(src + 4));
 		src += 8;
 		size -= 8;
 		if (cid != DATA)
-			return;
+			return 1;
 
 		atrk->state = STATE_BLOCKED;
 		atrk->trkid = trkid;
@@ -4067,7 +4068,7 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 	}
 
 	if (atrk->state < STATE_BLOCKED)
-		return;
+		return 1;
 	if (size > atrk->dataleft)
 		size = atrk->dataleft;
 	atrk_read_pcmsrc(atrk, size, src);
@@ -4076,6 +4077,7 @@ static void iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 	    ((atrk->dataleft < 1) || (atrk->dstfavail >= msa->audminframes))) {
 		atrk->state = STATE_MIXABLE;
 	}
+	return 0;
 }
 
 static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
@@ -4134,7 +4136,7 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint16_t p[7];
-	int i;
+	int i, ret;
 
 	for (i = 0; i < 7; i++)
 		p[i] = le16_to_cpu(*(uint16_t*)(src + (i<<1)));
@@ -4154,7 +4156,11 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			 * to be a highly project-dependent dumping ground for
 			 * per-frame stuff. For now assume this is imuse-type audio.
 			 */
-			iact_audio_imuse(ctx->msa, size - 18, src + 18, p[4], p[3]);
+			if (ctx->rt.iactimus) {
+				ret = iact_audio_imuse(ctx->msa, size - 18, src + 18, p[4], p[3]);
+				if (ret != 0)
+					ctx->rt.iactimus = 0;
+			}
 		}
 	}
 }
@@ -4975,6 +4981,12 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 				return 13;
 			}
 		}
+
+		/* since IACT 8/x/x/>0 can be either TheDig Audio or something else,
+		 * we initially assume imuse, since it can tell us when it is
+		 * definitely not it.  The Dig uses IACT for its iMUSE audio only.
+		 */
+		rt->iactimus = 1;
 	} else {
 		fps = 15;			/* ANIMv1 default */
 		srate = 11025;			/* ANIMv1 default */
