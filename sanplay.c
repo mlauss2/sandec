@@ -1,7 +1,7 @@
 /*
  * SDL3-based SAN video player.
  *
- * (c) 2024-2025 Manuel Lauss <manuel.lauss@gmail.com>
+ * (c) 2024-2026 Manuel Lauss <manuel.lauss@gmail.com>
  */
 
 #include <stdio.h>

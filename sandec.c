@@ -1,16 +1,10 @@
 /*
  * A/V decoder for LucasArts SMUSH ANM/NUT/SAN/SNM files.
  *
- * Written in 2024-2025 by Manuel Lauss <manuel.lauss@gmail.com>
+ * Written in 2024-2026 by Manuel Lauss <manuel.lauss@gmail.com>
  *
- * Some codec algorithms (Video, Audio, Palette) liberally taken
- *  from FFmpeg, ScummVM and smushplay projects:
- *  https://git.ffmpeg.org/gitweb/ffmpeg.git/blob/HEAD:/libavcodec/sanm.c
- *  https://github.com/scummvm/scummvm/blob/master/engines/scumm/smush/smush_player.cpp
- *  https://github.com/clone2727/smushplay/blob/master/codec47.cpp
- *  https://github.com/clone2727/smushplay/blob/master/codec48.cpp
- *
- * Others were reversed from the various game executables.
+ * Some algorithms were taken from FFmpeg/ScummVM/smushplay,
+ *  others were reversed from the various game executables.
  *
  * SPDX-License-Identifier: LGPL-2.1-only
  */
@@ -4090,7 +4084,7 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	uint16_t count, len;
 	int16_t *dst;
 
-	/* algorithm taken from ScummVM/engines/scumm/smush/smush_player.cpp */
+	/* LECSMUSH.DLL 10002030 */
 	while (size > 0) {
 		if (ctx->rt.iactpos >= 2) {
 			len = be16_to_cpu(*(uint16_t *)ib) + 2 - ctx->rt.iactpos;
@@ -4150,10 +4144,16 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			return;
 
 		if (p[3] == 0) {
-			/* subchunkless scaled IACT audio codec47/48 videos */
+			/* subchunkless scaled IACT audio codec47/48 videos,
+			 * LECSMUSH.DLL 10001a50
+			 */
 			iact_audio_scaled(ctx, size - 18, src + 18);
 		} else {
-			/* imuse-type */
+			/* On OL/COMI/MotS  iact 8/x/x/>0 sets up a multi-frame
+			 * palette blending operation.  In general, IACT seems
+			 * to be a highly project-dependent dumping ground for
+			 * per-frame stuff. For now assume this is imuse-type audio.
+			 */
 			iact_audio_imuse(ctx->msa, size - 18, src + 18, p[4], p[3]);
 		}
 	}

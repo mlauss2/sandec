@@ -1,17 +1,10 @@
-Single-file A/V decoder library for LucasArts SAN/SMUSH movie files (originally
-intended only to play "Outlaws" videos, since they are awesome),
+Single-file A/V decoder library for LucasArts SAN/SMUSH movie files,
 with an SDL3-based player application to demonstrate library use.
-
-Can also play game movies from Curse of Monkey Island, Shadows of the Empire,
-Mysteries of the Sith, The Dig, Full Throttle, Rebel Assault II, Rebel Assault,
-X-Wing Alliance.
-
-If you find this useful, I'd be very happy if you dropped me a line!
 
 # What works:
 - Linux/Unix.
   - Windows untested, but should build.
-- Can successfully parse all .SAN and .NUT files from the following LucasArts games:
+- Can successfully parse and decode all .SAN, .SNM and .NUT files from the following LucasArts games:
   - Outlaws
   - Curse of Monkey Island
     - Text rendering is not implemented, which is most noticeable in the intro file.
@@ -24,20 +17,10 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - Star Wars: Making Magic
   - Mortimer and the Riddles of the Medallion
   - Droidworks
-- Can successfully parse .SNM videos from the following LucasArts titles:
   - X-Wing Alliance
   - Indiana Jones and the Infernal Machine
   - Grim Fandango
   - Force Commander (need Zlib or unpack the .znm files)
-- Video decoding
-  - Handles all 8-bit codecs found in LucasArts DOS/Windows titles.
-  - BL16 video in .snm/.znm files.
-  - frame interpolation for codec47/48 videos
-    - default off as it generates a lot of ghosting, but some scenes, esp. zoom-ins and pans, look noticeably smoother.
-- Audio decoding
-  - audio ouput for all by the decoder is 22kHz/16bit/2ch.
-  - handles all raw PCM (SMUSH SAUD/PSAD).
-  - VIMA and IMA4 on Grim Fandango/Infernal Machine/ForceCommander/XWA/..
 - player keyboard controls:
   - space to pause/unpause
   - f     to toggle fullscreen/windowed
@@ -74,5 +57,6 @@ If you find this useful, I'd be very happy if you dropped me a line!
   - VMSK: masked blit; it's in the RA2 code, stubbed out in later engines, but never encountered in any SAN file.
   - GAME/GAM2: RA1 game progress feedback.
   - RAW!/SBL /SBL2/Crea: Raw PCM/VOC file support, it's in the (RA1) code but not used in any ANM/SAN file.
+- FADE (RA1) is still a bit bugged.
 
-20251222
+20260124
