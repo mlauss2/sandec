@@ -4678,8 +4678,9 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	ret = 0;
 	anm_flags = rt->def_anm_flags;
 
-	if ((0 == (anm_flags & ANM_FLAG_SKIP_CLR_DST)) && rt->fbsize)
-		memset(rt->fbuf, 0, rt->fbsize);
+	if (0 == (anm_flags & ANM_FLAG_SKIP_CLR_DST)) {
+		memset(rt->fbuf, 0, rt->fbsize ? rt->fbsize : FOBJ_MAXX * FOBJ_MAXY);
+	}
 
 	rt->last_fobj = NULL;
 	rt->last_fobj_size = 0;
