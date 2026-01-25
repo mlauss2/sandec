@@ -4194,7 +4194,7 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			 */
 			iact_audio_scaled(ctx, size - 18, src + 18);
 		} else {
-			/* On OL/COMI/MotS  iact 8/x/x/>0 sets up a multi-frame
+			/* On OL/COMI/MotS  iact 8/x/x/>0<6 sets up a multi-frame
 			 * palette blending operation.  In general, IACT seems
 			 * to be a highly project-dependent dumping ground for
 			 * per-frame stuff. For now assume this is imuse-type audio.
@@ -4205,12 +4205,11 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 					ctx->rt.iactimus = 0;
 			}
 
-			if ((ctx->rt.iactimus == 0) && ctx->rt.iact8c4x) {
+			if ((ctx->rt.iactimus == 0) && (ctx->rt.iact8c4x) &&
+			    (p[3] > 0) && (p[3] < 6)) {
 				/* palette crossfading: p[3] == number of steps,
 				 * see JKM.EXE 10565deb, LECSMUSH.DLL 10001ba4
 				 */
-				if (p[3] > 5 || p[3] < 1)
-					return;
 
 				memcpy(ctx->rt.iactpal, ctx->rt.palette, SZ_PAL);
 				if (size >= 768) {
