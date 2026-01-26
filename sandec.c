@@ -4745,7 +4745,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	ret = 0;
 	anm_flags = rt->def_anm_flags;
 
-	if (0 == (anm_flags & ANM_FLAG_SKIP_CLR_DST)) {
+	if ((rt->version < 3) && (0 == (anm_flags & ANM_FLAG_SKIP_CLR_DST))) {
 		memset(rt->fbuf, 0, rt->fbsize ? rt->fbsize : FOBJ_MAXX * FOBJ_MAXY);
 	}
 
@@ -4800,6 +4800,14 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 	/* OK case: all usable bytes of the FRME read, no errors */
 	if (ret == 0) {
+		if (rt->version > 2) {
+			ctx->io->queue_video(ctx->io->userctx, rt->vbuf,
+					     rt->pitch * rt->bufh * 1,
+					     rt->bufw, rt->bufh, rt->pitch,
+					     NULL, 0, rt->framedur);
+			return 0;
+		}
+
 		if (rt->iact8c4x) {
 			iact_pal_do_crossfade(ctx);
 		}
@@ -5272,16 +5280,19 @@ out:
 
 int sandec_init(void **ctxout)
 {
-	const int sz = sizeof(struct sanctx) + SZ_ADSTBUF;
 	struct sanctx *ctx;
 
 	if (!ctxout)
 		return 1;
-	ctx = (struct sanctx *)malloc(sz);
+	ctx = (struct sanctx *)malloc(sizeof(struct sanctx));
 	if (!ctx)
 		return 2;
-	memset(ctx, 0, sizeof(sz));
-	ctx->adstbuf1 = (uint8_t *)(ctx) + sizeof(struct sanctx);
+	memset(ctx, 0, sizeof(struct sanctx));
+	ctx->adstbuf1 = (uint8_t *)malloc(SZ_ADSTBUF);
+	if (!ctx->adstbuf1) {
+		free(ctx);
+		return 2;
+	}
 
 	/* set to error state initially until a valid file has been opened */
 	ctx->errdone = 44;
@@ -5377,6 +5388,8 @@ void sandec_exit(void **sanctx)
 
 	sandec_free_memories(ctx);
 
+	if (ctx->adstbuf1)
+		free(ctx->adstbuf1);
 	free(ctx);
 	*sanctx = NULL;
 }
