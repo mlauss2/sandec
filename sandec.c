@@ -53,13 +53,14 @@
 /* bytewise read an unaligned 16bit value from memory */
 static inline uint16_t ua16(uint8_t *p)
 {
-	return p[0] | p[1] << 8;
+	return p[0] | (p[1] << 8);
 }
 
 /* bytewise read an unaligned 32bit value from memory */
 static inline uint32_t ua32(uint8_t *p)
 {
-	return p[0] | p[1] << 8 | p[2] << 16 | p[3] << 24;
+	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+		((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
 /* chunk identifiers LE */
@@ -2608,7 +2609,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	struct sanrt *rt = &ctx->rt;
 	uint16_t w, h, wr, hr, param2;
 	uint8_t codec, param, *dst;
-	int16_t left, top;
+	int16_t left, top, v1skip;
 	int ret, fsc;
 
 	codec = src[0];
@@ -2618,6 +2619,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	top  = le16_to_cpu(ua16(src + 4));
 	w = wr = le16_to_cpu(ua16(src + 6));
 	h = hr = le16_to_cpu(ua16(src + 8));
+	v1skip = le16_to_cpu(ua16(src + 10));	/* ANIMv1 version of SKIP chunk */
 	param2 = le16_to_cpu(ua16(src + 12));
 
 	/* ignore nonsensical dimensions in frames, happens with
@@ -2644,9 +2646,9 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		anm_flags |= ANM_FLAG_IGN_FOB_OFS;
 	}
 	/* most videos which use codec37/47/48 work on the full buffer; except
-	 * for MM which has a full-buffer codec3 object as first in a FRME,
-	 * so we can skip clearing the main buffer since it gets fully overwritten
-	 * anyway.
+	 * for MM, but it has a full-buffer codec3 object as first in a FRME,
+	 * we can skip clearing the main buffer since it gets fully overwritten
+	 * anyway. Therefore this can be applied when any of these codecs are used.
 	 */
 	if (fsc) {
 		rt->def_anm_flags |= ANM_FLAG_SKIP_CLR_DST;
@@ -2727,6 +2729,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			}
 		}
 	}
+
+	(void)v1skip;
 
 	ret = fob_decode_render(ctx, dst, src, size, xoff, yoff, anm_flags);
 
@@ -3231,14 +3235,14 @@ static uint32_t atrk_bytes_to_dstframes(struct sanatrk *atrk, uint32_t avail)
 	uint32_t den = atrk->src_cnvrate >> 8;
 
 	if (atrk->flags & ATRK_SRC8BIT) {
-		avail = avail * 1;		/* samples */
+		avail = avail * 1;		/* 1 in byte -> 1 out frame   */
 	} else if (atrk->flags & ATRK_SRC12BIT) {
-		avail = (avail * 2) / 3;	/* samples */
+		avail = (avail * 2) / 3;	/* 3 in bytes -> 2 out frames */
 	} else {
-		avail = avail >> 1;		/* samples */
+		avail = avail >> 1;		/* 2 in bytes -> 1 out frame  */
 	}
 	if (0 == (atrk->flags & ATRK_1CH)) {
-		avail >>= 1;			/* frames */
+		avail /= 2;			/* 2ch: double input bytes reqd. */
 	}
 
 	if (den == 0) {
@@ -3385,7 +3389,7 @@ static uint32_t atrk_resample_12(struct sanatrk *atrk, int16_t *dst, uint32_t co
 			if (frac) {
 				int16_t next;
 				/* If rem was 0 (low nibble), next is same block rem 1 (high nibble)
-				 *              If rem was 1 (high nibble), next is next block (block+1) rem 0 */
+				 * If rem was 1 (high nibble), next is next block (block+1) rem 0 */
 				if (rem == 0) {
 					next = _aud_decode_12bit(atrk->data, pos, 1);
 				} else {
@@ -3431,7 +3435,7 @@ static uint32_t atrk_resample_12(struct sanatrk *atrk, int16_t *dst, uint32_t co
 
 static inline void atrk_reset(struct sanatrk *atrk)
 {
-	/* don't overwrite 1st and last member! */
+	/* first and last member of struct sanatrk are void* and need to be kept */
 	memset(&atrk->rdptr, 0, sizeof (struct sanatrk) - 2*sizeof(void *));
 }
 
@@ -3441,7 +3445,7 @@ static inline void atrk_set_srate(struct sanatrk *atrk, uint32_t rate)
 	atrk->src_cnvrate = (rate << 16) / (22050);
 }
 
-static inline void atrk_set_playpos(struct sanatrk *atrk, uint32_t ofs, uint32_t len)
+static void atrk_set_playpos(struct sanatrk *atrk, uint32_t ofs, uint32_t len)
 {
 	atrk->rdptr = ofs & ATRK_DATMASK;
 	atrk->playlen = len;
@@ -3454,7 +3458,7 @@ static inline void atrk_set_playpos(struct sanatrk *atrk, uint32_t ofs, uint32_t
 /* create a default STRK script which plays the whole stream, then terminates,
  * for the iMUSE (The Dig) tracks.
  */
-static inline void atrk_set_default_strk(struct sanatrk *atrk, uint32_t len)
+static void atrk_set_default_strk(struct sanatrk *atrk, uint32_t len)
 {
 	uint8_t *stp = atrk->strk;
 
@@ -3567,7 +3571,7 @@ static void atrk_process_strk(struct sanatrk *atrk)
 			}
 			/* execute logical op */
 			switch (s[0]) {
-			case 2:	 *r =((*r == 0) && (s[4] != 0)) ? 0 : 1; break;
+			case 2:	 *r =((*r != 0) || (s[4] == 0)) ? 1 : 0; break;
 			case 8:  *r = (s[5] < *r) ? 1 : 0; break;
 			case 9:  *r = (*r < s[5]) ? 1 : 0; break;
 			case 10: *r = (*r == s[5]) ? 1 : 0; break;
@@ -3669,7 +3673,6 @@ static struct sanatrk *atrk_find_trkid(struct sanmsa *msa, uint16_t trkid,
 	return NULL;
 }
 
-/* clear the ATRK_MIXED flag from all tracks */
 static void atrk_reset_mixed(struct sanmsa *msa)
 {
 	struct sanatrk *atrk;
@@ -3680,7 +3683,7 @@ static void atrk_reset_mixed(struct sanmsa *msa)
 	}
 }
 
-/* get the FIRST mixable track. */
+/* get the first not yet mixed track */
 static struct sanatrk *atrk_get_next_mixable(struct sanmsa *msa)
 {
 	struct sanatrk *atrk;
@@ -3819,40 +3822,38 @@ static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
 			src2 += 2;
 
 		/* apply volume */
-		int32_t d1_L = (raw1_L * v1l) >> 8;
-		int32_t d1_R = (raw1_R * v1r) >> 8;
-		int32_t d2_L = (raw2_L * v2l) >> 8;
-		int32_t d2_R = (raw2_R * v2r) >> 8;
+		int32_t d1_Ls = (raw1_L * v1l) >> 8;
+		int32_t d1_Rs = (raw1_R * v1r) >> 8;
+		int32_t d2_Ls = (raw2_L * v2l) >> 8;
+		int32_t d2_Rs = (raw2_R * v2r) >> 8;
 
 		/* s16 to u16 */
-		d1_L += 32768; d1_R += 32768;
-		d2_L += 32768; d2_R += 32768;
+		uint32_t d1_L = d1_Ls + 32768;
+		uint32_t d1_R = d1_Rs + 32768;
+		uint32_t d2_L = d2_Ls + 32768;
+		uint32_t d2_R = d2_Rs + 32768;
 
 		/* both silent path */
-		int32_t dark_L = (d1_L * d2_L) >> 15;
-		int32_t dark_R = (d1_R * d2_R) >> 15;
+		uint32_t dark_L = (d1_L * d2_L) >> 15;
+		uint32_t dark_R = (d1_R * d2_R) >> 15;
 
 		/* one louder path */
-		int32_t light_L = ((d1_L + d2_L) << 1) - dark_L - 65536;
-		int32_t light_R = ((d1_R + d2_R) << 1) - dark_R - 65536;
+		uint32_t light_L = ((d1_L + d2_L) << 1) - dark_L - 65536;
+		uint32_t light_R = ((d1_R + d2_R) << 1) - dark_R - 65536;
 
 		/* selection condition */
 		int cond_L = (d1_L < 32768) && (d2_L < 32768);
 		int cond_R = (d1_R < 32768) && (d2_R < 32768);
 
 		/* and select */
-		int32_t res_L = cond_L ? dark_L : light_L;
-		int32_t res_R = cond_R ? dark_R : light_R;
+		uint32_t res_L = cond_L ? dark_L : light_L;
+		uint32_t res_R = cond_R ? dark_R : light_R;
 
 		/* clamp */
 		if (res_L > 65535)
 			res_L = 65535;
-		else if (res_L < 0)
-			res_L = 0;
 		if (res_R > 65535)
 			res_R = 65535;
-		else if (res_R < 0)
-			res_R = 0;
 
 		/* mixed u16 back to s16 */
 		dst[0] = (int16_t)(res_L - 32768);
@@ -3899,13 +3900,8 @@ static int aud_mix_tracks(struct sanctx *ctx)
 	while ((active1 != 0) && (dff != 0)) {
 		atrk_reset_mixed(msa);
 		mixable = atrk_count_mixable(msa, &minlen1);
-		if (!mixable)
+		if ((mixable < 1) || (minlen1 == -1))
 			break;
-
-		if (dff && (minlen1 == -1)) {
-			/* hmm underrun */
-			break;
-		}
 
 		if (minlen1 > dff)
 			minlen1 = dff;
@@ -3935,31 +3931,23 @@ static int aud_mix_tracks(struct sanctx *ctx)
 		if (dff) {
 			active2 = atrk_count_active(msa, NULL);
 			if (active2 < active1) {
-				/* the hopefully short track was done and freed,
-				 * try again to get the missing rest from the
-				 * other tracks.
+				/* the short track was done and freed, try
+				 * again to get the missing rest from the
+				 * other still active tracks.
 				 */
 				active1 = active2;
 				continue;
 			}
 			/* see if any of the tracks had a reset of their play
-			 * position/length, indicated by state 5: then we can
-			 * reconsider it for further processing.
+			 * position/length (STRK processing), indicated by
+			 * STATE_NEWDATA, we reconsider these for further
+			 * processing as well.
 			 */
 			for (int i = 0; i < msa->numtrk; i++) {
 				atrk = &(msa->atrk[i]);
 				if (atrk->state == STATE_NEWDATA)
 					atrk->state = STATE_MIXED;
 			}
-			/* final check: newly mixable tracks with data available */
-			mixable = atrk_count_mixable(msa, &minlen1);
-			if ((mixable > 0) && (minlen1 != -1)) {
-				/* ok, more data just appeared, try again with
-				 * all active tracks. */
-				continue;
-			}
-			/* one track is experiencing an underrun, exit. */
-			break;
 		}
 	}
 	if (dstlen)
@@ -3982,7 +3970,7 @@ static int aud_mix_tracks(struct sanctx *ctx)
 }
 
 static int iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
-			      uint16_t trkid, uint16_t uid)
+			    uint16_t trkid, uint16_t uid)
 {
 	uint32_t cid, csz, mapsz;
 	uint16_t rate, bits, chnl, vol;
@@ -4194,15 +4182,13 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			 */
 			iact_audio_scaled(ctx, size - 18, src + 18);
 		} else {
-			/* On OL/COMI/MotS  iact 8/x/x/>0<6 sets up a multi-frame
-			 * palette blending operation.  In general, IACT seems
-			 * to be a highly project-dependent dumping ground for
-			 * per-frame stuff. For now assume this is imuse-type audio.
-			 */
+
 			if (ctx->rt.iactimus) {
 				ret = iact_audio_imuse(ctx->msa, size - 18, src + 18, p[4], p[3]);
 				if (ret != 0)
 					ctx->rt.iactimus = 0;
+				else
+					return;
 			}
 
 			if ((ctx->rt.iactimus == 0) && (ctx->rt.iact8c4x) &&
@@ -4585,8 +4571,8 @@ static void handle_FADE(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		return;
 
 	/* FDHD header first */
-	cid = le32_to_cpu(*(uint32_t *)(src + 0));
-	csz = be32_to_cpu(*(uint32_t *)(src + 4));
+	cid = le32_to_cpu(ua32(src + 0));
+	csz = be32_to_cpu(ua32(src + 4));
 	size -= 8;
 	src += 8;
 	if ((csz > size) || (csz < 8) || (cid != FDHD))
@@ -4599,8 +4585,8 @@ static void handle_FADE(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	src += csz;
 	if (size < 8)
 		return;
-	cid = le32_to_cpu(*(uint32_t *)(src + 0));
-	csz = be32_to_cpu(*(uint32_t *)(src + 4));
+	cid = le32_to_cpu(ua32(src + 0));
+	csz = be32_to_cpu(ua32(src + 4));
 	size -= 8;
 	src += 8;
 	if ((csz > size) || (cid != FFRM))
