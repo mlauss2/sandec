@@ -237,6 +237,10 @@ static int do_img_flip(struct playpriv *p)
 
 static void exit_sdl(struct playpriv *p)
 {
+	if (p->lastimg)
+		SDL_DestroySurface(p->lastimg);
+	if (p->newimg)
+		SDL_DestroySurface(p->newimg);
 	if (p->as)
 		SDL_DestroyAudioStream(p->as);
 	if (p->ren)
