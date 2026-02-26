@@ -2565,6 +2565,8 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	if (anm_flags & ANM_FLAG_CODEC_OPAQUE) {
 		if (codec == 1)
 			codec = 3;
+		else if (codec == 4)
+			codec = 5;
 		else if (codec == 31)
 			codec = 32;
 		else if (codec == 44) {
