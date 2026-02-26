@@ -99,6 +99,7 @@ static inline uint32_t ua32(uint8_t *p)
 /* ANM_FLAGS: various flags passed to the fob decoders and font renderer */
 #define ANM_FLAG_IGN_FOB_OFS		0x0001
 #define ANM_FLAG_ORIGIN_CENTER		0x0002
+#define ANM_FLAG_DECODE_PRETEND 	0x0010
 #define ANM_FLAG_SKIP_CLR_DST		0x0020
 #define ANM_FLAG_CODEC_OPAQUE		0x0100
 /* GOST codec mirroring flags */
@@ -1248,7 +1249,7 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 }
 
 static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, uint16_t h,
-		   int16_t xoff, int16_t yoff, uint32_t size)
+		   int16_t xoff, int16_t yoff, uint32_t size, const uint16_t anm_flags)
 {
 	uint8_t *coltbl, comp, newrot, flag, *dst;
 	uint32_t decsize;
@@ -1279,6 +1280,12 @@ static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, 
 		codec47_itable(ctx, src);
 		src += 0x8080;
 		size -= 0x8080;
+	}
+
+	if (((anm_flags & ANM_FLAG_DECODE_PRETEND) != 0)
+	    && (newrot == 0) && ((comp >= 2) && (comp <= 4))) {
+		ctx->rt.lastseq = seq;
+		return 0;	/* original returns error here */
 	}
 
 	dst = ctx->rt.buf0;
@@ -1509,10 +1516,11 @@ static int codec48_comp3(uint8_t * __restrict src, uint8_t * __restrict dst, uin
 }
 
 static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
-		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size)
+		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
+		   const uint16_t anm_flags)
 {
 	uint32_t pktsize, decsize;
-	uint8_t comp, flag, *dst;
+	uint8_t comp, flag;
 	uint16_t seq;
 
 	if (size < 16)
@@ -1546,7 +1554,7 @@ static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 	 *       The next frame then is compression 6, i.e. blits the actual decoding
 	 *        result to main buffer.
 	 * 0x20: unknown, checked in error path in MM
-	 * 0x30: unknonw, same as 0x20 but checked for MotS error path.
+	 * 0x30: unknown, same as 0x20 but checked for MotS error path.
 	 */
 
 	if (decsize > ctx->rt.fbsize)
@@ -1569,25 +1577,30 @@ static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 		size -= 0x8080;
 	}
 
-	dst = ctx->rt.buf0;
 	switch (comp) {
 	case 0:	if (size < pktsize)
 			return -82;
-		memcpy(dst, src, pktsize);
+		memcpy(ctx->rt.buf0, src, pktsize);
 		break;
-	case 2: codec47_comp5(src, size, dst, decsize); break;
+	case 2: codec47_comp5(src, size, ctx->rt.buf0, decsize); break;
 	case 3: if ((seq == 0) || (seq == ctx->rt.lastseq + 1)) {
 			if ((seq & 1) || ((flag & 1) == 0) || (flag & 0x10)) {
 				c47_swap_bufs(ctx, 1);	/* swap 0 and 2 */
-				dst = ctx->rt.buf0;
 			}
-			if (0 != codec48_comp3(src, dst, ctx->rt.buf2, ctx->rt.c47ipoltbl, w, h, size))
+			if (((seq & 1) != 0) && ((flag & 1) != 0)
+			    && ((anm_flags & ANM_FLAG_DECODE_PRETEND) != 0)
+			    && ((((flag & 0x10) == 0) && ((flag & 0x20) == 0))	/* MM */
+			         || ((flag & 0x30) == 0))) {	/* MotS */
+				ctx->rt.lastseq = seq;
+				return 0;	/* original does return error here */
+			}
+			if (0 != codec48_comp3(src, ctx->rt.buf0, ctx->rt.buf2, ctx->rt.c47ipoltbl, w, h, size))
 				return -84;
 		}
 		break;
 	case 5: if (size < ((w * h) / 4))
 			return -83;
-		codec47_comp1(src, dst, ctx->rt.c47ipoltbl, w, h);
+		codec47_comp1(src, ctx->rt.buf0, ctx->rt.c47ipoltbl, w, h);
 		break;
 	default:
 		break;
@@ -1605,10 +1618,10 @@ static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 			ctx->rt.can_ipol = 0;
 			return 0;
 		}
-		blt_solid(dbuf, dst, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
+		blt_solid(dbuf, ctx->rt.buf0, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
 			  ctx->rt.bufh, w * h);
 	} else {
-		blt_mask(dbuf, dst, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
+		blt_mask(dbuf, ctx->rt.buf0, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
 			 ctx->rt.bufh, w * h, 0);
 	}
 
@@ -1691,8 +1704,10 @@ static void codec37_comp1(uint8_t * __restrict src, uint32_t size, uint8_t * __r
 	}
 }
 
-static void codec37_comp3(uint8_t * __restrict src, uint8_t * __restrict dst, uint8_t * __restrict db, uint16_t w, uint16_t h,
-			  uint8_t mvidx, const uint8_t f4, const uint8_t c4, uint32_t size)
+static void codec37_comp3(uint8_t * __restrict src, uint32_t size,
+			  uint8_t * __restrict dst, uint8_t * __restrict db,
+			  uint16_t w, uint16_t h, uint8_t mvidx,
+			  const uint8_t f4, const uint8_t c4)
 {
 	uint8_t opc, c, copycnt;
 	int32_t ofs, mvofs;
@@ -1776,9 +1791,10 @@ static void codec37_comp3(uint8_t * __restrict src, uint8_t * __restrict dst, ui
 }
 
 static int codec37(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
-		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size)
+		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
+		   const uint16_t anm_flags)
 {
-	uint8_t comp, mvidx, flag, *dst, *db;
+	uint8_t comp, mvidx, flag;
 	uint32_t decsize;
 	uint16_t seq;
 
@@ -1799,34 +1815,39 @@ static int codec37(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 	if (comp == 0 || comp == 2)
 		memset(ctx->rt.buf2, 0, decsize);
 
-	if ((comp == 1 || comp == 3 || comp == 4)
-	    && ((seq & 1) || !(flag & 1))) {
-		void *tmp = ctx->rt.buf0;
-		ctx->rt.buf0 = ctx->rt.buf2;
-		ctx->rt.buf2 = tmp;
-	}
-
 	src += 16;
 	size -= 16;
-	dst = ctx->rt.buf0;
-	db = ctx->rt.buf2;
 
 	switch (comp) {
-	case 0: memcpy(dst, src, _min(size, decsize)); break;
-	case 1: codec37_comp1(src, size, dst, db, w, h, mvidx); break;
-	case 2: codec47_comp5(src, size, dst, decsize); break;
+	case 0: memcpy(ctx->rt.buf0, src, _min(size, decsize)); break;
+	case 2: codec47_comp5(src, size, ctx->rt.buf0, decsize); break;
+	case 1: /* fallthrough */
 	case 3: /* fallthrough */
-	case 4: codec37_comp3(src, dst, db, w, h, mvidx, flag & 4, comp == 4, size); break;
+	case 4: if ((seq == 0) || (seq == ctx->rt.lastseq + 1)) {
+			if (((seq & 1) == 0) || ((flag & 1) == 0) || ((anm_flags & ANM_FLAG_DECODE_PRETEND) == 0)) {
+				if (((seq & 1) != 0) || ((flag & 1) == 0)) {
+					c47_swap_bufs(ctx, 1);	/* swap 0 and 2 */
+				}
+			} else {
+				c47_swap_bufs(ctx, 1);	/* swap 0 and 2 */
+				return 0;	/* original does return error here */
+			}
+			if (comp == 1)
+				codec37_comp1(src, size, ctx->rt.buf0, ctx->rt.buf2, w, h, mvidx);
+			else
+				codec37_comp3(src, size, ctx->rt.buf0, ctx->rt.buf2, w, h, mvidx, flag & 4, comp == 4);
+		}
+		break;
 	default: break;
 	}
 
 	ctx->rt.lastseq = seq;
 
 	if ((flag & 2) == 0) {
-		blt_solid(dbuf, dst, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
+		blt_solid(dbuf, ctx->rt.buf0, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
 			  ctx->rt.bufh, w * h);
 	} else {
-		blt_mask(dbuf, dst, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
+		blt_mask(dbuf, ctx->rt.buf0, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
 			 ctx->rt.bufh, w * h, 0);
 	}
 
@@ -2596,9 +2617,9 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	case 33:
 	case 34: codec33(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2, codec == 34); break;
 	case 45: codec45(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2); break;
-	case 37: ret = codec37(ctx, dst, src, fobw, fobh, xoff, yoff, size); break;
-	case 47: ret = codec47(ctx, dst, src, fobw, fobh, xoff, yoff, size); break;
-	case 48: ret = codec48(ctx, dst, src, fobw, fobh, xoff, yoff, size); break;
+	case 37: ret = codec37(ctx, dst, src, fobw, fobh, xoff, yoff, size, anm_flags); break;
+	case 47: ret = codec47(ctx, dst, src, fobw, fobh, xoff, yoff, size, anm_flags); break;
+	case 48: ret = codec48(ctx, dst, src, fobw, fobh, xoff, yoff, size, anm_flags); break;
 	default: ret = 18; break;
 	}
 
