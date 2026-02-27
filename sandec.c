@@ -2716,7 +2716,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	if (rt->to_store) {
 		/* STOR: save the whole FOBJ */
 		rt->to_store = 0;
-		if (size <= rt->fbsize) {
+		if ((size + 4) <= rt->fbsize) {
 			*(uint32_t *)rt->buf3 = size;
 			memcpy(rt->buf3 + 4, src, size);
 		} else {
