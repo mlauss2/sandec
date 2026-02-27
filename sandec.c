@@ -2631,8 +2631,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 {
 	struct sanrt *rt = &ctx->rt;
 	uint16_t w, h, wr, hr, param2;
-	uint8_t codec, param, *dst;
 	int16_t left, top, v1skip;
+	uint8_t codec, param;
 	int ret, fsc;
 
 	codec = src[0];
@@ -2713,67 +2713,27 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		}
 	}
 
-	if (rt->to_store == 2 || (rt->to_store != 0 && fsc)) {
-		/* decode the image and change it to a FOBJ with codec20.
-		 * Used sometimes in RA1 only; RA2+ had this feature removed.
-		 * We can however use it for codecs37/47/48 since they work on
-		 * their own buffers and don't modify existing images like the
-		 * other codecs can do.
-		 */
-		*(uint32_t *)(rt->buf3 + 0) = rt->fbsize;/* block size in host endian */
-		memcpy(rt->buf3 + 4, src, 14);		/* FOBJ header		*/
-		*( uint8_t *)(rt->buf3 + 4) = 20;	/* set to codec20	*/
-		dst = rt->buf3 + 4 + 14;		/* write image data here*/
-		if (fsc) {
-			/* for "Making Magic": copy the existing image too,
-			 * change the codec20 to full buffer size
-			 */
-			memcpy(dst, rt->fbuf, rt->fbsize);
-			*( uint16_t *)(rt->buf3 +  6) = 0;		/* left   */
-			*( uint16_t *)(rt->buf3 +  8) = 0;		/* top    */
-			*( uint16_t *)(rt->buf3 + 10) = rt->bufw;	/* width  */
-			*( uint16_t *)(rt->buf3 + 12) = rt->bufh;	/* height */
-		}
-	} else {
-		/* for codecs 1-34,44: default write to the front buffer */
-		dst = rt->fbuf;
-		rt->vbuf = dst;
-
-		if (rt->to_store == 1) {
-			/* copy the FOBJ whole (all SAN versions), and render it normally
-			 * to the default front buffer.
-			 */
-			rt->to_store = 0;
-			if (size <= rt->fbsize) {
-				*(uint32_t *)rt->buf3 = size;
-				memcpy(rt->buf3 + 4, src, size);
-			} else {
-				return 26;		/* STOR buffer too small! */
-			}
+	if (rt->to_store) {
+		/* STOR: save the whole FOBJ */
+		rt->to_store = 0;
+		if (size <= rt->fbsize) {
+			*(uint32_t *)rt->buf3 = size;
+			memcpy(rt->buf3 + 4, src, size);
+		} else {
+			return 26;		/* STOR buffer too small! */
 		}
 	}
 
 	(void)v1skip;
 
-	ret = fob_decode_render(ctx, dst, src, size, xoff, yoff, anm_flags);
+	rt->vbuf = rt->fbuf;
+	ret = fob_decode_render(ctx, rt->fbuf, src, size, xoff, yoff, anm_flags);
 
 	if (ret == 0) {
-		/* the decoding-STOR was done, but we still need to put the image
-		 * to the front buffer now.
-		 */
-		if (rt->to_store) {
-			rt->to_store = 0;
-			ret = fob_decode_render(ctx, rt->fbuf, rt->buf3 + 4, *(uint32_t *)rt->buf3, 0, 0, 0);
-			if (ret)
-				return ret;
-		}
-
 		rt->have_frame = 1;
 		rt->last_fobj = src;
 		rt->last_fobj_size = size;
 	}
-
-	rt->to_store = 0;
 
 	return ret;
 }
@@ -4573,13 +4533,21 @@ static void handle_TRES(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
-	/* STOR usually caches the FOBJ raw data in the aux buffer.
-	 * In RA1 however, there's the option to decode the image immediately,
-	 * and store that instead with a standard FOBJ codec header with codec20
-	 * and 320x200 size (I guess for perf reasons in 1993).
-	 * This is indicated by STOR data 0 being 3.
+	/* STOR stores the next FOBJ to the anm_overlay_buf, to be replayed
+	 * later.  The SMUSH engines can store all objects except IACT, but on
+	 * FTCH the data is only passed to fob_decode_render() so we just store
+	 * the FOBJs.
 	 */
-	ctx->rt.to_store = (src[0] == 3 ? 2 : 1);
+	ctx->rt.to_store = 1;
+
+	/* For posterity: in RA1, if src[0] == 3, the engine does the following:
+	 *  - copy fobj header (22 bytes) to anm_overlay_buf
+	 *  - fob_decode_render(anm_overlay_buf+22, src, ..., anm_flags | 8)
+	 *     the 0x08 flag is a shortcut to a codec3 decoder which can only
+	 *     handle 320x200 images but faster than the arbitrary-size one.
+	 *  - change the fobj header to codec20, 320x200
+	 * Probably a good perf improvement on 1992/1993 PC hardware.
+	 */
 }
 
 static void handle_FADE(struct sanctx *ctx, uint32_t size, uint8_t *src)
@@ -4665,6 +4633,9 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t
 	} else if (size == 12) {
 		xoff = (int16_t)be32_to_cpu(ua32(src + 4));
 		yoff = (int16_t)be32_to_cpu(ua32(src + 8));
+		/* RA1 also does anm_flags |= 0x800, but this only disables the
+		 * application of camera shake offsets, which we don't support.
+		 */
 	} else
 		return 0;
 
