@@ -4779,6 +4779,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	}
 
 	/* OK case: all usable bytes of the FRME read, no errors */
+	rt->currframe++;
 	if (ret == 0) {
 		if (rt->version > 2) {
 			ctx->io->queue_video(ctx->io->userctx, rt->vbuf,
@@ -4823,7 +4824,6 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 		if (!(ctx->io->flags & SANDEC_FLAG_NO_AUDIO) && (ctx->msa))
 			aud_mix_tracks(ctx);
 
-		rt->currframe++;
 		rt->subid = 0;
 		rt->have_frame = 0;
 	}
