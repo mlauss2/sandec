@@ -54,9 +54,8 @@ with an SDL3-based player application to demonstrate library use.
 - The following Tags won't be implemented:
   - TEXT: maybe later; this requires a lot of additional infrastructure to fully support, esp. font loading/parsing/fontstore handling (since some texts have commands to switch to another font, ...) which doesn't belong here.
   - LOAD: preload bits of another ANM/SAN, used in RA1/2 for branchpoints (i.e. fly left for easy, stay right for hard).
-  - VMSK: masked blit; it's in the RA2 code, stubbed out in later engines, but never encountered in any SAN file.
+  - VMSK: basically FADE for RA2+; it's in the RA2 code but never encountered in any SAN file.
   - GAME/GAM2: RA1 game progress feedback.
-  - RAW!/SBL /SBL2/Crea: Raw PCM/VOC file support, it's in the (RA1) code but not used in any ANM/SAN file.
-- FADE (RA1) is still a bit bugged.
+  - RAW!/SBL /SBL2/Crea: Raw PCM/VOC file support, it's in the code but not used in any ANM/SAN file.
 
-20260124
+20260315

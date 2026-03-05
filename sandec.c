@@ -2591,6 +2591,7 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 		else if (codec == 31)
 			codec = 32;
 		else if (codec == 44) {
+			/* black background for NUT fonts */
 			fillrect(dst, left, top, fobw, fobh, ctx->rt.bufw, ctx->rt.bufh, 0);
 		}
 	}
@@ -2633,11 +2634,11 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	uint16_t w, h, wr, hr, param2;
 	int16_t left, top, v1skip;
 	uint8_t codec, param;
-	int ret, fsc;
+	int ret;
 
+	/* FOBJ header 14 bytes */
 	codec = src[0];
 	param = src[1];
-
 	left = le16_to_cpu(ua16(src + 2));
 	top  = le16_to_cpu(ua16(src + 4));
 	w = wr = le16_to_cpu(ua16(src + 6));
@@ -2658,9 +2659,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			return 0;
 	}
 
-	/* codecs with their own front buffers */
-	fsc = (codec == 37 || codec == 47 || codec == 48);
-
 	/* SotE: all videos have top==60 to center the video in the
 	 * 640x400 game window.  We don't need that.
 	 */
@@ -2668,27 +2666,28 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		left = top = 0;
 		anm_flags |= ANM_FLAG_IGN_FOB_OFS;
 	}
-	/* most videos which use codec37/47/48 work on the full buffer; except
-	 * for MM, but it has a full-buffer codec3 object as first in a FRME,
-	 * we can skip clearing the main buffer since it gets fully overwritten
-	 * anyway. Therefore this can be applied when any of these codecs are used.
+
+	/* All videos with codec37/47/48 have the FOBJ cover the full frame, except
+	 * for Mortimer, which requires a 2x2 upscale, and MM which embeds the
+	 * smaller c48 object in a full-frame c3 object; but this c3 object is
+	 * first in every FRME, so we can forego the clearing of the dest buffer
+	 * if any of c37/47/48 are used.
 	 */
-	if (fsc) {
+	if (codec == 37 || codec == 47 || codec == 48) {
 		rt->def_anm_flags |= ANM_FLAG_SKIP_CLR_DST;
 	}
 
-	/* decide on a buffer size */
+	/* guess the canvas size */
 	if (!rt->have_vdims) {
 		if (rt->version < 2) {
-			/* RA1: 384x242 internal buffer, 320x200 display */
+			/* RA1: 384x242 source video size, 320x200 display */
 			wr = 384;
 			hr = 242;
 			rt->have_vdims = 1;
 			rt->bufw = wr;
 			rt->bufh = hr;
-			rt->pitch = wr;
 		} else {
-			/* detect common resolutions */
+			/* RA2+: detect commonly used video resolutions */
 			wr = w + left;
 			hr = h + top;
 			if (((wr == 424) && (hr == 260)) ||	/* RA2 */
@@ -2696,21 +2695,22 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			    ((wr == 640) && (hr == 272)) ||	/* SotE */
 			    ((wr == 640) && (hr == 350)) ||	/* MotS */
 			    ((wr == 640) && (hr == 480)) ||	/* COMI/OL/.. */
-			    ((left == 0) && (top == 0) && (codec == 20) && (w > 3) && (h > 3))) {
+			    ((left == 0) && (top == 0) && (codec == 20)
+			     && (w > 3) && (h > 3))) {		/* FT remaster */
 				rt->have_vdims = 1;
 			}
-
-			/* IACT 8/././x>0 is used by c47/48 titles for Palette crossfading */
-			if (codec >= 47)
-				rt->iact8c4x = 1;
-
-			rt->pitch = wr;
 		}
+		rt->pitch = wr;
 		if (!rt->fbsize || (wr > rt->bufw) || (hr > rt->bufh)) {
 			rt->bufw = _max(rt->bufw, wr);
 			rt->bufh = _max(rt->bufh, hr);
 			rt->fbsize = rt->bufw * rt->bufh * 1;
 		}
+	}
+
+	/* IACT 8/././x>0 is used by c47/48 titles for Palette crossfading */
+	if ((rt->version > 1) && (codec >= 47) && (rt->iact8c4x == 0)) {
+		rt->iact8c4x = 1;
 	}
 
 	if (rt->to_store) {
@@ -2719,8 +2719,6 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		if (((size + 4) > size) && ((size + 4) <= rt->fbsize)) {
 			*(uint32_t *)rt->buf3 = size;
 			memcpy(rt->buf3 + 4, src, size);
-		} else {
-			return 26;		/* STOR buffer too small! */
 		}
 	}
 
