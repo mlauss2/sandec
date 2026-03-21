@@ -3067,6 +3067,12 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	if (size < 0x230)
 		return;
 
+	/* source pixel format. 3 seems to indicate 16bpp RGB565; the decoder code
+	 * in tgsmush.dll supports nothing else.
+	 */
+	if (src[0x228] != 3)
+		return;
+
 	dst = (uint16_t *)rt->buf0;
 	db1 = (uint16_t *)rt->buf1;
 	db2 = (uint16_t *)rt->buf2;
