@@ -2025,6 +2025,55 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	}
 }
 
+static void codec44(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
+		    uint16_t h, int16_t xoff, int16_t yoff, uint16_t size,
+		    uint8_t fgcol)
+{
+	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
+	int j, y, pc, skip, ls;
+	uint8_t c, *nsrc;
+
+	if ((size < 1) || ((yoff + h) < 0) || (yoff >= my) || (xoff + w < 0) || (xoff >= mx))
+		return;
+
+	nsrc = src;
+	y = yoff;
+	for (; (size > 2) && (h > 0) && (y < my); y++, h--) {
+		src = nsrc;
+		ls = le16_to_cpu(ua16(src));
+		src += 2;
+		size -= 2;
+		nsrc = src + ls;
+		if (y < 0) {
+			if (ls > size)
+				break;
+			size -= ls;
+			continue;
+		}
+		skip = 1;
+		pc = xoff;
+		while ((size > 1) && (ls > 1) && (pc <= (w + xoff))) {
+			j = le16_to_cpu(ua16(src));
+			src += 2;
+			size -= 2;
+			ls -= 2;
+			if (!skip) {
+				while ((size-- > 0) && (ls-- > 0) && (j-- >= 0)) {
+					c = *src++;
+					if ((pc >= 0) && (pc < mx)) {
+						c = (c == 0xff) ? 0 : (c + fgcol) - 1;
+						*(dst + (y * p) + pc) = c;
+					}
+					pc++;
+				}
+			} else {
+				pc += j;
+			}
+			skip ^= 1;
+		}
+	}
+}
+
 static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t xoff, int16_t yoff, uint16_t size,
 		    uint8_t param)
@@ -2543,7 +2592,7 @@ static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 
 static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 			     uint32_t size, int16_t xoff, int16_t yoff,
-			     uint16_t anm_flags)
+			     uint16_t anm_flags, uint8_t fgc, uint8_t bgc)
 {
 	uint16_t fobw, fobh, param2;
 	uint8_t codec, param;
@@ -2592,7 +2641,7 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 			codec = 32;
 		else if (codec == 44) {
 			/* black background for NUT fonts */
-			fillrect(dst, left, top, fobw, fobh, ctx->rt.bufw, ctx->rt.bufh, 0);
+			fillrect(dst, left, top, fobw, fobh, ctx->rt.bufw, ctx->rt.bufh, bgc);
 		}
 	}
 
@@ -2607,7 +2656,6 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	case 4:
 	case 5:  codec4(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2, codec == 5); break;
 	case 20: codec20(ctx, dst, src, fobw, fobh, xoff, yoff, size, fobw); break;
-	case 44:
 	case 21: codec21(ctx, dst, src, fobw, fobh, xoff, yoff, size, param); break;
 	case 23: codec23(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2); break;
 	case 28: codec1_flipx (ctx, dst, src, fobw, fobh, xoff, yoff, size, 1); break;
@@ -2617,8 +2665,9 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	case 32: codec31(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, codec == 32); break;
 	case 33:
 	case 34: codec33(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2, codec == 34); break;
-	case 45: codec45(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2); break;
 	case 37: ret = codec37(ctx, dst, src, fobw, fobh, xoff, yoff, size, anm_flags); break;
+	case 44: codec44(ctx, dst, src, fobw, fobh, xoff, yoff, size, fgc); break;
+	case 45: codec45(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2); break;
 	case 47: ret = codec47(ctx, dst, src, fobw, fobh, xoff, yoff, size, anm_flags); break;
 	case 48: ret = codec48(ctx, dst, src, fobw, fobh, xoff, yoff, size, anm_flags); break;
 	default: ret = 18; break;
@@ -2725,7 +2774,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	(void)v1skip;
 
 	rt->vbuf = rt->fbuf;
-	ret = fob_decode_render(ctx, rt->fbuf, src, size, xoff, yoff, anm_flags);
+	ret = fob_decode_render(ctx, rt->fbuf, src, size, xoff, yoff, anm_flags, 1, 0);
 
 	if (ret == 0) {
 		rt->have_frame = 1;
@@ -4646,7 +4695,7 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t
 	ret = 0;
 	sz = *(uint32_t *)(vb + 0);
 	if (sz > 0 && sz <= ctx->rt.fbsize) {
-		ret = fob_decode_render(ctx, ctx->rt.fbuf, vb + 4, sz, xoff, yoff, anm_flags);
+		ret = fob_decode_render(ctx, ctx->rt.fbuf, vb + 4, sz, xoff, yoff, anm_flags, 1, 0);
 	}
 	ctx->rt.can_ipol = 0;
 	if (ret == 0)
@@ -4688,7 +4737,7 @@ static void handle_GOST(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_
 		return;
 
 	fob_decode_render(ctx, ctx->rt.fbuf, ctx->rt.last_fobj, ctx->rt.last_fobj_size,
-			  xoff, yoff, anm_flags);
+			  xoff, yoff, anm_flags, 1, 0);
 }
 
 /* allocate memory for a full FRME */
