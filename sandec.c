@@ -4209,18 +4209,21 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		p[i] = le16_to_cpu(*(uint16_t*)(src + (i<<1)));
 
 	if (p[0] == 8 && p[1] == 46) {
-		if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
-			return;
 
 		if (p[3] == 0) {
 			/* subchunkless scaled IACT audio codec47/48 videos,
 			 * LECSMUSH.DLL 10001a50
 			 */
+			if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
+				return;
 			iact_audio_scaled(ctx, size - 18, src + 18);
 		} else {
 
-			if (ctx->rt.iactimus) {
-				ret = iact_audio_imuse(ctx->msa, size - 18, src + 18, p[4], p[3]);
+			if ((ctx->rt.iact8c4x == 0) && ctx->rt.iactimus) {
+				if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
+					ret = 1;
+				else
+					ret = iact_audio_imuse(ctx->msa, size - 18, src + 18, p[4], p[3]);
 				if (ret != 0)
 					ctx->rt.iactimus = 0;
 				else
