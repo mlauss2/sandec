@@ -4683,17 +4683,18 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t
 	uint32_t sz;
 	int ret;
 
-	if (size == 6) {
+	if ((size == 6) && (ctx->rt.version == 2)) {
 		xoff = le16_to_cpu(*(int16_t *)(src + 2));
 		yoff = le16_to_cpu(*(int16_t *)(src + 4));
-	} else if (size == 12) {
+	} else if ((size == 12) && (ctx->rt.version < 2)) {
 		xoff = (int16_t)be32_to_cpu(ua32(src + 4));
 		yoff = (int16_t)be32_to_cpu(ua32(src + 8));
 		/* RA1 also does anm_flags |= 0x800, but this only disables the
 		 * application of camera shake offsets, which we don't support.
 		 */
-	} else
-		return 0;
+	} else {
+		xoff = yoff = 0;
+	}
 
 	ret = 0;
 	sz = *(uint32_t *)(vb + 0);
