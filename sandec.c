@@ -273,7 +273,7 @@ struct sanctx {
 	struct sanmsa *msa;	/* 8 ATRK infra				*/
 	int errdone;		/* latest error status */
 	uint8_t *adstbuf1;	/* 8 audio buffer 1			*/
-		
+
 	/* codec47 static data */
 	int8_t c47_glyph4x4[NGLYPHS][16];
 	int8_t c47_glyph8x8[NGLYPHS][64];
@@ -969,7 +969,7 @@ static void fillrect(uint8_t *dst, int16_t xoff, int16_t yoff, uint16_t width,
 		height += yoff;
 		yoff = 0;
 	}
-	
+
 	if ((int32_t)yoff + height > maxheight) {
 		if (yoff >= maxheight)
 			return;
@@ -990,7 +990,7 @@ static void fillrect(uint8_t *dst, int16_t xoff, int16_t yoff, uint16_t width,
 	}
 
 	uint8_t *p = dst + ((int32_t)yoff * maxwidth) + xoff;
-	
+
 	while (height-- > 0) {
 		memset(p, color, width);
 		p += maxwidth;
@@ -2886,7 +2886,7 @@ static void bl16_comp1(uint16_t *dst, uint8_t *src, const uint16_t w, const uint
 			c1 = le16_to_cpu(*(uint16_t *)src);
 			src += 2;
 			*(uint16_t *)(dst1 + 0) = c1;	/* first 2 pixels in row */
-			*(uint16_t *)(dst1 + 2) = c1;			
+			*(uint16_t *)(dst1 + 2) = c1;
 			dst2 = dst1 + 4;		/* 2 16bit pixels */
 			if (w - 2 > 0) {
 				hw = (w - 1) >> 1;
@@ -3902,7 +3902,7 @@ static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
 static void atrk_resample(struct sanatrk *atrk, int16_t *destbuf, uint32_t len)
 {
 	uint32_t bytes;
-	
+
 	bytes = atrk->resample(atrk, destbuf, len);
 	atrk->state = STATE_MIXED;
 
@@ -4814,7 +4814,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 			case BL16: handle_BL16(ctx, csz, src); break;
 			default:   ret = 0;
 			}
-		} else {	
+		} else {
 			switch (cid) {
 			case NPAL: handle_NPAL(ctx, csz, src); break;
 			case FOBJ: ret = handle_FOBJ(ctx, csz, src, 0, 0, anm_flags); break;
@@ -4933,7 +4933,7 @@ static int sandec_alloc_msa(struct sanmsa **msa_out, uint8_t num_trks,
 	mem = sizeof(struct sanmsa);
 	/* channels buffer memories */
 	mem += num_trks * ATRK_DATSZ;
-	
+
 	/* resampling/mixing buffer */
 	grsb = 4 * audminframes;
 	mem += grsb;
@@ -5128,7 +5128,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	if (sandec_alloc_msa(&ctx->msa, ATRK_MAX, audminframes))
 		return 14;
 	ctx->msa->samplerate = srate;
-	
+
 	return 0;
 }
 
