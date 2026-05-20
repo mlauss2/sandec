@@ -3,6 +3,9 @@ INC=-I/usr/include/SDL3
 LIBS=-lSDL3
 CC=cc
 
+# GCC PR120120: with this gcc generates *much* faster code for codec47/bl16
+CFLAGS+=-fno-optimize-sibling-calls
+
 .PHONY: clean all zlib
 
 all: sanplay
