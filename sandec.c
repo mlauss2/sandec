@@ -787,16 +787,10 @@ static void c33_34_tilegen(uint8_t *dst, int8_t param1)
 static void c4_5_param2(struct sanctx *ctx, uint8_t *src, uint16_t cnt,
 		       uint8_t clr)
 {
-	uint8_t c, *dst;
-	uint32_t loop;
+	uint8_t c, *dst = (uint8_t *)&(ctx->c4tbl[1]);
+	uint32_t loop = cnt * 8;
 
-	/* ASSALT13.EXE 11bd0 - 11c16 */
-	loop = cnt << 2;
-	dst = (uint8_t *)&(ctx->c4tbl[1]);
 	while (loop--) {
-		c = *src++;			// lodsb [*esi into al] | xor ah,ah vor schleife
-		*dst++ = (c >> 4) + clr;	// ror ax, 4; add al, bl; stosb
-		*dst++ = (c & 0xf) + clr;	// rol ax, 4; and ax, 0xf, add al, bl; stosb
 		c = *src++;
 		*dst++ = (c >> 4) + clr;
 		*dst++ = (c & 0xf) + clr;
