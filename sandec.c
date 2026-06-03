@@ -1860,72 +1860,75 @@ static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 		    int16_t xoff, int16_t yoff, uint16_t size, uint8_t param,
 		    uint16_t param2)
 {
-	uint8_t *tbl1 = ctx->c45tbl1, *tbl2 = ctx->c45tbl2, *dst;
+	uint8_t *pal = ctx->c45tbl1, *rgb2pal = ctx->c45tbl2, *dst;
 	const uint16_t pitch = ctx->rt.pitch;
-	unsigned int t1, c1, c2, w1, w2, w3;
-	int i, b1, b2, xd;
+	unsigned int seq, c1, c2, r, g, b;
+	int i, runlen;
 
-	/* RA2 32b00 */
+	/* The main purpose of this codec is to slightly blur the outline of the "opening
+	 *  aperture" effect in the LEVxx/xxRETRY.SAN files (i.e. antialiasing).
+	 *
+	 * This seems to be an early version of the interpolation table system of codec47/48:
+	 * It comes with its own palette, and the indidividual r/g/b components of the four
+	 *  surrounding pixels need to be summed up and combined into rgb555 to create an
+	 *  index into the 15-bit "average color" rgb table to get the final palette value
+	 *  of the center pixel.
+	 *
+	 * RA2MEM 001f8b00-001f8bb8 (dispatcher), 002183ea-00218603 (main worker).
+	 */
 	if ((size < 6) || (src[4] != 1))
 		return;
 
-	t1 = *(uint16_t *)(src + 2);
-	if (t1 == 0) {
-		if (size < 0x306)
+	seq = *(uint16_t *)(src + 2);
+	src += 6;
+	size -= 6;
+	if (seq == 0) {
+		if (size < 0x300)
 			return;
-		memcpy(tbl1, src + 6, 0x300);
-		src += 0x306;
-		size -= 0x306;
-		/* if you follow the assembly (32b49 - 32b6d), EAX is 1 when the
-		 * first store to tbl2 is done.  However this is of course wrong and
-		 * results in wrong colors.
-		 */
+		memcpy(pal, src, 0x300);
+		src += 0x300;
+		size -= 0x300;
 		i = 0;
 		while ((size > 1) && (i < 0x8000)) {
-			b2 = *src++;
-			if ((b2 + i) > 0x8000)
-				b2 = 0x8000 - i;
-			memset(tbl2 + i, *src++, b2);
-			i += b2;
+			runlen = *src++;
+			if ((runlen + i) > 0x8000)
+				runlen = 0x8000 - i;
+			memset(rgb2pal + i, *src++, runlen);
+			i += runlen;
 			size -= 2;
 		}
-	} else {
-		src += 6;
-		size -= 6;
 	}
+
 	if (!dst_in)
 		return;
 
 	while (size > 3) {
-		xd = le16_to_cpu(*(int16_t *)(src + 0));
-		src += 2;		// 52461
-		xoff += xd;		// 52467
-		b1 = *src++;		// 5246d - 5246f
-		yoff += b1;		// 52470
-		b2 = *src++;		// 486-488  EBP
+		xoff += le16_to_cpu(*(int16_t *)(src + 0));
+		src += 2;
+		yoff += *src++;
+		runlen = *src++;
+		size -= 4;
 		do {
 			if (xoff > 0 && yoff > 0 && xoff < (ctx->rt.bufw - 1)) {
 				if (yoff >= (ctx->rt.bufh - 1))
 					return;
 
 				dst = dst_in + xoff + (yoff * pitch);
-				c1 = *(dst - 1) * 3; /* 0 - 765 */
+				c1 = *(dst - 1) * 3;
 				c2 = *(dst + 1) * 3;
-				w1 = *(tbl1 + c1 + 0) + *(tbl1 + c2 + 0);
-				w2 = *(tbl1 + c1 + 1) + *(tbl1 + c2 + 1);
-				w3 = *(tbl1 + c1 + 2) + *(tbl1 + c2 + 2);
+				r =  *(pal + c1 + 0) + *(pal + c2 + 0);
+				g =  *(pal + c1 + 1) + *(pal + c2 + 1);
+				b =  *(pal + c1 + 2) + *(pal + c2 + 2);
 				c1 = *(dst - pitch) * 3;
 				c2 = *(dst + pitch) * 3;
-				w1 += *(tbl1 + c1 + 0) + *(tbl1 + c2 + 0);
-				w2 += *(tbl1 + c1 + 1) + *(tbl1 + c2 + 1);
-				w3 += *(tbl1 + c1 + 2) + *(tbl1 + c2 + 2);
-				*dst = *(tbl2 + ((((w1 << 5) & 0x7c00) + (w2 & 0x3e0) + (w3 >> 5)) & 0x7fff));
+				r += *(pal + c1 + 0) + *(pal + c2 + 0);
+				g += *(pal + c1 + 1) + *(pal + c2 + 1);
+				b += *(pal + c1 + 2) + *(pal + c2 + 2);
+				*dst = *(rgb2pal + ((((r << 5) & 0x7c00) + (g & 0x3e0) + (b >> 5)) & 0x7fff));
 			}
 			xoff++;
-			b2--;
-		} while (b2 >= 0);
+		} while (runlen-- > 0);
 		xoff--;
-		size -= 4;
 	}
 }
 
