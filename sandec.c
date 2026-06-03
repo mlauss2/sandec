@@ -2585,6 +2585,83 @@ static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	}
 }
 
+static void codec31_flipx(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
+			  uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
+			  uint8_t p1, int opaque)
+{
+	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
+	uint8_t code, col;
+	uint16_t rlen, dlen;
+	int j, x, y;
+
+	if (((yoff + h) < 0) || (yoff >= my) || (xoff + w < 0) || (xoff >= mx))
+		return;
+
+	if (yoff < 0) {
+		y = -yoff;
+		while (y-- && size > 1) {
+			dlen = le16_to_cpu(ua16(src));
+			size -= 2;
+			if (size < dlen)
+				return;
+			size -= dlen;
+			src += 2 + dlen;
+		}
+		h += yoff;
+		yoff = 0;
+	}
+
+	y = yoff;
+	for (; (size > 1) && (h > 0) && (y < my); h--, y++) {
+		dlen = le16_to_cpu(ua16(src));
+		src += 2;
+		size -= 2;
+		x = xoff + w - 1;
+		while (dlen && size) {
+			code = *src++;
+			dlen--;
+			size--;
+			rlen = (code >> 1) + 1;
+
+			if (code & 1) {
+				if (size < 1)
+					return;
+				col = *src++;
+				dlen--;
+				size--;
+
+				for (j = 0; j < rlen; j++) {
+					uint8_t c1 = col & 0xf;
+					if ((c1 || opaque) && (x >= 0) && (x < mx))
+						*(dst + y * p + x) = p1 + c1;
+					x--;
+					c1 = col >> 4;
+					if ((c1 || opaque) && (x >= 0) && (x < mx))
+						*(dst + y * p + x) = p1 + c1;
+					x--;
+				}
+			} else {
+				if (size < rlen)
+					rlen = size;
+				for (j = 0; (j < rlen) && (size > 0); j++) {
+					col = *src++;
+
+					uint8_t c1 = col & 0xf;
+					if ((c1 || opaque) && (x >= 0) && (x < mx))
+						*(dst + y * p + x) = p1 + c1;
+					x--;
+					c1 = col >> 4;
+					if ((c1 || opaque) && (x >= 0) && (x < mx))
+						*(dst + y * p + x) = p1 + c1;
+					x--;
+				}
+				dlen -= rlen;
+				size -= rlen;
+			}
+		}
+	}
+}
+
 /******************************************************************************/
 
 static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
@@ -2627,6 +2704,9 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 		case ANM_FLAG_FLIPY: codec = 29; break;
 		default: codec = 30; break;
 		}
+	} else if (((codec == 31 || codec == 32))
+		   && (anm_flags & (ANM_FLAG_FLIPX | ANM_FLAG_FLIPY))) {
+			codec += 4;	/* 35/36 for flipped */
 	}
 
 	if (anm_flags & ANM_FLAG_CODEC_OPAQUE) {
@@ -2662,6 +2742,8 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	case 32: codec31(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, codec == 32); break;
 	case 33:
 	case 34: codec33(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2, codec == 34); break;
+	case 35:
+	case 36: codec31_flipx(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, codec == 36); break;
 	case 37: ret = codec37(ctx, dst, src, fobw, fobh, xoff, yoff, size, anm_flags); break;
 	case 44: codec44(ctx, dst, src, fobw, fobh, xoff, yoff, size, fgc); break;
 	case 45: codec45(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2); break;
