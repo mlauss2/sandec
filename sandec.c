@@ -256,8 +256,8 @@ struct sanrt {
 	uint8_t  have_itable:1;	/* 1 have c47/48 interpolation table    */
 	uint8_t  can_ipol:1;	/* 1 do an interpolation                */
 	uint8_t  have_ipframe:1;/* 1 we have an interpolated frame      */
-	uint8_t  iactimus:1;	/* 1 is TheDig/IACT 8/0/0/x>0 is audio	*/
 	uint8_t  iact8c4x:1;	/* 1 IACT 8 for codec47/48 titles	*/
+	uint8_t  iactimus:2;	/* 1 is TheDig/IACT 8/0/0/x>0 is audio	*/
 	uint8_t  iactpal1;	/* 1 number of crossfade steps		*/
 	uint8_t  iactpal2;	/* 1 stepsize				*/
 	uint16_t iactpalfrme;	/* 2 curre FRME num at iactpal cmd	*/
@@ -3886,6 +3886,7 @@ static void atrk_read_pcmsrc(struct sanatrk *atrk, uint32_t size, uint8_t *src)
 		memcpy(atrk->data + 0, src + toend, size - toend);
 	}
 	atrk->datacnt += size;
+	atrk->dataleft -= size;
 	atrk->wrptr += size;
 	atrk->wrptr &= ATRK_DATMASK;
 	if (atrk->state > STATE_HEADER)
@@ -4184,7 +4185,6 @@ static int iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 	if (size > atrk->dataleft)
 		size = atrk->dataleft;
 	atrk_read_pcmsrc(atrk, size, src);
-	atrk->dataleft -= size;
 	if ((atrk->state < STATE_MIXABLE) &&
 	    ((atrk->dataleft < 1) || (atrk->dstfavail >= msa->audminframes))) {
 		atrk->state = STATE_MIXABLE;
@@ -4298,14 +4298,15 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			iact_audio_scaled(ctx, size - 18, src + 18);
 		} else {
 
-			if ((ctx->rt.iact8c4x == 0) && ctx->rt.iactimus) {
+			if ((ctx->rt.iact8c4x == 0) && (ctx->rt.iactimus > 0)) {
 				if (ctx->io->flags & SANDEC_FLAG_NO_AUDIO)
 					ret = 1;
 				else
 					ret = iact_audio_imuse(ctx->msa, size - 18, src + 18, p[4], p[3]);
-				if (ret != 0)
-					ctx->rt.iactimus = 0;
-				else
+
+				if (ctx->rt.iactimus == 2) {
+					ctx->rt.iactimus = ret ? 0 : 1;
+				} else if (ctx->rt.iactimus == 1)
 					return;
 			}
 
@@ -5176,7 +5177,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		 * we initially assume imuse, since it can tell us when it is
 		 * definitely not it.  The Dig uses IACT for its iMUSE audio only.
 		 */
-		rt->iactimus = 1;
+		rt->iactimus = 2;
 	} else {
 		fps = 15;			/* ANIMv1 default */
 		srate = 11025;			/* ANIMv1 default */
