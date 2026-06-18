@@ -126,9 +126,10 @@ static inline uint32_t ua32(uint8_t *p)
 #define GLYPH_COORD_VECT_SIZE 16
 #define NGLYPHS 256
 
-/* maximum volume. */
-#define ATRK_VOL_MAX	255
+static const int ATRK_DEST_RATE = 22050;
 
+/* maximum volume. */
+static const int ATRK_VOL_MAX = 127;
 
 /* 1M for Dig */
 #define _ATRK_DATSZ	(1 << 20)
@@ -3318,16 +3319,16 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 static void atrk_setdamp(struct sanmsa *msa, uint16_t dampmin, uint16_t dampmax,
 			 uint16_t diprate, uint16_t riserate)
 {
-	if (dampmax > 256)
-		dampmax = 256;		/* FT default */
+	if (dampmax > 127)
+		dampmax = 127;
 	if (dampmin > dampmax)
-		dampmin = 114;
+		dampmin = 96;
 	if (dampmax < dampmin)
-		dampmax = 256;
-	if (riserate > 256 || riserate < 1)
+		dampmax = 127;
+	if (riserate > 127 || riserate < 1)
 		riserate = 32;
-	if (diprate > 256 || diprate < 1)
-		diprate = 16;
+	if (diprate > 127 || diprate < 1)
+		diprate = 24;
 
 	msa->sou_vol_damp = dampmax;
 	msa->sou_damp_min = dampmin;
@@ -3342,7 +3343,7 @@ static void atrk_init_volumes(struct sanmsa *msa)
 	msa->sou_vol_voice = 127;
 	msa->sou_vol_music = 127;
 	msa->sou_vol_global = 127;
-	atrk_setdamp(msa, 114, 256, 16, 48);
+	atrk_setdamp(msa, 114, 127, 24, 32);
 }
 
 static uint32_t atrk_bytes_to_dstframes(struct sanatrk *atrk, uint32_t avail)
@@ -3557,7 +3558,7 @@ static inline void atrk_reset(struct sanatrk *atrk)
 static inline void atrk_set_srate(struct sanatrk *atrk, uint32_t rate)
 {
 	atrk->srate = rate;
-	atrk->src_cnvrate = (rate << 16) / (22050);
+	atrk->src_cnvrate = (rate << 16) / ATRK_DEST_RATE;
 }
 
 static void atrk_set_playpos(struct sanatrk *atrk, uint32_t ofs, uint32_t len)
@@ -3938,10 +3939,10 @@ static void aud_mixs16(uint8_t *ds1, uint8_t *s1, uint8_t *s2, int bytes,
 			src2 += 2;
 
 		/* apply volume */
-		int32_t d1_Ls = (raw1_L * v1l) >> 8;
-		int32_t d1_Rs = (raw1_R * v1r) >> 8;
-		int32_t d2_Ls = (raw2_L * v2l) >> 8;
-		int32_t d2_Rs = (raw2_R * v2r) >> 8;
+		int32_t d1_Ls = (raw1_L * v1l) >> 7;
+		int32_t d1_Rs = (raw1_R * v1r) >> 7;
+		int32_t d2_Ls = (raw2_L * v2l) >> 7;
+		int32_t d2_Rs = (raw2_R * v2r) >> 7;
 
 		/* s16 to u16 */
 		uint32_t d1_L = d1_Ls + 32768;
@@ -4035,7 +4036,7 @@ static int aud_mix_tracks(struct sanctx *ctx)
 			}
 			vol = (vol * msa->sou_vol_global) >> 7;
 			if (m == SAUD_FLAG_TRK_MUSIC)
-				vol = ((vol * msa->sou_vol_damp) >> 8) & 0xff;
+				vol = ((vol * msa->sou_vol_damp) >> 7) & 0xff;
 
 			atrk_resample(atrk, trkobuf, minlen1);
 			aud_mixs16(dstptr, (uint8_t *)trkobuf, dstptr,
@@ -5192,7 +5193,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	/* minimum number of samples to generate when resampling a stream to the
 	 * output rate to supply enough data for the duration of a single frame.
 	 */
-	audminframes = ((22050 / fps) + 1) & ~1U;
+	audminframes = ((ATRK_DEST_RATE / fps) + 1) & ~1U;
 
 	/* for Full Throttle: the incoming audio data rate is not not enough
 	 * to sustain click-free playback at the requested 10fps.  It starts
@@ -5202,7 +5203,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	 */
 	if (fps < 11) {
 		rt->framedur = 10000000 / 105;
-		audminframes = (((22050 * 10) / 105) + 1) & ~1U;
+		audminframes = (((ATRK_DEST_RATE * 10) / 105) + 1) & ~1U;
 	}
 
 	if (sandec_alloc_msa(&ctx->msa, ATRK_MAX, audminframes))
@@ -5291,7 +5292,7 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 		case WAVE:
 			srate  = le32_to_cpu(ua32(src + 0));
 			achans = le32_to_cpu(ua32(src + 4));
-			if (srate != 22050)
+			if (srate != ATRK_DEST_RATE)
 				ret = 57;
 			if ((achans < 1) || (achans > 2))
 				ret = 58;
@@ -5463,7 +5464,7 @@ int sandec_open(void *sanctx, struct sanio *io)
 		if ((csz < 8) || (csz > (1 << 20))) {
 			goto out;
 		} else {
-			if (sandec_alloc_msa(&ctx->msa, 1, 22050))
+			if (sandec_alloc_msa(&ctx->msa, 1, ATRK_DEST_RATE))
 				goto out;
 			if (csz > ATRK_DATSZ)
 				goto out;
