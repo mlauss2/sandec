@@ -28,14 +28,19 @@ struct playpriv {
 	IOHDL fhdl;
 	SDL_Renderer *ren;
 	SDL_Window *win;
-	SDL_Surface *lastimg;
-	SDL_Surface *newimg;
+
+	SDL_Surface *surf;
+	SDL_Texture *tex;
+	int have_newimg;
+
 	SDL_AudioStream *as;
 
 	uint16_t pxw;
 	uint16_t pxh;
 	uint16_t winw;
 	uint16_t winh;
+	uint16_t texw;
+	uint16_t texh;
 
 	uint32_t vbufsize;
 	uint64_t next_disp_us;
@@ -73,16 +78,16 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 {
 	struct playpriv *p = (struct playpriv *)ctx;
 	SDL_Palette *pal;
-	SDL_Surface *sur;
-	int ret;
+	int i, linesz;
 
 	if (p->err || p->sm == 2)
 		return;
 
-	if (p->newimg) {
+	if (p->have_newimg) {
 		p->err = 1105;
 		return;
 	}
+
 	if ((w == 384) && (h == 242) && (p->animv1full == 0)) {
 		p->pxw = 320;
 		p->pxh = 200;
@@ -91,29 +96,38 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 		p->pxh = h;
 	}
 
-	sur = SDL_CreateSurfaceFrom(p->pxw, p->pxh, imgpal ? SDL_PIXELFORMAT_INDEX8 : SDL_PIXELFORMAT_RGB565,
-				    vdata, pitch);
-	if (!sur) {
-		p->err = 1106;
-		return;
+	if (!p->surf || p->surf->w != p->pxw || p->surf->h != p->pxh) {
+		if (p->surf)
+			SDL_DestroySurface(p->surf);
+		p->surf = SDL_CreateSurface(p->pxw, p->pxh, imgpal ? SDL_PIXELFORMAT_INDEX8 : SDL_PIXELFORMAT_RGB565);
+		if (!p->surf) {
+			p->err = 1106;
+			return;
+		}
+	}
+
+	if (p->surf->pitch == pitch) {
+		memcpy(p->surf->pixels, vdata, (size_t)p->pxh * pitch);
+	} else {
+		linesz = p->pxw * (imgpal ? 1 : 2);
+		for (i = 0; i < p->pxh; i++) {
+			memcpy((uint8_t*)p->surf->pixels + (i * p->surf->pitch), vdata + (i * pitch), linesz);
+		}
 	}
 
 	if (imgpal) {
 		pal = SDL_CreatePalette(256);
-		if (!pal) {
-			SDL_DestroySurface(sur);
+		if (pal) {
+			memcpy(pal->colors, imgpal, 256 * sizeof(uint32_t));
+			SDL_SetSurfacePalette(p->surf, pal);
+			SDL_DestroyPalette(pal);
+		} else {
 			p->err = 1107;
 			return;
 		}
-		memcpy(pal->colors, imgpal, 256 * sizeof(uint32_t));
-		ret = SDL_SetSurfacePalette(sur, pal);
-		if (!ret) {
-			SDL_DestroySurface(sur);
-			p->err = 1108;
-			return;
-		}
 	}
-	p->newimg = sur;
+
+	p->have_newimg = 1;
 	p->vbufsize = size;
 	p->subid = subid;
 	p->err = 0;
@@ -123,7 +137,6 @@ static void queue_video(void *ctx, unsigned char *vdata, uint32_t size,
 /* render the current surface to a window */
 static int render_frame(struct playpriv *p)
 {
-	SDL_Texture *tex;
 	int ret, nw, nh;
 
 	if (p->err)
@@ -190,27 +203,50 @@ static int render_frame(struct playpriv *p)
 		}
 	}
 
-	if (!p->ren || !p->lastimg) {
+	if (!p->ren) {
 		p->err = 1102;
 		goto out;
 	}
 
-	tex = SDL_CreateTextureFromSurface(p->ren, p->lastimg);
-	if (!tex) {
-		p->err = 1103;
+	if (p->have_newimg && p->surf) {
+		if (!p->tex || p->texw != p->pxw || p->texh != p->pxh) {
+			if (p->tex) SDL_DestroyTexture(p->tex);
+
+			p->tex = SDL_CreateTexture(p->ren, p->surf->format,
+						   SDL_TEXTUREACCESS_STREAMING,
+						   p->pxw, p->pxh);
+			if (!p->tex) {
+				p->err = 1103;
+				goto out;
+			}
+			p->texw = p->pxw;
+			p->texh = p->pxh;
+		}
+
+		SDL_UpdateTexture(p->tex, NULL, p->surf->pixels, p->surf->pitch);
+		if (p->surf->format == SDL_PIXELFORMAT_INDEX8) {
+			SDL_SetTexturePalette(p->tex, SDL_GetSurfacePalette(p->surf));
+		}
+
+		p->have_newimg = 0;
+	}
+
+	if (!p->tex) {
+		p->err = 1108;
 		goto out;
 	}
 
-	SDL_SetTextureScaleMode(tex, smodes[p->texsmooth]);
-	ret = SDL_RenderTexture(p->ren, tex, NULL, NULL);
-	SDL_DestroyTexture(tex);
+	SDL_SetTextureScaleMode(p->tex, smodes[p->texsmooth]);
+	ret = SDL_RenderTexture(p->ren, p->tex, NULL, NULL);
+
 	if (!ret) {
 		p->err = 1104;
 		goto out;
 	}
 	SDL_RenderPresent(p->ren);
+
 	if (p->autopause) {
-		p->paused = 1;	
+		p->paused = 1;
 		p->ptick = SDL_GetTicks();
 	}
 	if (p->as && (p->paused == 0))
@@ -223,24 +259,18 @@ out:
 static int do_img_flip(struct playpriv *p)
 {
 	/* frame timer expired but no new image was posted */
-	if (!p->newimg)
+	if (!p->have_newimg)
 		return 0;
 
-	if (p->lastimg) {
-		SDL_DestroySurface(p->lastimg);
-		p->lastimg = NULL;
-	}
-	p->lastimg = p->newimg;
-	p->newimg = NULL;
 	return render_frame(p);
 }
 
 static void exit_sdl(struct playpriv *p)
 {
-	if (p->lastimg)
-		SDL_DestroySurface(p->lastimg);
-	if (p->newimg)
-		SDL_DestroySurface(p->newimg);
+	if (p->surf)
+		SDL_DestroySurface(p->surf);
+	if (p->tex)
+		SDL_DestroyTexture(p->tex);
 	if (p->as)
 		SDL_DestroyAudioStream(p->as);
 	if (p->ren)
