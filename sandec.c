@@ -176,7 +176,6 @@ struct sanatrk {
 	uint8_t *data;		/* input data buffer			*/
 	uint32_t rdptr;		/* read pointer				*/
 	uint32_t wrptr;		/* write pointer			*/
-	int32_t datacnt;	/* currently held data in buffer	*/
 	uint32_t flags;		/* source format/type flags		*/
 	enum atrk_state state;	/* Track state				*/
 	atrk_rsp_fn resample;	/* destformat conversion function	*/
@@ -3373,9 +3372,16 @@ static uint32_t atrk_bytes_to_dstframes(struct sanatrk *atrk, uint32_t avail)
 	return avail;
 }
 
+static inline uint32_t atrk_bufbytes(struct sanatrk *atrk)
+{
+	if (atrk->rdptr <= atrk->wrptr)
+		return atrk->wrptr - atrk->rdptr;
+	return atrk->wrptr + ATRK_DATSZ - atrk->rdptr;
+}
+
 static void atrk_update_dstframes_avail(struct sanatrk *atrk)
 {
-	atrk->dstfavail = atrk_bytes_to_dstframes(atrk, atrk->datacnt);
+	atrk->dstfavail = atrk_bytes_to_dstframes(atrk, atrk_bufbytes(atrk));
 	atrk->dstpavail = atrk_bytes_to_dstframes(atrk, atrk->playlen);
 }
 
@@ -3566,7 +3572,7 @@ static void atrk_set_playpos(struct sanatrk *atrk, uint32_t ofs, uint32_t len)
 	atrk->rdptr = ofs & ATRK_DATMASK;
 	atrk->playlen = len;
 	atrk->src_accum = 0;
-	atrk->dstpavail = atrk_bytes_to_dstframes(atrk, atrk->playlen);
+	atrk_update_dstframes_avail(atrk);
 	if (atrk->state == STATE_MIXED)
 		atrk->state = STATE_NEWDATA;
 }
@@ -3886,7 +3892,6 @@ static void atrk_read_pcmsrc(struct sanatrk *atrk, uint32_t size, uint8_t *src)
 		memcpy(atrk->data + atrk->wrptr, src, toend);
 		memcpy(atrk->data + 0, src + toend, size - toend);
 	}
-	atrk->datacnt += size;
 	atrk->dataleft -= size;
 	atrk->wrptr += size;
 	atrk->wrptr &= ATRK_DATMASK;
@@ -4334,7 +4339,7 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 static void handle_SAUD(struct sanatrk *atrk, const uint16_t rate)
 {
-	uint32_t cid, csz, size = atrk->datacnt;
+	uint32_t cid, csz, size = atrk_bufbytes(atrk);
 	uint8_t *src = atrk->data;
 
 	if ((atrk->state > STATE_HEADER) || (size < 16))
@@ -4376,7 +4381,6 @@ static void handle_SAUD(struct sanatrk *atrk, const uint16_t rate)
 	/* Move the remaining PCM data to the start of the buffer */
 	size = (size > csz) ? csz : size;
 	memmove(atrk->data, src, size);
-	atrk->datacnt = size;
 	atrk->wrptr = size;
 	atrk->dataleft = csz - size;
 
@@ -5477,7 +5481,6 @@ int sandec_open(void *sanctx, struct sanio *io)
 			atrk->vol = ATRK_VOL_MAX;
 			atrk->pan = 0;
 			atrk->wrptr = csz + 8;
-			atrk->datacnt = csz + 8;
 			atrk->trkid = 1;
 			atrk->maxidx = 1;
 			ctx->msa->samplerate = 11025;
