@@ -21,6 +21,8 @@ with an SDL3-based player application to demonstrate library use.
   - Indiana Jones and the Infernal Machine
   - Grim Fandango
   - Force Commander (need Zlib or unpack the .znm files)
+  - Mortimer and the Riddles of the Medallion
+    - need to use "-m" switch in the player. See notes below.
 - player keyboard controls:
   - space to pause/unpause
   - f     to toggle fullscreen/windowed
@@ -34,23 +36,24 @@ with an SDL3-based player application to demonstrate library use.
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
-# What does not work:
-- Mortimer and the Riddles of the Medallion
-  - Most videos play, but issues with transparency and objects with only half width/height.
-
 # Build:
 - Have SDL3
 - Zlib (optional)
 - run "make" or "make zlib" (to support the .znm files from Force Commander without unpacking)
 
 # Use:
-- sanplay [-f] [-v] [-s] [-[0..3]] <file1.san/anm> [file2.san] [file3.san]...
+- sanplay [-f] [-v] [-s] [-[0..3]] [-m] <file1.san/anm> [file2.san] [file3.san]...
   - -f: start fullscreen
   - -v: be verbose
   - -s: no audio (silent)
   - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
+  - -m: Mortimer mode, use for Video of "Mortimer and the Riddles of the Medallion".
 
 # Notes
+- Mortimer and the Riddles of the Medallion
+  - Mortimer selectively uses upscaling on codec3/23/37 objects and also (mis-)uses codec3 (opaque) as 2x2-variant of codec1 (transparent). This cannot be reliably autodetected, so the decoder implements a "Mortimer-Mode", selected via "-m" player commandline switch.
+  - Decoding artifacts in the codec37 videos remain.
+  - Video/Audio are all possible combinations lumped together, filtered via (unsupported) SKIP chunks.
 - The following Tags won't be implemented:
   - TEXT: maybe later; this requires a lot of additional infrastructure to fully support, esp. font loading/parsing/fontstore handling (since some texts have commands to switch to another font, ...) which doesn't belong here.
   - LOAD: preload bits of another ANM/SAN, used in RA1/2 for branchpoints (i.e. fly left for easy, stay right for hard).
@@ -58,4 +61,4 @@ with an SDL3-based player application to demonstrate library use.
   - GAME/GAM2: RA1 game progress feedback.
   - RAW!/SBL /SBL2/Crea: Raw PCM/VOC file support, it's in the code but not used in any ANM/SAN file.
 
-20260315
+20260729

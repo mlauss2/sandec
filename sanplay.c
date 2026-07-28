@@ -312,7 +312,7 @@ static int sio_read(void *ctx, void *dst, uint32_t size)
 int main(int a, char **argv)
 {
 	int ret, speedmode, fc, running, parserdone, i, verbose;
-	int sdl_inited;
+	int sdl_inited, mortimermode;
 	uint64_t t1, t2, ren, dec;
 	struct playpriv pp;
 	struct sanio sio;
@@ -323,6 +323,7 @@ int main(int a, char **argv)
 
 	verbose = 0;
 	sdl_inited = 0;
+	mortimermode = 0;
 
 	if (a < 2) {
 		printf("usage: %s [-f] [-v] [-s] [-[0..3]] <file.san/.anm> [file2.san] [file3.san] ...\n", argv[0]);
@@ -361,6 +362,7 @@ int main(int a, char **argv)
 				case 'f': pp.nextmult = -1; break;
 				case 'v': verbose++; break;
 				case 's': sio.flags |= SANDEC_FLAG_NO_AUDIO; break;
+				case 'm': mortimermode = 1; break;
 				}
 				c++;
 			}
@@ -400,6 +402,14 @@ int main(int a, char **argv)
 			continue;
 		}
 
+		if (mortimermode) {
+			ret = sandec_set_params(sanctx, 640, 480, 1);
+			if (ret) {
+				if (verbose) {
+					printf("Mortimer params failed: %d\n", ret);
+				}
+			}
+		}
 		fc = sandec_get_framecount(sanctx);
 		pp.err = 0;
 		running = 1;
@@ -522,7 +532,7 @@ err:
 					}
 
 					if (running && verbose) {
-						printf("\33[2K\r%4u/%4u  %lu ms/%lu ms I:%d S:%d P:%d  R:%d", sandec_get_currframe(sanctx), fc, ren, dec, !!(sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION), pp.texsmooth, pp.autopause, ret);
+						printf("\33[2K\r%4u/%4u  %lu ms/%lu ms I:%d S:%d P:%d  R:%d M:%d", sandec_get_currframe(sanctx), fc, ren, dec, !!(sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION), pp.texsmooth, pp.autopause, ret, mortimermode);
 						fflush(stdout);
 					}
 

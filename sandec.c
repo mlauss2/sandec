@@ -264,6 +264,7 @@ struct sanrt {
 	void	 *membase;	/* 8 base to allocated mem block	*/
 	uint8_t *last_fobj;	/* 8 ptr to last FOBJ, for GOST		*/
 	uint32_t last_fobj_size;/* 4 size of last FOBJ			*/
+	uint8_t	 mortimer:1;	/* 1 upscale for Mortimer		*/
 };
 
 /* internal context: static stuff. */
@@ -950,6 +951,35 @@ static void blt_ipol(uint8_t * __restrict dst, uint8_t * __restrict src1,
 		src1 += srcpitch;
 		src2 += srcpitch;
 		dst += dstpitch;
+	}
+}
+
+static void blt_upscale_2x2(uint8_t * restrict dst, const uint8_t * restrict src,
+		      int16_t dstxoff, int16_t dstyoff, uint16_t srcxoff, uint16_t srcyoff,
+		      uint16_t srcwidth, uint16_t srcheight, uint16_t srcpitch,
+		      uint16_t dstpitch, uint16_t dstheight, int32_t size)
+{
+	uint32_t dstxstart = (dstxoff < 0) ? 0 : dstxoff;
+	uint32_t dstystart = (dstyoff < 0) ? 0 : dstyoff;
+	uint32_t dstxend = dstxoff + (srcwidth * 2);
+	uint32_t dstyend = dstyoff + (srcheight * 2);
+	
+	if (dstxend > dstpitch)
+		dstxend = dstpitch;
+	if (dstyend > dstheight)
+		dstyend = dstheight;
+	if (dstxstart >= dstxend || dstystart >= dstyend)
+		return;
+
+	for (uint32_t dy = dstystart; dy < dstyend; ++dy) {
+		uint32_t sy = srcyoff + (dy - dstyoff) / 2;
+		const uint8_t * restrict s = src + (sy * srcpitch);
+		uint8_t * restrict d = dst + (dy * dstpitch);
+
+		for (int32_t dx = dstxstart; dx < dstxend; ++dx) {
+			uint32_t sx = srcxoff + (dx - dstxoff) / 2;
+			d[dx] = s[sx];
+		}
 	}
 }
 
@@ -1837,7 +1867,10 @@ static int codec37(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 
 	ctx->rt.lastseq = seq;
 
-	if ((flag & 2) == 0) {
+	if (ctx->rt.mortimer) {
+		blt_upscale_2x2(dbuf, ctx->rt.buf0, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
+				ctx->rt.bufh, w * h);
+	} else if ((flag & 2) == 0) {
 		blt_solid(dbuf, ctx->rt.buf0, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
 			  ctx->rt.bufh, w * h);
 	} else {
@@ -2019,6 +2052,110 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 			}
 			skip ^= 1;
 		}
+	}
+}
+
+/* codec23 upscaling as used in Mortimer only. */
+static void codec23_2x2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
+			uint16_t h, int16_t xoff, int16_t yoff, uint16_t size,
+			uint8_t param, int16_t param2)
+{
+	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
+	int skip, i, j, ls, pc, y, wrlen, skip_left;
+	uint8_t lut[256], *d;
+
+	/* Mortimer 00410770: first c23 has this LUT (param2 == 256),
+	 * later frames reuse it (param2 == 257). param2 < 256 indicates
+	 * this is a delta value to apply to the color instead.
+	 */
+	if (param2 == 256) {
+		if (size < 256)
+			return;
+		memcpy(ctx->c23lut, src, 256);
+		src += 256;
+		size -= 256;
+	} else if (param2 < 256) {
+		/* create a lut with constant delta */
+		for (i = 0; i < 256; i++)
+			lut[i] = (i + param2) & 0xff;
+	} else {
+		for (i = 0; i < 256; i++)
+			lut[i] = ctx->c23lut[i];
+	}
+
+	if ((size < 1) || ((yoff + h) * 2 <= 0) || (yoff * 2 >= my) || ((xoff + w) * 2 <= 0) || (xoff * 2 >= mx))
+		return;
+
+	/* Mortimer 00410400+ */
+	if (yoff < 0) {
+		y = -yoff;
+		while (y-- && size > 1) {
+			ls = le16_to_cpu(ua16(src));
+			size -= 2;
+			if (size < ls)
+				return;
+			size -= ls;
+			src += 2 + ls;
+		}
+		h += yoff;
+		yoff = 0;
+	}
+	
+	y = yoff;
+	for (; (size > 1) && (h > 0) && (y * 2 < my); h--, y++) {
+		ls = le16_to_cpu(ua16(src));
+		src += 2;
+		size -= 2;
+		if (size < ls)
+			return;
+
+		uint8_t *next_src = src + ls;
+		size -= ls;
+		skip = 1;
+		pc = xoff;
+		while ((src < next_src) && (pc < (w + xoff))) {
+			j = *src++;
+			if (!skip) {
+				skip_left = (pc < 0) ? -pc : 0;
+				if (skip_left >= j) {
+					pc += j;
+					j = 0;
+				} else {
+					pc += skip_left;
+					j -= skip_left;
+				}
+				wrlen = j;
+				if (pc + wrlen > (mx / 2)) {
+					wrlen = (mx / 2) - pc;
+				}
+
+				if (wrlen > 0) {
+					uint32_t dy = y * 2;
+					uint32_t dx = pc * 2;
+					d = dst + (dy * p) + dx;
+					
+					for (i = 0; i < wrlen; i++) {
+						uint8_t color = lut[d[0]];
+						
+						d[0] = color;
+						d[1] = color;
+						if (dy + 1 < my) {
+							d[p] = color;
+							d[p + 1] = color;
+						}						
+						d += 2;
+					}
+					pc += wrlen;
+					j -= wrlen;
+				}
+				if (j > 0)
+					pc += j;
+			} else {
+				pc += j;
+			}
+			skip ^= 1;
+		}
+		src = next_src;
 	}
 }
 
@@ -2487,6 +2624,124 @@ static void codec1_flipxy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16
 	}
 }
 
+/* Transparent codec1 where every source pixel is a 2x2 destination pixel block.
+ * Used in Mortimer, as codec3 in the *H.SAN files.
+ */
+static void codec1_2x2(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
+			uint16_t fobw, uint16_t fobh, int16_t xoff, int16_t yoff)
+{
+	const uint16_t stride = ctx->rt.pitch;
+
+	if (yoff < 0) {
+		yoff = -yoff;
+		if (fobh <= yoff)
+			return;
+		fobh -= yoff;
+		while (yoff--)
+			src += 2 + le16_to_cpu(ua16(src));
+	}
+
+	int16_t bo = yoff + fobh - ctx->rt.bufh;
+	if (bo > 0) {
+		if (fobh <= bo)
+			return;
+		fobh -= bo;
+	}
+
+	uint16_t skipx = 0;
+	if (xoff < 0) {
+		skipx = -xoff;
+		if (fobw <= skipx)
+			return;
+		fobw -= skipx;
+		xoff = 0;
+	}
+
+	int16_t ro = (xoff + fobw) - ctx->rt.bufw;
+	if (ro > 0) {
+		if (fobw <= ro)
+			return;
+		fobw -= ro;
+	}
+
+	dst += (yoff * stride * 2) + (xoff * 2);	
+	for (uint16_t y = 0; y < fobh; y++) {
+		uint16_t dlen = le16_to_cpu(ua16(src));
+		const uint8_t *src2 = src + 2;
+		src += 2 + dlen;
+		
+		uint8_t *dst2 = dst;
+		uint16_t skipx2 = skipx;
+		uint16_t drawx = fobw;		
+		while (drawx > 0) {
+			uint8_t code = *src2++;
+			int rlen = (code >> 1) + 1;
+
+			if (skipx2 > 0) {
+				if (code & 1) {
+					if (skipx2 >= rlen) {
+						skipx2 -= rlen;
+						src2++;
+						continue;
+					} else {
+						rlen -= skipx2;
+						skipx2 = 0;
+					}
+				} else {
+					if (skipx2 >= rlen) {
+						skipx2 -= rlen;
+						src2 += rlen;
+						continue;
+					} else {
+						src2 += skipx2;
+						rlen -= skipx2;
+						skipx2 = 0;
+					}
+				}
+			}
+
+			int draw_len = rlen;
+			if (draw_len > drawx) {
+				draw_len = drawx;
+			}
+			drawx -= rlen;
+
+			if (code & 1) {
+				uint8_t color = *src2++;
+				if (color != 0) {
+					for (int i = 0; i < draw_len; i++) {
+						dst2[i * 2] = color;
+						dst2[i * 2 + 1] = color;
+						dst2[stride + i * 2] = color;
+						dst2[stride + i * 2 + 1] = color;
+					}
+				}
+				dst2 += draw_len * 2;
+			} else {
+				for (int i = 0; i < draw_len; i++) {
+					uint8_t color = *src2++;
+					if (color != 0) {
+						dst2[0] = color;
+						dst2[1] = color;
+						dst2[stride] = color;
+						dst2[stride + 1] = color;
+					}
+					dst2 += 2;
+				}
+
+				if (rlen > draw_len) {
+					src2 += (rlen - draw_len);
+				}
+			}
+
+			if (drawx <= 0)
+				break;
+		}
+
+		dst += stride * 2;
+	}
+}
+
 static void codec2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
 		   uint8_t param, uint16_t param2)
@@ -2727,14 +2982,24 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 
 	ret = 0;
 	switch (codec) {
-	case 1:
-	case 3:  codec1(ctx, dst, src, fobw, fobh, xoff, yoff, size, (codec == 1)); break;
+	case 1:  codec1(ctx, dst, src, fobw, fobh, xoff, yoff, size, 1); break;
 	case 2:  codec2(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2); break;
+	case 3: if (ctx->rt.mortimer == 0) {
+			codec1(ctx, dst, src, fobw, fobh, xoff, yoff, size, 0);
+		} else {
+			codec1_2x2(ctx, dst, src, fobw, fobh, xoff, yoff);
+		}
+		break;
 	case 4:
 	case 5:  codec4(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2, codec == 5); break;
 	case 20: codec20(ctx, dst, src, fobw, fobh, xoff, yoff, size, fobw); break;
 	case 21: codec21(ctx, dst, src, fobw, fobh, xoff, yoff, size, param); break;
-	case 23: codec23(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2); break;
+	case 23: if (ctx->rt.mortimer == 0) {
+			codec23(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2);
+		} else {
+			codec23_2x2(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2);
+		}
+		break;
 	case 28: codec1_flipx (ctx, dst, src, fobw, fobh, xoff, yoff, size, 1); break;
 	case 29: codec1_flipy (ctx, dst, src, fobw, fobh, xoff, yoff, size, 1); break;
 	case 30: codec1_flipxy(ctx, dst, src, fobw, fobh, xoff, yoff, size, 1); break;
@@ -2828,7 +3093,7 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 				rt->have_vdims = 1;
 			}
 		}
-		rt->pitch = wr;
+		rt->pitch = _max(wr, rt->pitch);
 		if (!rt->fbsize || (wr > rt->bufw) || (hr > rt->bufh)) {
 			rt->bufw = _max(rt->bufw, wr);
 			rt->bufh = _max(rt->bufh, hr);
@@ -5525,4 +5790,37 @@ int sandec_get_currframe(void *sanctx)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
 	return ctx ? ctx->rt.currframe : 0;
+}
+
+int sandec_set_params(void *sanctx, int16_t xres, int16_t yres, int8_t mortimermode)
+{
+	struct sanctx *ctx = (struct sanctx *)sanctx;
+	if (!ctx)
+		return 110;
+	if (ctx->rt.version < 3) {
+		if ((xres != -1) || (xres != -1)) {
+			if ((xres > 0) && (xres <= FOBJ_MAXX)) {
+				ctx->rt.bufw = xres;
+			} else {
+				return 111;
+			}
+			if ((yres > 0) && (yres <= FOBJ_MAXY)) {
+				ctx->rt.bufh = yres;
+			} else {
+				return 112;
+			}
+			ctx->rt.pitch = ctx->rt.bufw;
+			ctx->rt.fbsize = ctx->rt.bufw * ctx->rt.bufh * 1;
+			ctx->rt.have_vdims = 1;
+		}
+		if (mortimermode != -1) {
+			if (mortimermode == 0) {
+				ctx->rt.mortimer = 0;
+			} else if ((ctx->rt.bufw == 640) && (ctx->rt.bufh == 480) && (mortimermode != 0)) {
+				ctx->rt.mortimer = 1;
+			}
+		}
+	}
+
+	return 0;
 }

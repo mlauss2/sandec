@@ -132,4 +132,7 @@ int sandec_get_framecount(void *sanctx);
 /* get the current rendered frame number */
 int sandec_get_currframe(void *sanctx);
 
+/* override parameters; for Mortimer primarily */
+int sandec_set_params(void *sanctx, int16_t xres, int16_t yres, int8_t mortimermode);
+
 #endif
