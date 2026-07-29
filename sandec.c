@@ -963,7 +963,7 @@ static void blt_upscale_2x2(uint8_t * restrict dst, const uint8_t * restrict src
 	uint32_t dstystart = (dstyoff < 0) ? 0 : dstyoff;
 	uint32_t dstxend = dstxoff + (srcwidth * 2);
 	uint32_t dstyend = dstyoff + (srcheight * 2);
-	
+
 	if (dstxend > dstpitch)
 		dstxend = dstpitch;
 	if (dstyend > dstheight)
@@ -2100,7 +2100,7 @@ static void codec23_2x2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 		h += yoff;
 		yoff = 0;
 	}
-	
+
 	y = yoff;
 	for (; (size > 1) && (h > 0) && (y * 2 < my); h--, y++) {
 		ls = le16_to_cpu(ua16(src));
@@ -2133,16 +2133,16 @@ static void codec23_2x2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 					uint32_t dy = y * 2;
 					uint32_t dx = pc * 2;
 					d = dst + (dy * p) + dx;
-					
+
 					for (i = 0; i < wrlen; i++) {
 						uint8_t color = lut[d[0]];
-						
+
 						d[0] = color;
 						d[1] = color;
 						if (dy + 1 < my) {
 							d[p] = color;
 							d[p + 1] = color;
-						}						
+						}
 						d += 2;
 					}
 					pc += wrlen;
@@ -2272,10 +2272,12 @@ static void codec20(struct sanctx *ctx, uint8_t * __restrict dst,
 static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 			const uint16_t w, const uint16_t h, const int16_t xoff,
 			const int16_t yoff, uint32_t size, const uint8_t param,
-			const uint16_t param2, const int c5)
+			const uint16_t param2, const int codec)
 {
 	const uint16_t p = ctx->rt.pitch, mx = ctx->rt.bufw, my = ctx->rt.bufh;
 	uint8_t mask, bits, *gs, idx, c4t;
+	const int sega = (codec >= 33);
+	const int c5 = ((codec == 5) || (codec == 34));
 	uint32_t dstoff;
 	int i, j, k, l, bit, x, y;
 
@@ -2332,8 +2334,9 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 
 			/* post processing to smooth out block borders a bit.
 			 * ASSAULT.EXE 121e8 - 12242 for the (c4t&0x80)==0 case.
+			 * SEGA codec33/34 do not do post-processing at all.
 			 */
-			if (x <= 0 || y <= 0 || x >= mx || y >= my)
+			if (x <= 0 || y <= 0 || x >= mx || y >= my || sega)
 				continue;	/* skip unreachable edges */
 			dstoff = y * p +  x;
 			if (c4t & 0x80) {
@@ -2355,22 +2358,22 @@ static void codec4_main(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 
 static void codec33(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
-		    uint8_t param, uint16_t param2, int c5)
+		    uint8_t param, uint16_t param2, int codec)
 {
 	if (ctx->c4tblparam != (param + 0x100))
 		c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
 	ctx->c4tblparam = param + 0x100;
-	codec4_main(ctx, dst, src, w, h, xoff, yoff, size, param, param2, c5);
+	codec4_main(ctx, dst, src, w, h, xoff, yoff, size, param, param2, codec);
 }
 
 static void codec4(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
-		   uint8_t param, uint16_t param2, int c5)
+		   uint8_t param, uint16_t param2, int codec)
 {
 	if (ctx->c4tblparam != param)
 		c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
 	ctx->c4tblparam = param;
-	codec4_main(ctx, dst, src, w, h, xoff, yoff, size, param, param2, c5);
+	codec4_main(ctx, dst, src, w, h, xoff, yoff, size, param, param2, codec);
 }
 
 static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w,
@@ -2664,15 +2667,15 @@ static void codec1_2x2(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 		fobw -= ro;
 	}
 
-	dst += (yoff * stride * 2) + (xoff * 2);	
+	dst += (yoff * stride * 2) + (xoff * 2);
 	for (uint16_t y = 0; y < fobh; y++) {
 		uint16_t dlen = le16_to_cpu(ua16(src));
 		const uint8_t *src2 = src + 2;
 		src += 2 + dlen;
-		
+
 		uint8_t *dst2 = dst;
 		uint16_t skipx2 = skipx;
-		uint16_t drawx = fobw;		
+		uint16_t drawx = fobw;
 		while (drawx > 0) {
 			uint8_t code = *src2++;
 			int rlen = (code >> 1) + 1;
@@ -2991,7 +2994,7 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 		}
 		break;
 	case 4:
-	case 5:  codec4(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2, codec == 5); break;
+	case 5:  codec4(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2, codec); break;
 	case 20: codec20(ctx, dst, src, fobw, fobh, xoff, yoff, size, fobw); break;
 	case 21: codec21(ctx, dst, src, fobw, fobh, xoff, yoff, size, param); break;
 	case 23: if (ctx->rt.mortimer == 0) {
@@ -3006,7 +3009,7 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	case 31:
 	case 32: codec31(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, codec == 32); break;
 	case 33:
-	case 34: codec33(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2, codec == 34); break;
+	case 34: codec33(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, param2, codec); break;
 	case 35:
 	case 36: codec31_flipx(ctx, dst, src, fobw, fobh, xoff, yoff, size, param, codec == 36); break;
 	case 37: ret = codec37(ctx, dst, src, fobw, fobh, xoff, yoff, size, anm_flags); break;
