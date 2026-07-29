@@ -435,6 +435,11 @@ int main(int a, char **argv)
 					ret = render_frame(&pp);
 					if (ret)
 						break;
+					if (e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN) {
+						SDL_HideCursor();
+					} else {
+						SDL_ShowCursor();
+					}
 				} else if (e.type == SDL_EVENT_KEY_DOWN) {
 					SDL_KeyboardEvent *ke = (SDL_KeyboardEvent *)&e;
 					if (!ke->down || ke->repeat != 0)
