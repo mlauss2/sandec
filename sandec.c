@@ -5458,7 +5458,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	}
 	free(ahbuf);
 
-	if (!fps)
+	if ((fps < 10) || (fps > 15))
 		fps = 15;
 	rt->framedur = 1000000 / fps;	/* frame duration in microseconds */
 
