@@ -4063,13 +4063,25 @@ static struct sanatrk *atrk_find_trkid(struct sanmsa *msa, uint16_t trkid,
 	return NULL;
 }
 
-static void atrk_reset_mixed(struct sanmsa *msa)
+static void atrk_reset_mixed(struct sanmsa *msa, int cleanup)
 {
 	struct sanatrk *atrk;
 	for (int i = 0; i < msa->numtrk; i++) {
 		atrk = &(msa->atrk[i]);
-		if (atrk->state >= STATE_MIXED)
-			atrk->state = STATE_MIXABLE;
+		if (cleanup && (atrk_bufbytes(atrk) == 0) && (atrk->dataleft == atrk->playlen)
+		    && (atrk->rdptr > 0) && (atrk->wrptr > 0)
+		    && (atrk->state == STATE_MIXABLE)) {
+			/* RA1 SEGA-CD: does sound data accounting a bit differently.
+			 * all tracks end with still 8 bytes left to fill+play but no more
+			 * data coming in.  However sice the engine does age-based
+			 * assignment of the 3 non-music channels, this is no problem
+			 * there.  We however need to kill these stale channels.
+			 */
+			atrk_reset(atrk);
+		} else {
+			if (atrk->state >= STATE_MIXED)
+				atrk->state = STATE_MIXABLE;
+		}
 	}
 }
 
@@ -4288,7 +4300,7 @@ static int aud_mix_tracks(struct sanctx *ctx)
 
 	active1 = atrk_count_active(msa, &voice);
 	while ((active1 != 0) && (dff != 0)) {
-		atrk_reset_mixed(msa);
+		atrk_reset_mixed(msa, 0);
 		mixable = atrk_count_mixable(msa, &minlen1);
 		if ((mixable < 1) || (minlen1 == -1))
 			break;
@@ -4355,7 +4367,7 @@ static int aud_mix_tracks(struct sanctx *ctx)
 			msa->sou_vol_damp = msa->sou_damp_max;
 	}
 
-	atrk_reset_mixed(msa);
+	atrk_reset_mixed(msa, 1);
 	return (dstlen != 0);
 }
 
