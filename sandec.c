@@ -5748,7 +5748,7 @@ int sandec_open(void *sanctx, struct sanio *io)
 		if ((csz < 8) || (csz > (1 << 20))) {
 			goto out;
 		} else {
-			if (sandec_alloc_msa(&ctx->msa, 1, ATRK_DEST_RATE))
+			if (sandec_alloc_msa(&ctx->msa, 1, ATRK_DEST_RATE / 15))
 				goto out;
 			if (csz > ATRK_DATSZ)
 				goto out;
