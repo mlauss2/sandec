@@ -276,8 +276,8 @@ struct sanctx {
 	uint8_t *adstbuf1;	/* 8 audio buffer 1			*/
 
 	/* codec47 static data */
-	int8_t c47_glyph4x4[NGLYPHS][16];
-	int8_t c47_glyph8x8[NGLYPHS][64];
+	uint8_t c47_glyph4x4[NGLYPHS][16];
+	uint8_t c47_glyph8x8[NGLYPHS][64];
 	uint8_t c4tbl[2][256][16];
 	uint8_t c23lut[256];
 	uint8_t c45tbl1[768];
@@ -472,19 +472,19 @@ static const int8_t c37_mv[3][512] = {
  * https://git.ffmpeg.org/gitweb/ffmpeg.git/blob_plain/HEAD:/libavcodec/sanm.c
  */
 
-static const int8_t c47_glyph4_x[GLYPH_COORD_VECT_SIZE] = {
+static const uint8_t c47_glyph4_x[GLYPH_COORD_VECT_SIZE] = {
 	0, 1, 2, 3, 3, 3, 3, 2, 1, 0, 0, 0, 1, 2, 2, 1
 };
 
-static const int8_t c47_glyph4_y[GLYPH_COORD_VECT_SIZE] = {
+static const uint8_t c47_glyph4_y[GLYPH_COORD_VECT_SIZE] = {
 	0, 0, 0, 0, 1, 2, 3, 3, 3, 3, 2, 1, 1, 1, 2, 2
 };
 
-static const int8_t c47_glyph8_x[GLYPH_COORD_VECT_SIZE] = {
+static const uint8_t c47_glyph8_x[GLYPH_COORD_VECT_SIZE] = {
 	0, 2, 5, 7, 7, 7, 7, 7, 7, 5, 2, 0, 0, 0, 0, 0
 };
 
-static const int8_t c47_glyph8_y[GLYPH_COORD_VECT_SIZE] = {
+static const uint8_t c47_glyph8_y[GLYPH_COORD_VECT_SIZE] = {
 	0, 0, 0, 0, 1, 3, 4, 6, 7, 7, 7, 7, 6, 4, 3, 1
 };
 
@@ -597,7 +597,7 @@ static enum GlyphDir c47_which_direction(enum GlyphEdge edge0, enum GlyphEdge ed
 }
 
 /* Interpolate two points. */
-static void c47_interp_point(int8_t *points, int x0, int y0, int x1, int y1,
+static void c47_interp_point(uint8_t *points, int x0, int y0, int x1, int y1,
 			 int pos, int npoints)
 {
 	if (npoints) {
@@ -609,11 +609,11 @@ static void c47_interp_point(int8_t *points, int x0, int y0, int x1, int y1,
 	}
 }
 
-static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *yvec,
+static void c47_make_glyphs(uint8_t *pglyphs, const uint8_t *xvec, const uint8_t *yvec,
 			const int side_length)
 {
 	const int glyph_size = side_length * side_length;
-	int8_t *pglyph = pglyphs;
+	uint8_t *pglyph = pglyphs;
 
 	int i, j;
 	for (i = 0; i < GLYPH_COORD_VECT_SIZE; i++) {
@@ -630,7 +630,7 @@ static void c47_make_glyphs(int8_t *pglyphs, const int8_t *xvec, const int8_t *y
 			int ipoint;
 
 			for (ipoint = 0; ipoint <= npoints; ipoint++) {
-				int8_t point[2];
+				uint8_t point[2];
 				int irow, icol;
 
 				c47_interp_point(point, x0, y0, x1, y1, ipoint, npoints);
@@ -1134,7 +1134,7 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t * __restrict src,
 {
 	uint8_t opc, col[2], c;
 	uint16_t i, j;
-	int8_t *pglyph;
+	uint8_t *pglyph;
 
 	if ((*dsize) < 1)
 		return 0;
@@ -3273,9 +3273,8 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 			   const uint32_t stride, uint8_t blksize, struct sanctx *ctx)
 {
 	int32_t mvofs, ofs;
-	int8_t *pglyph;
+	uint8_t *pglyph, opc;
 	uint16_t c[2];
-	uint8_t opc;
 	int16_t o2;
 	int i, j;
 
