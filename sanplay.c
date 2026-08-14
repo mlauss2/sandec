@@ -509,9 +509,8 @@ int main(int a, char **argv)
 						running = 0;
 					} else if (!pp.as || (0 == SDL_GetAudioStreamQueued(pp.as))) {
 						running = 0;
-					} else {
-						continue;
 					}
+					continue;
 				}
 
 				t1 = SDL_GetTicks();
@@ -541,8 +540,8 @@ err:
 						fflush(stdout);
 					}
 
-				} else if (delt > 5000) {
-					SDL_Delay(5);
+				} else if (delt > 1000) {
+					SDL_Delay(1);
 				}
 			}
 		}
