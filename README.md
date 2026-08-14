@@ -15,7 +15,6 @@ with an SDL3-based player application to demonstrate library use.
   - Rebel Assault II
   - Rebel Assault I (DOS, 3DO and SEGA-CD versions)
   - Star Wars: Making Magic
-  - Mortimer and the Riddles of the Medallion
   - Droidworks
   - X-Wing Alliance
   - Indiana Jones and the Infernal Machine
