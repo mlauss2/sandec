@@ -349,7 +349,7 @@ const int16_t adpcm_step_table[ADPCM_STEP_COUNT] = {
 	15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
 };
 
-static const int8_t ima4_tab[16] = {
+static const int8_t adpcm_index_table[16] = {
 	-1, -1, -1, -1,  2,  4,  6,  8, -1, -1, -1, -1,  2,  4,  6,  8
 };
 
@@ -636,27 +636,23 @@ static void c47_make_glyphs(uint8_t *pglyphs, const uint8_t *xvec, const uint8_t
 				c47_interp_point(point, x0, y0, x1, y1, ipoint, npoints);
 
 				switch (dir) {
-					case DIR_UP:
-						for (irow = point[1]; irow >= 0; irow--)
-							pglyph[point[0] + irow * side_length] = 1;
+				case DIR_UP:
+					for (irow = point[1]; irow >= 0; irow--)
+						pglyph[point[0] + irow * side_length] = 1;
 					break;
-
-					case DIR_DOWN:
-						for (irow = point[1]; irow < side_length; irow++)
-							pglyph[point[0] + irow * side_length] = 1;
+				case DIR_DOWN:
+					for (irow = point[1]; irow < side_length; irow++)
+						pglyph[point[0] + irow * side_length] = 1;
 					break;
-
-					case DIR_LEFT:
-						for (icol = point[0]; icol >= 0; icol--)
-							pglyph[icol + point[1] * side_length] = 1;
+				case DIR_LEFT:
+					for (icol = point[0]; icol >= 0; icol--)
+						pglyph[icol + point[1] * side_length] = 1;
 					break;
-
-					case DIR_RIGHT:
-						for (icol = point[0]; icol < side_length; icol++)
-							pglyph[icol + point[1] * side_length] = 1;
+				case DIR_RIGHT:
+					for (icol = point[0]; icol < side_length; icol++)
+						pglyph[icol + point[1] * side_length] = 1;
 					break;
-
-					case NO_DIR:
+				case NO_DIR:
 					break;
 				}
 			}
@@ -668,24 +664,19 @@ static void c4_5_tilegen(uint8_t *dst, uint8_t param1)
 {
 	int i, j, k, l, m, n, o;
 
-	// 23316
-	for (i = 1; i < 16; i += 2) {			// i = l24
-		// 23321
-		for (k = 0; k < 16; k++) {		// k = bx
-			// 23329
-			j = i + param1;			// j = l34
-			l = k + param1;			// k = l30
-			m = (j + l) / 2;		// esi, dx
-			n = (j + m) / 2;		// n = l28, l20 (16bit)
-			o = (l + m) / 2;		// o = l28, l1c (16bit)
+	for (i = 1; i < 16; i += 2) {
+		for (k = 0; k < 16; k++) {
+			j = i + param1;
+			l = k + param1;
+			m = (j + l) / 2;
+			n = (j + m) / 2;
+			o = (l + m) / 2;
 			if (j == m || l == m) {
-				// 23376
 				*dst++ = l; *dst++ = j; *dst++ = l; *dst++ = j;
 				*dst++ = j; *dst++ = l; *dst++ = j; *dst++ = j;
 				*dst++ = l; *dst++ = j; *dst++ = l; *dst++ = j;
 				*dst++ = l; *dst++ = l; *dst++ = j; *dst++ = l;
 			} else {
-				// 233ab
 				*dst++ = m; *dst++ = m; *dst++ = n; *dst++ = j;
 				*dst++ = m; *dst++ = m; *dst++ = n; *dst++ = j;
 				*dst++ = o; *dst++ = o; *dst++ = m; *dst++ = n;
@@ -694,24 +685,19 @@ static void c4_5_tilegen(uint8_t *dst, uint8_t param1)
 		}
 	}
 
-	// 23415
-	for (i = 0; i < 16; i += 2) {			// i = l24
-		// 23420
-		for (k = 0; k < 16; k++) {		// k = bx
-			// 23428
-			j = i + param1;			// j = l34
-			l = k + param1;			// l = l2c
-			m = (j + l) / 2;		// m = si, dx
-			n = (j + m) / 2;		// n = l28, l20 (16bit)
-			o = (l + m) / 2;		// o = l28, l1c (16bit)
+	for (i = 0; i < 16; i += 2) {
+		for (k = 0; k < 16; k++) {
+			j = i + param1;
+			l = k + param1;
+			m = (j + l) / 2;
+			n = (j + m) / 2;
+			o = (l + m) / 2;
 			if (m == j || m == l) {
-				// 23477
 				*dst++ = j; *dst++ = j; *dst++ = l; *dst++ = j;
 				*dst++ = j; *dst++ = j; *dst++ = j; *dst++ = l;
 				*dst++ = l; *dst++ = j; *dst++ = l; *dst++ = l;
 				*dst++ = j; *dst++ = l; *dst++ = j; *dst++ = l;
 			} else {
-				// 234b1  l14 = j
 				*dst++ = j; *dst++ = j; *dst++ = n; *dst++ = m;
 				*dst++ = j; *dst++ = j; *dst++ = n; *dst++ = m;
 				*dst++ = n; *dst++ = n; *dst++ = m; *dst++ = o;
@@ -725,7 +711,6 @@ static void c33_34_tilegen(uint8_t *dst, int8_t param1)
 {
 	int i, j, k, l, m, n, o, p;
 
-	/* ASSAULT.EXE 1bf7b */
 	for (i = 0; i < 8; i++) {
 		for (k = 0; k < 8; k++) {
 			j = i + param1;
@@ -1040,10 +1025,8 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 		*pal++ = 0xffU << 24 | t[2] << 16 | t[1] << 8 | t[0];
 		i++;
 	}
-	/* HACK: (not sure though if really a hack): palette index 0
-	 * is always 0/0/0 for RA1. Fixes a lot of scenes with blue/
-	 * white/gray/.. space backgrounds, at least until the next NPAL.
-	 */
+
+	/* RA1 always sets color index 0 to full black. */
 	if (rt->version < 2)
 		rt->palette[0] = 0xffU << 24;
 }
@@ -4791,7 +4774,7 @@ static int handle_IMA4(struct sanctx *ctx, uint32_t size, uint8_t *src,
 		else if (tblidx > 88)
 			tblidx = 88;
 		adpcm_step = adpcm_step_table[tblidx];
-		tblidx += ima4_tab[nib];
+		tblidx += adpcm_index_table[nib];
 		delt = adpcm_step >> 3;
 		if (nib & 4)
 			delt += adpcm_step;
