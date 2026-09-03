@@ -51,13 +51,13 @@
 #endif
 
 /* bytewise read an unaligned 16bit value from memory */
-static inline uint16_t ua16(uint8_t *p)
+static inline uint16_t ua16(const uint8_t *p)
 {
 	return p[0] | (p[1] << 8);
 }
 
 /* bytewise read an unaligned 32bit value from memory */
-static inline uint32_t ua32(uint8_t *p)
+static inline uint32_t ua32(const uint8_t *p)
 {
 	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
 		((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
@@ -1331,7 +1331,8 @@ static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, 
 /******************************************************************************/
 
 /* scale 4x4 input block to 8x8 output block */
-static void c48_4to8(uint8_t * __restrict dst, uint8_t * __restrict src, uint16_t w)
+static void c48_4to8(uint8_t * __restrict dst, const uint8_t * __restrict src,
+		     const uint16_t w)
 {
 	uint16_t p;
 	/* dst is always aligned, so we can do at least 16bit stores */
@@ -1346,180 +1347,181 @@ static void c48_4to8(uint8_t * __restrict dst, uint8_t * __restrict src, uint16_
 	}
 }
 
-/* process an 8x8 block */
-static uint8_t *c48_block(uint8_t * __restrict src, uint8_t * __restrict dst,
-			  uint8_t * __restrict db, const uint16_t w,
-			  const uint8_t *itbl, uint32_t *size)
+static int codec48_comp3(const uint8_t * __restrict src, uint8_t * __restrict dst,
+			 const uint8_t * __restrict db, const uint8_t * __restrict itbl,
+			 const uint16_t w, const uint16_t h, uint32_t size)
 {
 	uint8_t opc, sb[16];
-	int16_t mvofs;
 	uint32_t ofs;
-	int i, j, k, l;
+	int i, j, k, l, m, n;
 
-	if (*size < 1)
-		return 0;
-	opc = *src++;
-	(*size)--;
-	switch (opc) {
-	case 0xFF:	/* 1x1 -> 8x8 block scale */
-		if (*size < 1)
-			return 0;
-		(*size)--;
-		sb[15] = *src++;
-		sb[ 7] = itbl[(*(dst - 1*w + 7) << 8) | sb[15]];
-		sb[ 3] = itbl[(*(dst - 1*w + 7) << 8) | sb[ 7]];
-		sb[11] = itbl[(sb[15] << 8)           | sb[ 7]];
-		sb[ 1] = itbl[(*(dst - 0*w - 1) << 8) | sb[ 3]];
-		sb[ 0] = itbl[(*(dst - 0*w - 1) << 8) | sb[ 1]];
-		sb[ 2] = itbl[(sb[ 3] << 8)           | sb[ 1]];
-		sb[ 5] = itbl[(*(dst + 2*w -1) << 8)  | sb[ 7]];
-		sb[ 4] = itbl[(*(dst + 2*w -1) << 8)  | sb[ 5]];
-		sb[ 6] = itbl[(sb[ 7] << 8)           | sb[ 5]];
-		sb[ 9] = itbl[(*(dst + 3*w -1) << 8)  | sb[11]];
-		sb[ 8] = itbl[(*(dst + 3*w -1) << 8)  | sb[ 9]];
-		sb[10] = itbl[(sb[11] << 8)           | sb[ 9]];
-		sb[13] = itbl[(*(dst + 4*w -1) << 8)  | sb[15]];
-		sb[12] = itbl[(*(dst + 4*w -1) << 8)  | sb[13]];
-		sb[14] = itbl[(sb[15] << 8)           | sb[13]];
-		c48_4to8(dst, sb, w);
-		break;
-	case 0xFE:	/* 1x 8x8 copy from deltabuf, 16bit mv from src */
-		if ((*size) < 2)
-			return 0;
-		mvofs = (int16_t)le16_to_cpu(ua16(src)); src += 2;
-		for (i = 0; i < 8; i++) {
-			ofs = w * i;
-			for (k = 0; k < 8; k++)
-				*(dst + ofs + k) = *(db + ofs + k + mvofs);
-		}
-		(*size) -= 2;
-		break;
-	case 0xFD:	/* 2x2 -> 8x8 block scale */
-		if ((*size) < 4)
-			return 0;
-		sb[ 5] = *src++;
-		sb[ 7] = *src++;
-		sb[13] = *src++;
-		sb[15] = *src++;
-		sb[ 1] = itbl[(*(dst - 1*w + 3) << 8) | sb[ 5]];
-		sb[ 3] = itbl[(*(dst - 1*w + 7) << 8) | sb[ 7]];
-		sb[11] = itbl[(sb[15] << 8)           | sb[ 7]];
-		sb[ 9] = itbl[(sb[13] << 8)           | sb[ 5]];
-		sb[ 0] = itbl[(*(dst - 0*w - 1) << 8) | sb[ 1]];
-		sb[ 2] = itbl[(sb[ 3] << 8)           | sb[ 1]];
-		sb[ 4] = itbl[(*(dst + 2*w - 1) << 8) | sb[ 5]];
-		sb[ 6] = itbl[(sb[ 7] << 8)           | sb[ 5]];
-		sb[ 8] = itbl[(*(dst + 3*w - 1) << 8) | sb[ 9]];
-		sb[10] = itbl[(sb[11] << 8)           | sb[ 9]];
-		sb[12] = itbl[(*(dst + 4*w - 1) << 8) | sb[13]];
-		sb[14] = itbl[(sb[15] << 8)           | sb[13]];
-		c48_4to8(dst, sb, w);
-		(*size) -= 4;
-		break;
-	case 0xFC:	/* 4x copy 4x4 block, per-block c48_mv, index from source */
-		if ((*size) < 4)
-			return 0;
-		for (i = 0; i < 8; i += 4) {
-			for (k = 0; k < 8; k += 4) {
-				opc = *src++;
-				mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
-				for (j = 0; j < 4; j++) {
-					ofs = (w * (j + i)) + k;
-					for (l = 0; l < 4; l++)
+	for (m = 0; m < h; m += 8) {
+		for (n = 0; n < w; n += 8) {
+			if (size < 1)
+				return 1;
+			opc = *src++;
+			size -= 1;
+			switch (opc) {
+			case 0xFF:
+				/* 4x4 to 8x8 upscale.  1 Reference color, while the
+				 * other 15 have to be interpolated from existing
+				 * pixels in adjacent blocks of the current buffer.
+				 */
+				if (size < 1)
+					return 1;
+				sb[15] = *src++;
+				sb[ 7] = itbl[(*(dst - 1*w + 7 + n) << 8) | sb[15]];
+				sb[ 3] = itbl[(*(dst - 1*w + 7 + n) << 8) | sb[ 7]];
+				sb[11] = itbl[(sb[15] << 8)               | sb[ 7]];
+				sb[ 1] = itbl[(*(dst - 0*w - 1 + n) << 8) | sb[ 3]];
+				sb[ 0] = itbl[(*(dst - 0*w - 1 + n) << 8) | sb[ 1]];
+				sb[ 2] = itbl[(sb[ 3] << 8)               | sb[ 1]];
+				sb[ 5] = itbl[(*(dst + 2*w -1 + n) << 8)  | sb[ 7]];
+				sb[ 4] = itbl[(*(dst + 2*w -1 + n) << 8)  | sb[ 5]];
+				sb[ 6] = itbl[(sb[ 7] << 8)               | sb[ 5]];
+				sb[ 9] = itbl[(*(dst + 3*w -1 + n) << 8)  | sb[11]];
+				sb[ 8] = itbl[(*(dst + 3*w -1 + n) << 8)  | sb[ 9]];
+				sb[10] = itbl[(sb[11] << 8)               | sb[ 9]];
+				sb[13] = itbl[(*(dst + 4*w -1 + n) << 8)  | sb[15]];
+				sb[12] = itbl[(*(dst + 4*w -1 + n) << 8)  | sb[13]];
+				sb[14] = itbl[(sb[15] << 8)               | sb[13]];
+				c48_4to8(dst + n, sb, w);
+				size -= 1;
+				break;
+			case 0xFE:	/* 1x 8x8 block copy, per-block mv from datastream */
+				{
+				if (size < 2)
+					return 1;
+				const int16_t mvofs = le16_to_cpu(ua16(src)); src += 2;
+				for (i = 0; i < 8; i++) {
+					ofs = w * i + n;
+					for (k = 0; k < 8; k++)
+						*(dst + ofs + k) = *(db + ofs + k + mvofs);
+				}
+				size -= 2;
+				break;
+				}
+			case 0xFD:
+				/* 4x4 to 8x8 upscale.  4 Reference colors, while the
+				 * other 12 have to be interpolated from existing
+				 * pixels in adjacent blocks of the currenf buffer.
+				 */
+				if (size < 4)
+					return 1;
+				sb[ 5] = *src++;
+				sb[ 7] = *src++;
+				sb[13] = *src++;
+				sb[15] = *src++;
+				sb[ 1] = itbl[(*(dst - 1*w + 3 + n) << 8) | sb[ 5]];
+				sb[ 3] = itbl[(*(dst - 1*w + 7 + n) << 8) | sb[ 7]];
+				sb[11] = itbl[(sb[15] << 8)               | sb[ 7]];
+				sb[ 9] = itbl[(sb[13] << 8)               | sb[ 5]];
+				sb[ 0] = itbl[(*(dst - 0*w - 1 + n) << 8) | sb[ 1]];
+				sb[ 2] = itbl[(sb[ 3] << 8)               | sb[ 1]];
+				sb[ 4] = itbl[(*(dst + 2*w - 1 + n) << 8) | sb[ 5]];
+				sb[ 6] = itbl[(sb[ 7] << 8)               | sb[ 5]];
+				sb[ 8] = itbl[(*(dst + 3*w - 1 + n) << 8) | sb[ 9]];
+				sb[10] = itbl[(sb[11] << 8)               | sb[ 9]];
+				sb[12] = itbl[(*(dst + 4*w - 1 + n) << 8) | sb[13]];
+				sb[14] = itbl[(sb[15] << 8)               | sb[13]];
+				c48_4to8(dst + n, sb, w);
+				size -= 4;
+				break;
+			case 0xFC:	/* 4x 4x4 blocks copy, per-block mv index from datastream */
+				if (size < 4)
+					return 1;
+				for (i = 0; i < 8; i += 4) {
+					for (k = 0; k < 8; k += 4) {
+						opc = *src++;
+						const int16_t mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
+						for (j = 0; j < 4; j++) {
+							ofs = (w * (j + i)) + k + n;
+							for (l = 0; l < 4; l++)
+								*(dst + ofs + l) = *(db + ofs + l + mvofs);
+						}
+					}
+				}
+				size -= 4;
+				break;
+			case 0xFB: 	/* 4x 4x4 blocks copy, per-block mv from datastream */
+				if (size < 8)
+					return 1;
+				for (i = 0; i < 8; i += 4) {			/* 2 */
+					for (k = 0; k < 8; k += 4) {		/* 2 */
+						const int16_t mvofs = le16_to_cpu(ua16(src)); src += 2;
+						for (j = 0; j < 4; j++) {	/* 4 */
+							ofs = (w * (j + i)) + k + n;
+							for (l = 0; l < 4; l++)
+								*(dst + ofs + l) = *(db + ofs + l + mvofs);
+						}
+					}
+				}
+				size -= 8;
+				break;
+			case 0xFA:	/* 1x 4x4 block from datastream, upscaled to 8x8 */
+				if (size < 16)
+					return 1;
+				c48_4to8(dst + n, src, w);
+				src += 16;
+				size -= 16;
+				break;
+			case 0xF9:	/* 16x 2x2 blocks copy, per-block mv index from datastream */
+				if (size < 16)
+					return 0;
+				for (i = 0; i < 8; i += 2) {				/* 4 */
+					for (j = 0; j < 8; j += 2) {			/* 4 */
+						ofs = (w * i) + j + n;
+						opc = *src++;
+						const int16_t mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
+						for (l = 0; l < 2; l++) {
+							*(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
+							*(dst + ofs + l + w) = *(db + ofs + l + w + mvofs);
+						}
+					}
+				}
+				size -= 16;
+				break;
+			case 0xF8:	/* 16x 2x2 blocks copy, per-block mv from datastream */
+				if (size < 32)
+					return 1;
+				for (i = 0; i < 8; i += 2) {				/* 4 */
+					for (j = 0; j < 8; j += 2) {			/* 4 */
+						ofs = w * i + j + n;
+						const int16_t mvofs = le16_to_cpu(ua16(src)); src += 2;
+						for (l = 0; l < 2; l++) {
+							*(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
+							*(dst + ofs + l + w) = *(db + ofs + l + w + mvofs);
+						}
+					}
+				}
+				size -= 32;
+				break;
+			case 0xF7:	/* 1x 8x8 block move from datastream */
+				if (size < 64)
+					return 1;
+				for (i = 0; i < 8; i++) {
+					ofs = i * w + n;
+					for (l = 0; l < 8; l++)
+						*(dst + ofs + l) = *src++;
+				}
+				size -= 64;
+				break;
+			default:	/* 1x 8x8 block copy, mv index from datastream */
+				{
+				const int16_t mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
+				for (i = 0; i < 8; i++) {
+					ofs = i * w + n;
+					for (l = 0; l < 8; l++)
 						*(dst + ofs + l) = *(db + ofs + l + mvofs);
 				}
-			}
-		}
-		(*size) -= 4;
-		break;
-	case 0xFB: 	/* Copy 4x 4x4 blocks, per-block mv from source */
-		if ((*size) < 8)
-			return 0;
-		for (i = 0; i < 8; i += 4) {			/* 2 */
-			for (k = 0; k < 8; k += 4) {		/* 2 */
-				mvofs = le16_to_cpu(ua16(src)); src += 2;
-				for (j = 0; j < 4; j++) {	/* 4 */
-					ofs = (w * (j + i)) + k;
-					for (l = 0; l < 4; l++)
-						*(dst + ofs + l) = *(db + ofs + l + mvofs);
+				break;
 				}
 			}
-		}
-		(*size) -= 8;
-		break;
-	case 0xFA:	/* scale 4x4 input block to 8x8 dest block */
-		if ((*size) < 16)
-			return 0;
-		c48_4to8(dst, src, w);
-		src += 16;
-		(*size) -= 16;
-		break;
-	case 0xF9:	/* 16x 2x2 copy from delta, per-block c48_mv */
-		if ((*size) < 16)
-			return 0;
-		for (i = 0; i < 8; i += 2) {				/* 4 */
-			for (j = 0; j < 8; j += 2) {			/* 4 */
-				ofs = (w * i) + j;
-				opc = *src++;
-				mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
-				for (l = 0; l < 2; l++) {
-					*(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
-					*(dst + ofs + l + w) = *(db + ofs + l + w + mvofs);
-				}
-			}
-		}
-		(*size) -= 16;
-		break;
-	case 0xF8:	/* 16x 2x2 blocks copy, mv from source */
-		if ((*size) < 32)
-			return 0;
-		for (i = 0; i < 8; i += 2) {				/* 4 */
-			for (j = 0; j < 8; j += 2) {			/* 4 */
-				ofs = w * i + j;
-				mvofs = le16_to_cpu(ua16(src)); src += 2;
-				for (l = 0; l < 2; l++) {
-					*(dst + ofs + l + 0) = *(db + ofs + l + 0 + mvofs);
-					*(dst + ofs + l + w) = *(db + ofs + l + w + mvofs);
-				}
-			}
-		}
-		(*size) -= 32;
-		break;
-	case 0xF7:	/* copy 8x8 block from src to dest */
-		if ((*size) < 64)
-			return 0;
-		for (i = 0; i < 8; i++) {
-			ofs = i * w;
-			for (l = 0; l < 8; l++)
-				*(dst + ofs + l) = *src++;
-		}
-		(*size) -= 64;
-		break;
-	default:	/* copy 8x8 block from prev, c48_mv */
-		mvofs = c37_mv[0][opc * 2] + (c37_mv[0][opc * 2 + 1] * w);
-		for (i = 0; i < 8; i++) {
-			ofs = i * w;
-			for (l = 0; l < 8; l++)
-				*(dst + ofs + l) = *(db + ofs + l + mvofs);
-		}
-		break;
-	}
-	return src;
-}
-
-static int codec48_comp3(uint8_t * __restrict src, uint8_t * __restrict dst, uint8_t * __restrict db,
-			 uint8_t *itbl, uint16_t w, uint16_t h, uint32_t size)
-{
-	int i, j;
-
-	for (i = 0; (i < h) && src && size; i += 8) {
-		for (j = 0; (j < w) && src && size; j += 8) {
-			src = c48_block(src, dst + j, db + j, w, itbl, &size);
 		}
 		dst += w * 8;
 		db += w * 8;
 	}
-	return (src == 0) ? 1 : 0;
+	return 0;
 }
 
 static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
