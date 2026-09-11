@@ -4465,8 +4465,20 @@ static int iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint8_t v1, v2, v3, *src2, *ib = ctx->rt.iactbuf;
+	struct sanatrk *atrk = &(ctx->msa->atrk[0]);
 	uint16_t count, len;
 	int16_t *dst;
+
+	if (atrk->state < STATE_MIXABLE) {
+		/* Droidworks is the only valid user of 11kHz; COMI uses 22kHz,
+		 * Fortunately, they can be identified using the video framerate.
+		 * COMI uses 12fps, while Droidworks uses 15fps.
+		 */
+		if ((ctx->rt.framedur == 1000000 / 12) && (ctx->msa->samplerate == 11025))
+			ctx->msa->samplerate = 22050;
+		atrk_set_srcfmt(atrk, ctx->msa->samplerate, 16, 2, ATRK_VOL_MAX, 0);
+		atrk->state = STATE_MIXABLE;
+	}
 
 	/* LECSMUSH.DLL 10002030 */
 	while (size > 0) {
@@ -4497,7 +4509,9 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 						*dst++ = cpu_to_le16((int8_t)v3) << ((count & 1) ? v1 : v2);
 					}
 				} while (--count);
-				ctx->io->queue_audio(ctx->io->userctx, ctx->adstbuf1, 4096);
+				atrk->dataleft += 4096;
+				atrk->playlen += 4096;
+				atrk_read_pcmsrc(atrk, 4096, ctx->adstbuf1);
 				size -= len;
 				src += len;
 				ctx->rt.iactpos = 0;
