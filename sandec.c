@@ -1175,8 +1175,8 @@ static uint8_t* codec47_block(struct sanctx *ctx, uint8_t * __restrict src,
 				for (j = 0; j < size; j++)
 					*(dst + (i * w) + j) = *(p1 + (i * w) + j);
 			break;
-		default:	/* fill a block with color from the codebook */
-			c = coltbl[opc & 7];
+		default:	/* fill a block with color from the 4-color codebook */
+			c = coltbl[opc & 3];
 			for (i = 0; i < size; i++)
 				for (j = 0; j < size; j++)
 					*(dst + (i * w) + j) = c;
@@ -1269,7 +1269,7 @@ static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, 
 	comp =   src[2];
 	newrot = src[3];
 	flag =   src[4];
-	coltbl = src + 8;	/* codebook 8 colors */
+	coltbl = src + 8;	/* codebook 4 colors */
 	decsize  = le32_to_cpu(ua32(src + 14));	/* decoded (raw frame) size */
 	if (decsize > ctx->rt.fbsize)
 		decsize = ctx->rt.fbsize;
