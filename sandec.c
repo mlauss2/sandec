@@ -3690,7 +3690,7 @@ static uint32_t atrk_resample_16(struct sanatrk *atrk, int16_t *dst, uint32_t co
 		if (atrk->flags & ATRK_1CH) {
 			/* Mono 16-bit Little Endian */
 			s1 = (int16_t)(atrk->data[pos] | (atrk->data[(pos + 1) & mask] << 8));
-			if (frac) {
+			if (frac && (((pos + 3) & mask) < atrk->wrptr)) {
 				uint32_t pos2 = (pos + 2) & mask;
 				int16_t next = (int16_t)(atrk->data[pos2] | (atrk->data[(pos2 + 1) & mask] << 8));
 				s1 += ((next - s1) * (int32_t)frac) >> 16;
@@ -3702,7 +3702,7 @@ static uint32_t atrk_resample_16(struct sanatrk *atrk, int16_t *dst, uint32_t co
 			uint32_t posR = (pos + 2) & mask;
 			s2 = (int16_t)(atrk->data[posR] | (atrk->data[(posR + 1) & mask] << 8));
 
-			if (frac) {
+			if (frac && (((pos + 7) & mask) < atrk->wrptr)) {
 				/* Next frame Left */
 				uint32_t posN = (pos + 4) & mask;
 				int16_t n1 = (int16_t)(atrk->data[posN] | (atrk->data[(posN + 1) & mask] << 8));
