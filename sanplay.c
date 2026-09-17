@@ -292,7 +292,7 @@ static int init_sdl(struct playpriv *p)
 	p->texsmooth = 1;
 	p->prevmult = 1;
 
-	spec.freq = 22050;
+	spec.freq = SANDEC_AUDIO_SRATE;
 	spec.format = SDL_AUDIO_S16LE;
 	spec.channels = 2;
 	as = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);

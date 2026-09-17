@@ -216,8 +216,9 @@ struct sanmsa {
 	uint16_t sou_damp_max;		/* maximum damping volume	*/
 	uint16_t sou_damp_dip_rate;	/* damping volume reduct. rate  */
 	uint16_t sou_damp_rise_rate;	/* damping volume augment. rate */
-	uint32_t samplerate;		/* 4 audio samplerate in Hz	*/
-	uint8_t numtrk;
+	uint32_t srcrate;		/* 4 SAN audio samplerate in Hz	*/
+	uint32_t destrate;		/* 4 desired destination rate	*/
+	uint8_t numtrk;			/* number of allocated tracks	*/
 };
 
 /* internal context: per-file */
@@ -272,6 +273,7 @@ struct sanctx {
 	struct sanrt rt;
 	struct sanio *io;
 	struct sanmsa *msa;	/* 8 ATRK infra				*/
+	uint32_t adestrate;	/* 4 desired audio output rate		*/
 	int errdone;		/* latest error status */
 	uint8_t *adstbuf1;	/* 8 audio buffer 1			*/
 
@@ -3809,17 +3811,18 @@ static inline void atrk_reset(struct sanatrk *atrk)
 
 static void atrk_set_srate(struct sanatrk *atrk, uint32_t rate)
 {
+	const uint32_t destrate = atrk->msa->destrate;
 	atrk->srate = rate;
 
 	/* find out whether the rate is a truncated integer ratio
 	 * of the destination rate, to fix consumption accounting,
 	 *  e.g. in RA2 LEV03/03PLAY2.SAN laser blasts at 5512Hz.
 	 */
-	const uint32_t div = (ATRK_DEST_RATE + (rate / 2)) / rate;
-	if ((div > 0) && (ATRK_DEST_RATE / div) == rate)
+	const uint32_t div = (destrate + (rate / 2)) / rate;
+	if ((div > 0) && (destrate / div) == rate)
 		atrk->src_cnvrate = (1U << 16) / div;
 	else
-		atrk->src_cnvrate = ((uint64_t)rate << 16) / ATRK_DEST_RATE;
+		atrk->src_cnvrate = ((uint64_t)rate << 16) / destrate;
 }
 
 static void atrk_set_playpos(struct sanatrk *atrk, uint32_t ofs, uint32_t len)
@@ -4392,7 +4395,7 @@ static int iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 
 	if (vol > ATRK_VOL_MAX)
 		vol = ATRK_VOL_MAX;
-	rate = msa->samplerate;
+	rate = msa->srcrate;
 	bits = 12;
 	chnl = 1;
 
@@ -4477,9 +4480,9 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		 * Fortunately, they can be identified using the video framerate.
 		 * COMI uses 12fps, while Droidworks uses 15fps.
 		 */
-		if ((ctx->rt.framedur == 1000000 / 12) && (ctx->msa->samplerate == 11025))
-			ctx->msa->samplerate = 22050;
-		atrk_set_srcfmt(atrk, ctx->msa->samplerate, 16, 2, ATRK_VOL_MAX, 0);
+		if ((ctx->rt.framedur == 1000000 / 12) && (ctx->msa->srcrate == 11025))
+			ctx->msa->srcrate = 22050;
+		atrk_set_srcfmt(atrk, ctx->msa->srcrate, 16, 2, ATRK_VOL_MAX, 0);
 		atrk->state = STATE_MIXABLE;
 	}
 
@@ -4747,7 +4750,7 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 	}
 	atrk_read_pcmsrc(atrk, size, src);
 	if (atrk->state < STATE_BLOCKED)
-		handle_SAUD(atrk, msa->samplerate);
+		handle_SAUD(atrk, msa->srcrate);
 
 	if (atrk->state == STATE_BLOCKED) {
 		if ((atrk->dataleft < 1) || (atrk->maxidx < 2)
@@ -5489,7 +5492,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	/* minimum number of samples to generate when resampling a stream to the
 	 * output rate to supply enough data for the duration of a single frame.
 	 */
-	audminframes = ((ATRK_DEST_RATE / fps) + 1) & ~1U;
+	audminframes = ((ctx->adestrate / fps) + 1) & ~1U;
 
 	/* for Full Throttle: the incoming audio data rate is not not enough
 	 * to sustain click-free playback at the requested 10fps.  It starts
@@ -5499,12 +5502,13 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	 */
 	if (fps < 11) {
 		rt->framedur = 10000000 / 105;
-		audminframes = (((ATRK_DEST_RATE * 10) / 105) + 1) & ~1U;
+		audminframes = (((ctx->adestrate * 10) / 105) + 1) & ~1U;
 	}
 
 	if (sandec_alloc_msa(&ctx->msa, ATRK_MAX, audminframes))
 		return 14;
-	ctx->msa->samplerate = srate;
+	ctx->msa->srcrate = srate;
+	ctx->msa->destrate = ctx->adestrate;
 
 	return 0;
 }
@@ -5567,6 +5571,8 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 	 */
 	ret = 0;
 	sb = src;
+	srate = 22050;		/* default */
+	achans = 2;		/* default */
 	while ((sz > 7) && (ret == 0)) {
 		c[0] = le32_to_cpu(ua32(src + 0));
 		c[1] = be32_to_cpu(ua32(src + 4));
@@ -5588,8 +5594,6 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 		case WAVE:
 			srate  = le32_to_cpu(ua32(src + 0));
 			achans = le32_to_cpu(ua32(src + 4));
-			if (srate != ATRK_DEST_RATE)
-				ret = 57;
 			if ((achans < 1) || (achans > 2))
 				ret = 58;
 			c[1] = 12;
@@ -5610,9 +5614,11 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 	if (0 != sandec_alloc_vidmem(ctx, maxx, maxy, 1))
 		return 4;
 
-	const uint32_t audminframes = (((22050 * 10 * rt->framedur) / 1000000) + 1) & ~1U;
+	const uint32_t audminframes = (((srate * 10 * rt->framedur) / 1000000) + 1) & ~1U;
 	if (sandec_alloc_msa(&ctx->msa, 1, audminframes))
 		return 60;
+	ctx->msa->srcrate = srate;
+	ctx->msa->destrate = ctx->adestrate;
 
 	rt->bufw = maxx;
 	rt->bufh = maxy;
@@ -5717,6 +5723,7 @@ int sandec_init(void **ctxout)
 
 	c47_make_glyphs(&ctx->c47_glyph4x4[0][0], c47_glyph4_x, c47_glyph4_y, 4);
 	c47_make_glyphs(&ctx->c47_glyph8x8[0][0], c47_glyph8_x, c47_glyph8_y, 8);
+	ctx->adestrate = SANDEC_AUDIO_SRATE;
 	*ctxout = ctx;
 
 	return 0;
@@ -5779,8 +5786,9 @@ int sandec_open(void *sanctx, struct sanio *io)
 			atrk->wrptr = csz + 8;
 			atrk->trkid = 1;
 			atrk->maxidx = 1;
-			ctx->msa->samplerate = 11025;
-			handle_SAUD(atrk, ctx->msa->samplerate);
+			ctx->msa->srcrate = 11025;
+			ctx->msa->destrate = ctx->adestrate;
+			handle_SAUD(atrk, ctx->msa->srcrate);
 			ret = atrk_count_active(ctx->msa, NULL) > 0 ? 0 : 8;
 		}
 

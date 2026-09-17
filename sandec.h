@@ -94,6 +94,9 @@
 #define SANDEC_DONE	-1
 /* all other positive values indicate where the error occured */
 
+/* resample all audio to this target rate */
+#define SANDEC_AUDIO_SRATE	22050
+
 
 /* flags */
 /* do frame interpolation if possible */
