@@ -3646,7 +3646,7 @@ static uint32_t atrk_resample_8(struct sanatrk *atrk, int16_t *dst, uint32_t cou
 		if (atrk->flags & ATRK_1CH) {
 			/* Mono 8-bit */
 			s1 = (atrk->data[pos] << 8) ^ 0x8000;
-			if (frac) {
+			if (frac && (((pos + 1) & mask) < atrk->wrptr)) {
 				int16_t next = (atrk->data[(pos + 1) & mask] << 8) ^ 0x8000;
 				s1 += ((next - s1) * (int32_t)frac) >> 16;
 			}
@@ -3655,7 +3655,7 @@ static uint32_t atrk_resample_8(struct sanatrk *atrk, int16_t *dst, uint32_t cou
 			/* Stereo 8-bit */
 			s1 = (atrk->data[pos] << 8) ^ 0x8000;
 			s2 = (atrk->data[(pos + 1) & mask] << 8) ^ 0x8000;
-			if (frac) {
+			if (frac && (((pos + 4) & mask) < atrk->wrptr)) {
 				int16_t n1 = (atrk->data[(pos + 2) & mask] << 8) ^ 0x8000;
 				int16_t n2 = (atrk->data[(pos + 3) & mask] << 8) ^ 0x8000;
 				s1 += ((n1 - s1) * (int32_t)frac) >> 16;
@@ -3807,10 +3807,19 @@ static inline void atrk_reset(struct sanatrk *atrk)
 	memset(&atrk->rdptr, 0, sizeof (struct sanatrk) - 2*sizeof(void *));
 }
 
-static inline void atrk_set_srate(struct sanatrk *atrk, uint32_t rate)
+static void atrk_set_srate(struct sanatrk *atrk, uint32_t rate)
 {
 	atrk->srate = rate;
-	atrk->src_cnvrate = (rate << 16) / ATRK_DEST_RATE;
+
+	/* find out whether the rate is a truncated integer ratio
+	 * of the destination rate, to fix consumption accounting,
+	 *  e.g. in RA2 LEV03/03PLAY2.SAN laser blasts at 5512Hz.
+	 */
+	const uint32_t div = (ATRK_DEST_RATE + (rate / 2)) / rate;
+	if ((div > 0) && (ATRK_DEST_RATE / div) == rate)
+		atrk->src_cnvrate = (1U << 16) / div;
+	else
+		atrk->src_cnvrate = ((uint64_t)rate << 16) / ATRK_DEST_RATE;
 }
 
 static void atrk_set_playpos(struct sanatrk *atrk, uint32_t ofs, uint32_t len)
