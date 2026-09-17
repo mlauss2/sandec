@@ -3725,23 +3725,33 @@ static uint32_t atrk_resample_16(struct sanatrk *atrk, int16_t *dst, uint32_t co
 	return ((acc >> 16) * 2 * chm);	/* source bytes consumed */
 }
 
-static inline int16_t _aud_decode_12bit(const uint8_t *data, uint32_t ptr, int hinib)
+static int16_t atrk_decode_12bit(const uint8_t *data, uint32_t ptr, int hinib, const uint32_t wp)
 {
-	uint32_t pos = ptr & ATRK_DATMASK;
-	uint8_t b0 = data[pos];
-	uint8_t b1 = data[(pos + 1) & ATRK_DATMASK];
-	uint8_t b2 = data[(pos + 2) & ATRK_DATMASK];
+	const uint32_t p0 = ptr & ATRK_DATMASK;
+	const uint32_t p1 = (p0 + 1) & ATRK_DATMASK;
+	const uint32_t p2 = (p0 + 2) & ATRK_DATMASK;
+
+	const uint8_t b0 = data[p0];
+	const uint8_t b1 = data[p1];
+	const uint8_t b2 = data[p2];
 
 	if (!hinib) {
-		return ((((b1 & 0x0f) << 8) | b0) << 4) - 0x8000;
+		if (b1 < wp)
+			return ((((b1 & 0x0f) << 8) | b0) << 4) - 0x8000;
+		else
+			return 0;
 	} else {
-		return ((((b1 & 0xf0) << 4) | b2) << 4) - 0x8000;
+		if (b2 < wp)
+			return ((((b1 & 0xf0) << 4) | b2) << 4) - 0x8000;
+		else
+			return 0;
 	}
 }
 
 static uint32_t atrk_resample_12(struct sanatrk *atrk, int16_t *dst, uint32_t count)
 {
 	uint32_t acc = atrk->src_accum;
+	const uint32_t wp = atrk->wrptr;
 	int16_t s1, s2;
 
 	for (uint32_t i = 0; i < count; i++) {
@@ -3754,16 +3764,16 @@ static uint32_t atrk_resample_12(struct sanatrk *atrk, int16_t *dst, uint32_t co
 			uint32_t rem = isidx & 1;
 			uint32_t pos = (atrk->rdptr + (block * 3));
 
-			s1 = _aud_decode_12bit(atrk->data, pos, rem);
+			s1 = atrk_decode_12bit(atrk->data, pos, rem, wp);
 
 			if (frac) {
 				int16_t next;
 				/* If rem was 0 (low nibble), next is same block rem 1 (high nibble)
 				 * If rem was 1 (high nibble), next is next block (block+1) rem 0 */
 				if (rem == 0) {
-					next = _aud_decode_12bit(atrk->data, pos, 1);
+					next = atrk_decode_12bit(atrk->data, pos, 1, wp);
 				} else {
-					next = _aud_decode_12bit(atrk->data, pos + 3, 0);
+					next = atrk_decode_12bit(atrk->data, pos + 3, 0, wp);
 				}
 				s1 += ((next - s1) * (int32_t)frac) >> 16;
 			}
@@ -3773,12 +3783,12 @@ static uint32_t atrk_resample_12(struct sanatrk *atrk, int16_t *dst, uint32_t co
 			uint32_t pos = (atrk->rdptr + (isidx * 3));
 
 			/* L is always low nibble type, R is always high nibble type */
-			s1 = _aud_decode_12bit(atrk->data, pos, 0);
-			s2 = _aud_decode_12bit(atrk->data, pos, 1);
+			s1 = atrk_decode_12bit(atrk->data, pos, 0, wp);
+			s2 = atrk_decode_12bit(atrk->data, pos, 1, wp);
 
 			if (frac) {
-				int16_t n1 = _aud_decode_12bit(atrk->data, pos + 3, 0);
-				int16_t n2 = _aud_decode_12bit(atrk->data, pos + 3, 1);
+				int16_t n1 = atrk_decode_12bit(atrk->data, pos + 3, 0, wp);
+				int16_t n2 = atrk_decode_12bit(atrk->data, pos + 3, 1, wp);
 
 				s1 += ((n1 - s1) * (int32_t)frac) >> 16;
 				s2 += ((n2 - s2) * (int32_t)frac) >> 16;
