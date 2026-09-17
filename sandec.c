@@ -4761,6 +4761,7 @@ static int handle_IMA4(struct sanctx *ctx, uint32_t size, uint8_t *src,
 			uint32_t samples, int ch)
 {
 	int16_t *dst = (int16_t *)ctx->adstbuf1;
+	struct sanatrk *atrk = &(ctx->msa->atrk[0]);
 	int i, j, nibsel, tblidx, adpcm_step, dat, delt;
 	uint8_t in, nib;
 
@@ -4816,13 +4817,16 @@ static int handle_IMA4(struct sanctx *ctx, uint32_t size, uint8_t *src,
 
 		i++;
 	}
-	ctx->io->queue_audio(ctx->io->userctx, ctx->adstbuf1, i * 2 * ch);
+	atrk->playlen += i * 2 * ch;
+	atrk->dataleft += i * 2 * ch;
+	atrk_read_pcmsrc(atrk, i * 2 * ch, ctx->adstbuf1);
 	return 0;
 }
 
 static int handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	int i, j, v1, data, ch, inbits, numbits, bitsize;
+	struct sanatrk *atrk = &(ctx->msa->atrk[0]);
 	int  hibit, lobits, tblidx, idx2, delt;
 	int16_t startdata[2], *dst;
 	uint8_t startpos[2];
@@ -4830,6 +4834,11 @@ static int handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	if (size < 16)
 		return 86;
+
+	if (atrk->state < STATE_MIXABLE) {
+		atrk_set_srcfmt(atrk, 22050, 16, 2, ATRK_VOL_MAX, 0);
+		atrk->state = STATE_MIXABLE;
+	}
 
 	samples = be32_to_cpu(ua32(src));
 	src += 4;
@@ -4937,8 +4946,9 @@ static int handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		if (!size)
 			break;
 	}
-
-	ctx->io->queue_audio(ctx->io->userctx, ctx->adstbuf1, samples * 2 * ch);
+	atrk->playlen += samples * 2 * ch;
+	atrk->dataleft += samples * 2 * ch;
+	atrk_read_pcmsrc(atrk, samples * 2 * ch, ctx->adstbuf1);
 	return 0;
 }
 
@@ -5204,6 +5214,10 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	/* OK case: all usable bytes of the FRME read, no errors */
 	rt->currframe++;
 	if (ret == 0) {
+		/* resample+mix audio track(s) and queue it up */
+		if (!(ctx->io->flags & SANDEC_FLAG_NO_AUDIO) && (ctx->msa))
+			aud_mix_tracks(ctx);
+
 		if (rt->version > 2) {
 			ctx->io->queue_video(ctx->io->userctx, rt->vbuf,
 					     rt->pitch * rt->bufh * 1,
@@ -5243,9 +5257,6 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 			}
 		}
 
-		/* mix multi-track audio and queue it up */
-		if (!(ctx->io->flags & SANDEC_FLAG_NO_AUDIO) && (ctx->msa))
-			aud_mix_tracks(ctx);
 
 		rt->subid = 0;
 		rt->have_frame = 0;
@@ -5598,6 +5609,10 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 		return 59;
 	if (0 != sandec_alloc_vidmem(ctx, maxx, maxy, 1))
 		return 4;
+
+	const uint32_t audminframes = (((22050 * 10 * rt->framedur) / 1000000) + 1) & ~1U;
+	if (sandec_alloc_msa(&ctx->msa, 1, audminframes))
+		return 60;
 
 	rt->bufw = maxx;
 	rt->bufh = maxy;
