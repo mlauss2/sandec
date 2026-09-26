@@ -1,4 +1,4 @@
-CFLAGS?=-O3 -march=native -mtune=native -ggdb3 -gdwarf-5 -pipe -Wall -pedantic
+CFLAGS?=-Og -march=native -mtune=native -ggdb3 -gdwarf-5 -pipe -Wall -pedantic
 INC=-I/usr/include/SDL3
 LIBS=-lSDL3
 CC=cc
@@ -19,7 +19,7 @@ zlib: LIBS += -lz
 zlib: sanplay
 
 sanplay: $(FOBJS)
-	$(CC) $(LIBS) -o sanplay $(FOBJS)
+	$(CC) $(LIBS) $(CFLAGS) -o sanplay $(FOBJS)
 
 clean:
 	@rm -f sanplay $(FOBJS) *~ *.rej *.orig

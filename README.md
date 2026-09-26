@@ -30,7 +30,7 @@ with an SDL3-based player application to demonstrate library use.
   - q     to quit
   - l     to toggle ANIMv1 (RA1) viewport size: Most videos have 320x200 content, but some gameplay videos have content on the full 384x242 buffer.
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
-  - i  to toggle frame interpolation on codec47/48 on/off
+  - i  to toggle frame interpolation on/off
   - s  to cycle between SDL3 texture smoothing (off/pixelized and smoothed).
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
@@ -49,6 +49,8 @@ with an SDL3-based player application to demonstrate library use.
   - -m: Mortimer mode, use for Video of "Mortimer and the Riddles of the Medallion".
 
 # Notes
+- Frame interpolation/framerate doubling
+  It is now possible for all .ANM/.SAN files to double the framerate by using frame interpolation.  The videos are smoother/less choppy on pans, but this also generates visible ghosting, so it is disabled by default.
 - Mortimer and the Riddles of the Medallion
   - Mortimer selectively uses upscaling on codec3/23/37 objects and also (mis-)uses codec3 (opaque) as 2x2-variant of codec1 (transparent). This cannot be reliably autodetected, so the decoder implements a "Mortimer-Mode", selected via "-m" player commandline switch.
   - Decoding artifacts in the codec37 videos remain.
@@ -60,4 +62,4 @@ with an SDL3-based player application to demonstrate library use.
   - GAME/GAM2: RA1 game progress feedback.
   - RAW!/SBL /SBL2/Crea: Raw PCM/VOC file support, it's in the code but not used in any ANM/SAN file.
 
-20260729
+20260926

@@ -120,7 +120,7 @@ static inline uint32_t ua32(const uint8_t *p)
 #define SZ_SHIFTPAL	(768 * sizeof(int16_t))
 #define SZ_C47IPTBL	(256 * 256)
 #define SZ_ADSTBUF	(393216)
-#define SZ_ANMBUFS (SZ_IACT + (2 * SZ_PAL) + SZ_DELTAPAL + SZ_C47IPTBL + SZ_SHIFTPAL)
+#define SZ_ANMBUFS (SZ_IACT + (2 * SZ_PAL) + SZ_DELTAPAL + (2 * SZ_C47IPTBL) + SZ_SHIFTPAL)
 
 /* codec47 glyhps */
 #define GLYPH_COORD_VECT_SIZE 16
@@ -232,6 +232,7 @@ struct sanrt {
 	uint8_t *buf3;		/* 8 STOR buffer			*/
 	uint8_t *buf4;		/* 8 last full frame for interpolation  */
 	uint8_t *buf5;		/* 8 interpolated frame                 */
+	uint8_t *fadebuf;	/* 8 intermediate buffer for v1 FADE	*/
 	uint8_t *vbuf;		/* 8 final image buffer passed to caller*/
 	uint16_t pitch;		/* 2 image pitch			*/
 	uint16_t bufw;		/* 2 alloc'ed buffer width/pitch	*/
@@ -254,8 +255,7 @@ struct sanrt {
 	uint16_t version;	/* 2 SAN version number			*/
 	uint8_t  have_vdims:1;	/* 1 we have valid video dimensions	*/
 	uint8_t  have_frame:1;	/* 1 we have a valid video frame	*/
-	uint8_t  have_itable:1;	/* 1 have c47/48 interpolation table    */
-	uint8_t  can_ipol:1;	/* 1 do an interpolation                */
+	uint8_t  can_ipol:1;	/* 1 frame interpolation possible       */
 	uint8_t  have_ipframe:1;/* 1 we have an interpolated frame      */
 	uint8_t  iact8c4x:1;	/* 1 IACT 8 for codec47/48 titles	*/
 	uint8_t  iactimus:2;	/* 1 is TheDig/IACT 8/0/0/x>0 is audio	*/
@@ -266,6 +266,8 @@ struct sanrt {
 	uint8_t *last_fobj;	/* 8 ptr to last FOBJ, for GOST		*/
 	uint32_t last_fobj_size;/* 4 size of last FOBJ			*/
 	uint8_t	 mortimer:1;	/* 1 upscale for Mortimer		*/
+	uint8_t *general_itbl;	/* 8 general interpolation table	*/
+	uint8_t *itbl;		/* 8 ptr to itable to use for framegen  */
 };
 
 /* internal context: static stuff. */
@@ -1002,6 +1004,66 @@ static inline int read_source(struct sanctx *ctx, void *dst, uint32_t sz)
 	return !(ctx->io->ioread(ctx->io->userctx, dst, sz));
 }
 
+static uint16_t isqrt32(uint32_t a)
+{
+	uint32_t rem = 0;
+	uint16_t root = 0;
+
+	for (int i = 16; i > 0; i--) {
+		root <<= 1;
+		rem = (rem << 2) | (a >> 30);
+		a <<= 2;
+		if (root < rem) {
+			rem -= root | 1;
+			root += 2;
+		}
+	}
+	return root >> 1;
+}
+
+/* generate an interpolation table based on the palette we have */
+static void generate_itbl(const uint32_t *pal, uint8_t *itbl)
+{
+	int i, j, k, r1, r2, g1, g2, b1, b2, mr, mg, mb, dr, dg, db;
+	int dist, best_dist, best_idx;
+
+	for (i = 0; i < 256; i++) {
+		r1 = (pal[i] >> 16) & 0xff;
+		g1 = (pal[i] >>  8) & 0xff;
+		b1 =  pal[i]        & 0xff;
+		for (j = i; j < 256; j++) {
+			if (i == j) {
+				itbl[(i << 8) | i] = i;
+				continue;
+			}
+
+			r2 = (pal[j] >> 16) & 0xff;
+			g2 = (pal[j] >>  8) & 0xff;
+			b2 =  pal[j]       & 0xff;
+
+			mr = isqrt32((r1 * r1 + r2 * r2) >> 1);
+			mg = isqrt32((g1 * g1 + g2 * g2) >> 1);
+			mb = isqrt32((b1 * b1 + b2 * b2) >> 1);
+
+			best_dist = 256 * 256 * 3;
+			best_idx = i;
+
+			for (k = 0; k < 256; k++) {
+				dr = ((pal[k] >> 16) & 0xff) - mr;
+				dg = ((pal[k] >>  8) & 0xff) - mg;
+				db = ( pal[k]        & 0xff) - mb;
+				dist = (dr * dr) + (dg * dg) + (db * db);
+				if (dist < best_dist) {
+					best_dist = dist;
+					best_idx = k;
+				}
+			}
+			itbl[(i << 8) | j] = best_idx;
+			itbl[(j << 8) | i] = best_idx;
+		}
+	}
+}
+
 static void read_palette(struct sanctx *ctx, uint8_t *src)
 {
 	struct sanrt *rt = &ctx->rt;
@@ -1020,6 +1082,10 @@ static void read_palette(struct sanctx *ctx, uint8_t *src)
 	/* RA1 always sets color index 0 to full black. */
 	if (rt->version < 2)
 		rt->palette[0] = 0xffU << 24;
+
+	if (rt->itbl == rt->general_itbl)
+		generate_itbl(rt->palette, rt->general_itbl);
+	rt->can_ipol = 0;
 }
 
 static void interpolate_frame(uint8_t * __restrict dst,
@@ -1243,7 +1309,7 @@ static void codec47_itable(struct sanctx *ctx, uint8_t *src)
 		}
 		itbl += 256;
 	}
-	ctx->rt.have_itable = 1;
+	ctx->rt.itbl = ctx->rt.c47ipoltbl;
 }
 
 static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, uint16_t h,
@@ -1313,8 +1379,8 @@ static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, 
 		c47_swap_bufs(ctx, newrot);
 
 	ctx->rt.lastseq = seq;
-	if (seq > 1)
-		ctx->rt.can_ipol = 1;
+	if (seq < 1)
+		ctx->rt.can_ipol = 0;
 
 	return 0;
 }
@@ -1606,8 +1672,8 @@ static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 		break;
 	}
 
-	if (seq > 0)
-		ctx->rt.can_ipol = 1;
+	if (seq < 1)
+		ctx->rt.can_ipol = 0;
 	ctx->rt.lastseq = seq;
 
 	if ((flag & 2) == 0) {
@@ -1853,6 +1919,9 @@ static int codec37(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 		blt_mask(dbuf, ctx->rt.buf0, xoff, yoff, 0, 0, w, h, w, ctx->rt.pitch,
 			 ctx->rt.bufh, 0);
 	}
+
+	if (seq < 1)
+		ctx->rt.can_ipol = 0;
 
 	return 0;
 }
@@ -3000,7 +3069,6 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	case 48: ret = codec48(ctx, dst, src, fobw, fobh, xoff, yoff, size, anm_flags); break;
 	default: ret = 18; break;
 	}
-
 	return ret;
 }
 
@@ -3554,6 +3622,9 @@ static void handle_XPAL(struct sanctx *ctx, uint32_t size, uint8_t *src)
 			}
 			*pal++ = 0xffU << 24 | t2[2] << 16 | t2[1] << 8 | t2[0];
 		}
+		if (ctx->rt.itbl == ctx->rt.general_itbl)
+			generate_itbl(ctx->rt.palette, ctx->rt.general_itbl);
+		ctx->rt.can_ipol = 0;
 	}
 }
 
@@ -4998,7 +5069,7 @@ static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 static void handle_FADE(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint32_t csz, cid, count, remaining;
-	uint8_t *vga = ctx->rt.buf5;
+	uint8_t *vga = ctx->rt.fadebuf;
 	int32_t dstoff, dstoff2;
 	int16_t fadestride;
 	int8_t c;
@@ -5061,7 +5132,8 @@ static void handle_FADE(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		}
 	}
 
-	ctx->rt.vbuf = ctx->rt.buf5;
+	ctx->rt.vbuf = ctx->rt.fadebuf;
+	ctx->rt.can_ipol = 0;
 	return;
 }
 
@@ -5090,7 +5162,6 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t
 	if (sz > 0 && sz <= ctx->rt.fbsize) {
 		ret = fob_decode_render(ctx, ctx->rt.fbuf, vb + 4, sz, xoff, yoff, anm_flags, 1, 0);
 	}
-	ctx->rt.can_ipol = 0;
 	if (ret == 0)
 		ctx->rt.have_frame = 1;
 	return ret;
@@ -5177,6 +5248,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 
 	rt->last_fobj = NULL;
 	rt->last_fobj_size = 0;
+	rt->can_ipol = 1;
 	while ((size > 7) && (ret == 0)) {
 
 		/* some blocks like IACT have odd size, and RA1 L2PLAY.ANM
@@ -5248,10 +5320,9 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 			 * and queue that plus the decoded one.
 			 */
 			if (ctx->io->flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION
-			    && rt->have_itable
 			    && rt->can_ipol) {
 				interpolate_frame(rt->buf5, rt->buf4, rt->vbuf,
-						  rt->c47ipoltbl, rt->bufw, rt->bufh);
+						  rt->itbl, rt->bufw, rt->bufh);
 				rt->have_ipframe = 1;
 				rt->can_ipol = 0;
 				memcpy(rt->buf4, rt->vbuf, rt->bufw * rt->bufh * 1);
@@ -5265,8 +5336,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 					     rt->bufw, rt->bufh, rt->pitch, rt->palette,
 					     rt->subid, rt->framedur);
 				/* save frame as possible interpolation source */
-				if (rt->have_itable)
-					memcpy(rt->buf4, rt->vbuf, rt->bufw * rt->bufh * 1);
+				memcpy(rt->buf4, rt->vbuf, rt->bufw * rt->bufh * 1);
 			}
 		}
 
@@ -5385,7 +5455,7 @@ static int sandec_alloc_vidmem(struct sanctx *ctx, const uint16_t maxx,
 		/* ANM aux buffers: fbuf, buf3/4/5 */
 		vmem = maxx * maxy;
 		vmem = (vmem + 63) & ~63;		/* align */
-		mem += vmem * 4;
+		mem += vmem * 5;
 		/* STOR buffer c20 FOBJ header + data size */
 		mem += 32;
 		mem = (mem + 4095) & ~4095;
@@ -5409,6 +5479,7 @@ static int sandec_alloc_vidmem(struct sanctx *ctx, const uint16_t maxx,
 		rt->deltapal = (int16_t *)m;	m += SZ_DELTAPAL;
 		rt->shiftpal = (int16_t *)m;	m += SZ_SHIFTPAL;
 		rt->c47ipoltbl = (uint8_t *)m;	m += SZ_C47IPTBL;
+		rt->general_itbl = (uint8_t *)m;m += SZ_C47IPTBL;
 
 		/* set up video buffers for ANM */
 		m = (uint8_t *)((((uintptr_t)m) + 63) & ~63);
@@ -5419,6 +5490,7 @@ static int sandec_alloc_vidmem(struct sanctx *ctx, const uint16_t maxx,
 		rt->buf4 = rt->buf2 + cmem;	/* interpolated frame buffer	*/
 		rt->buf5 = rt->buf4 + vmem;	/* interpolation last frame buf */
 		rt->buf3 = rt->buf5 + vmem;	/* STOR buffer			*/
+		rt->fadebuf = rt->buf5 + vmem;	/* FADE intermediate buffer	*/
 	} else {
 		/* set up buffers for SNM: 3 video buffers for BL16 */
 		rt->fbuf = NULL;
@@ -5464,6 +5536,8 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		return 4;
 	}
 
+	/* set our own as default interpolation table */
+	rt->itbl = rt->general_itbl;
 	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
 
 	if (rt->version > 1) {
