@@ -5559,11 +5559,11 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 	rt->framedur = le32_to_cpu(ua32(src + 14));
 	maxx = rt->bufw;
 	maxy = rt->bufh;
+	/* followed by a few more parameters and 1024 bytes
+	 * of ARGB palette data.
+	 */
 	free(src);
 
-	/* there's now >1kB of data left, no idea what it's for.
-	 * at the end there should be FLHD
-	 */
 	if (read_source(ctx, c, 8)) {
 		return 52;
 	}
@@ -5587,8 +5587,8 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 	 */
 	ret = 0;
 	sb = src;
-	srate = 22050;		/* default */
-	achans = 2;		/* default */
+	srate = 22050;		/* default in all game movies so far */
+	achans = 2;		/* default in all game movies so far */
 	while ((sz > 7) && (ret == 0)) {
 		c[0] = le32_to_cpu(ua32(src + 0));
 		c[1] = be32_to_cpu(ua32(src + 4));
@@ -5606,10 +5606,29 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 			t16 = le16_to_cpu(*(uint16_t *)(src + 4));
 			if (t16 > maxy)
 				maxy = t16;
+			/* either pixel format of pixel component count.
+			 *  The BL16 decoders in tgsmush.dll and indy3d.exe
+			 *  only support "3".  However the code in these
+			 *  ref implementations does support conversion
+			 *  to and from a wide variety of pixel formats.
+			 */
+			if (le16_to_cpu(*(uint16_t *)(src + 6)) != 3)
+				return 61;
 			break;
 		case WAVE:
 			srate  = le32_to_cpu(ua32(src + 0));
 			achans = le32_to_cpu(ua32(src + 4));
+			/* at offset 8, there's a 32bit-LE value indicating
+			 * the amount of PCM bytes the decoder will generate
+			 * in total for this file.
+			 * This is needed because the original decoder will
+			 * construct PSADv2 packets, with 0000 for "SAUD", a
+			 * valid default STRK script and "S6MZ" (for mono) or
+			 * "S6SZ" tags for the PCM data portion indicating the
+			 * format, and return those on decoding.  We are only
+			 * interested in the raw WAVE data though, no need
+			 * to read it.
+			 */
 			if ((achans < 1) || (achans > 2))
 				ret = 58;
 			c[1] = 12;
