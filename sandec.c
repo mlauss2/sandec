@@ -3198,7 +3198,7 @@ static void bl16_comp8(uint16_t *dst, uint8_t *src, uint32_t left, const uint16_
 			for (j = 0; j < rlen; j++)
 				*dst++ = col;
 		} else {
-			if (rlen < srcsize)
+			if (rlen > srcsize)
 				rlen = srcsize;
 			srcsize -= rlen;
 			for (j = 0; j < rlen; j++)
