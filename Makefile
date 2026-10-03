@@ -1,4 +1,4 @@
-CFLAGS?=-Og -march=native -mtune=native -ggdb3 -gdwarf-5 -pipe -Wall -pedantic
+CFLAGS?=-O3 -march=native -mtune=native -ggdb3 -gdwarf-5 -pipe -Wall -pedantic
 INC=-I/usr/include/SDL3
 LIBS=-lSDL3
 CC=cc
