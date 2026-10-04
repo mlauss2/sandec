@@ -95,8 +95,6 @@ static inline uint32_t ua32(const uint8_t *p)
 #define FDHD	0x44484446
 #define FFRM	0x4d524646
 #define GOST	0x54534f47
-#define S6MZ	0x5a4d3653
-#define S6SZ	0x5a533653
 
 /* ANM_FLAGS: various flags passed to the fob decoders and font renderer */
 #define ANM_FLAG_IGN_FOB_OFS		0x0001
@@ -4709,19 +4707,16 @@ static void handle_SAUD(struct sanatrk *atrk, const uint16_t rate)
 	if ((atrk->state > STATE_HEADER) || (size < 16))
 		return;
 
-	/* need to find: SAUD____STRK____<ssss>SDAT____, or
-	 * 0000____0000____<ssss>S6[MS]Z____ for the PSADv2 packets fed to the
-	 *  sound interface in the SANM format
-	 */
+	/* need to find: SAUD____STRK____<ssss>SDAT____  */
 	cid = le32_to_cpu(ua32(src + 0));
-	if ((cid != SAUD) && (cid != 0))
+	if (cid != SAUD)
 		return;
 
 	src += 8;
 	size -= 8;
 	cid = le32_to_cpu(ua32(src + 0));
 	csz = be32_to_cpu(ua32(src + 4));
-	if ((cid != STRK) && (cid != 0))
+	if (cid != STRK)
 		return;
 
 	src += 8;
@@ -4737,7 +4732,7 @@ static void handle_SAUD(struct sanatrk *atrk, const uint16_t rate)
 
 	cid = le32_to_cpu(ua32(src + 0));	/* SDAT */
 	csz = be32_to_cpu(ua32(src + 4));	/* total PCM bytes */
-	if ((cid != SDAT) && (cid != S6MZ) && (cid != S6SZ))
+	if (cid != SDAT)
 		return;
 
 	src += 8;
@@ -4751,13 +4746,7 @@ static void handle_SAUD(struct sanatrk *atrk, const uint16_t rate)
 	atrk->wrptr = size;
 	atrk->dataleft = csz - size;
 
-	if (cid == SDAT) {
-		atrk_set_srcfmt(atrk, rate, 8, 1, atrk->vol, atrk->pan);
-	} else if (cid == S6MZ) {
-		atrk_set_srcfmt(atrk, rate, 16, 1, atrk->vol, atrk->pan);
-	} else { /* S6SZ */
-		atrk_set_srcfmt(atrk, rate, 16, 2, atrk->vol, atrk->pan);
-	}
+	atrk_set_srcfmt(atrk, rate, 8, 1, atrk->vol, atrk->pan);
 	atrk_process_strk(atrk);
 	atrk_update_dstframes_avail(atrk);
 }
