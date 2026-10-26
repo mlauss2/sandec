@@ -403,7 +403,7 @@ int main(int a, char **argv)
 		}
 
 		if (mortimermode) {
-			ret = sandec_set_params(sanctx, 640, 480, 1);
+			ret = sandec_set_params(sanctx, 768, 484, 1);
 			if (ret) {
 				if (verbose) {
 					printf("Mortimer params failed: %d\n", ret);

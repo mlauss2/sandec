@@ -109,9 +109,11 @@ static inline uint32_t ua32(const uint8_t *p)
 /* reasonable maximum size of a FRME */
 #define FRME_MAX_SIZE	(4 << 20)
 
-/* ANIM maximum image size */
-#define FOBJ_MAXX	640
-#define FOBJ_MAXY	480
+/* ANIM maximum image size.
+ * Derived from Mortimer's 384x242 2x2 upscaled gameplay videos.
+ */
+#define FOBJ_MAXX	768
+#define FOBJ_MAXY	484
 
 /* sizes of various internal work buffers */
 #define SZ_IACT		(4096)
@@ -5950,7 +5952,7 @@ int sandec_set_params(void *sanctx, int16_t xres, int16_t yres, int8_t mortimerm
 		if (mortimermode != -1) {
 			if (mortimermode == 0) {
 				ctx->rt.mortimer = 0;
-			} else if ((ctx->rt.bufw == 640) && (ctx->rt.bufh == 480) && (mortimermode != 0)) {
+			} else if ((ctx->rt.bufw == 768) && (ctx->rt.bufh == 484) && (mortimermode != 0)) {
 				ctx->rt.mortimer = 1;
 			}
 		}
