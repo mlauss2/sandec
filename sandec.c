@@ -998,7 +998,7 @@ static void fillrect(uint8_t *dst, int16_t xoff, int16_t yoff, uint16_t width,
 
 static inline int read_source(struct sanctx *ctx, void *dst, uint32_t sz)
 {
-	return !(ctx->io->ioread(ctx->io->userctx, dst, sz));
+	return ctx->io->ioread(ctx->io->userctx, dst, sz);
 }
 
 static uint16_t isqrt32(uint32_t a)
@@ -4349,7 +4349,7 @@ static void atrk_resample(struct sanatrk *atrk, int16_t *destbuf, uint32_t len)
 		atrk_process_strk(atrk);
 }
 
-static int aud_mix_tracks(struct sanctx *ctx)
+static int aud_mix_tracks(struct sanctx *ctx, void **dpt_out, uint32_t *dsz_out)
 {
 	struct sanmsa *msa = ctx->msa;
 	int16_t *trkobuf = (int16_t *)msa->audrsb1;
@@ -4418,8 +4418,10 @@ static int aud_mix_tracks(struct sanctx *ctx)
 			}
 		}
 	}
-	if (dstlen)
-		ctx->io->queue_audio(ctx->io->userctx, aptr, dstlen);
+	if (dstlen) {
+		*dpt_out = (void *)aptr;
+		*dsz_out = dstlen;
+	}
 
 	if (voice) {
 		if (msa->sou_vol_damp != msa->sou_damp_min)
@@ -5168,7 +5170,7 @@ static int allocfrme(struct sanctx *ctx, uint32_t sz)
 	return 0;
 }
 
-static int handle_FRME(struct sanctx *ctx, uint32_t size)
+static int handle_FRME(struct sanctx *ctx, uint32_t size, struct sanframe *outdata)
 {
 	struct sanrt *rt = &ctx->rt;
 	uint32_t cid, csz;
@@ -5246,13 +5248,15 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 	if (ret == 0) {
 		/* resample+mix audio track(s) and queue it up */
 		if (!(ctx->io->flags & SANDEC_FLAG_NO_AUDIO) && (ctx->msa))
-			aud_mix_tracks(ctx);
+			aud_mix_tracks(ctx, &(outdata->aud_data), &(outdata->aud_size));
 
 		if (rt->version > 2) {
-			ctx->io->queue_video(ctx->io->userctx, rt->vbuf,
-					     rt->pitch * rt->bufh * 1,
-					     rt->bufw, rt->bufh, rt->pitch,
-					     NULL, 0, rt->framedur);
+			outdata->vid_data = rt->vbuf;
+			outdata->vid_size = rt->pitch * rt->bufh;
+			outdata->vid_xres = rt->bufw;
+			outdata->vid_yres = rt->bufh;
+			outdata->vid_pitch = rt->pitch;
+			outdata->frame_duration_us = rt->framedur;
 			return 0;
 		}
 
@@ -5267,15 +5271,24 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size)
 				rt->have_ipframe = 1;
 				rt->can_ipol = 0;
 				memcpy(rt->buf4, rt->vbuf, rt->bufw * rt->bufh * 1);
-				ctx->io->queue_video(ctx->io->userctx, rt->buf5,
-					     rt->pitch * rt->bufh,
-					     rt->bufw, rt->bufh, rt->pitch, rt->palette,
-					     rt->subid, rt->framedur / 2);
+				outdata->vid_data = rt->buf5;
+				outdata->vid_size = rt->pitch * rt->bufh;
+				outdata->vid_xres = rt->bufw;
+				outdata->vid_yres = rt->bufh;
+				outdata->vid_pitch = rt->pitch;
+				outdata->pal = rt->palette;
+				outdata->frame_duration_us = rt->framedur / 2;
+				outdata->txtres = rt->subid;
 			} else {
-				ctx->io->queue_video(ctx->io->userctx, rt->vbuf,
-					     rt->pitch * rt->bufh * 1,
-					     rt->bufw, rt->bufh, rt->pitch, rt->palette,
-					     rt->subid, rt->framedur);
+				outdata->vid_data = rt->vbuf;
+				outdata->vid_size = rt->pitch * rt->bufh;
+				outdata->vid_xres = rt->bufw;
+				outdata->vid_yres = rt->bufh;
+				outdata->vid_pitch = rt->pitch;
+				outdata->pal = rt->palette;
+				outdata->frame_duration_us = rt->framedur;
+				outdata->txtres = rt->subid;
+
 				/* save frame as possible interpolation source */
 				memcpy(rt->buf4, rt->vbuf, rt->bufw * rt->bufh * 1);
 			}
@@ -5675,49 +5688,62 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 /******************************************************************************/
 /* public interface */
 
-int sandec_decode_next_frame(void *sanctx)
+int sandec_decode_next_frame(void *sanctx, struct sanframe *outdata)
 {
 	struct sanctx *ctx = (struct sanctx *)sanctx;
 	uint32_t c[2];
 	int ret, b;
 
-	if (!ctx)
+	if (!ctx || !outdata)
 		return 1;
 	/* in case of previous error, don't continue, just return it again */
 	if (ctx->errdone)
 		return ctx->errdone;
 
+	memset(outdata, 0, sizeof(struct sanframe));
+
 	/* interpolated frame: was queued first, now queue the decoded one */
 	if (ctx->rt.have_ipframe) {
 		struct sanrt *rt = &ctx->rt;
 		rt->have_ipframe = 0;
-		ctx->io->queue_video(ctx->io->userctx, rt->vbuf, rt->pitch * rt->bufh,
-				     rt->bufw, rt->bufh, rt->pitch, rt->palette,
-				     rt->subid, rt->framedur / 2);
+		outdata->vid_data = rt->vbuf;
+		outdata->vid_size = rt->pitch * rt->bufh;
+		outdata->vid_xres = rt->bufw;
+		outdata->vid_yres = rt->bufh;
+		outdata->vid_pitch = rt->pitch;
+		outdata->pal = rt->palette;
+		outdata->frame_duration_us = rt->framedur / 2;
+		outdata->txtres = rt->subid;
 		return SANDEC_OK;
 	}
 
 again:
 	ret = read_source(ctx, c, 8);
 	if (ret) {
+		/* read error: file may have been read */
 		if (ctx->rt.currframe >= ctx->rt.FRMEcnt) {
-			ret = SANDEC_DONE;	/* seems we reached file end */
+			/* all frames read, finish up remaining audio */
 			if (ctx->msa) {
 				atrk_finish_all(ctx->msa);
-				b = 1;
-				while (b && atrk_count_active(ctx->msa, NULL) &&
-					!(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)) {
-					b = aud_mix_tracks(ctx);
+				if (atrk_count_active(ctx->msa, NULL)) {
+					b = aud_mix_tracks(ctx, &(outdata->aud_data), &(outdata->aud_size));
+				} else {
+					b = 0;
 				}
+			} else {
+				b = 0;
 			}
+		} else {
+			b = 0;
 		}
+		ret = (b == 0) ? SANDEC_DONE : SANDEC_OK;
 		goto out;
 	}
 
 	c[1] = be32_to_cpu(c[1]);
 	if (c[0] == FRME) {
 		/* default case */
-		ret = handle_FRME(ctx, c[1]);
+		ret = handle_FRME(ctx, c[1], outdata);
 
 	} else if (c[0] == ANNO) {
 		/* some annotation, found esp. in Grim Fandango files. just skip it */
@@ -5732,9 +5758,6 @@ again:
 			c[1] -= rs;
 		}
 		goto again;
-
-	} else if (atrk_count_active(ctx->msa, NULL) && !(ctx->io->flags & SANDEC_FLAG_NO_AUDIO)) {
-		aud_mix_tracks(ctx);
 
 	} else {
 		ret = 10;

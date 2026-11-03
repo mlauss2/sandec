@@ -30,8 +30,11 @@ with an SDL3-based player application to demonstrate library use.
   - q     to quit
   - l     to toggle ANIMv1 (RA1) viewport size: Most videos have 320x200 content, but some gameplay videos have content on the full 384x242 buffer.
   - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
-  - i  to toggle frame interpolation on/off
+  - i  to toggle frame interpolation on/off.
   - s  to cycle between SDL3 texture smoothing (off/pixelized and smoothed).
+  - g  to toggle pixel grid overlay on/off.
+  - G  to cycle grid color (green/red/blue/white/black atm).
+  - h  to cycle the pixel corner to draw the grid over (bottom-right default).
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
@@ -45,7 +48,9 @@ with an SDL3-based player application to demonstrate library use.
   - -f: start fullscreen
   - -v: be verbose
   - -s: no audio (silent)
-  - -0..3: speedmode  0: normal  1: ignore frametimes (display as fast as possible)  2: just decode as fast as possible  3: pause after every frame
+  - -1: fast decode+render mode (benchmark decoding+rendering).
+  - -2: benchmark decode (just decode as fast as possible, no display/rendering).
+  - -3: pause after displaying first frame.
   - -m: Mortimer mode, use for Video of "Mortimer and the Riddles of the Medallion".
 
 # Notes
@@ -62,4 +67,4 @@ with an SDL3-based player application to demonstrate library use.
   - GAME/GAM2: RA1 game progress feedback.
   - RAW!/SBL /SBL2/Crea: Raw PCM/VOC file support, it's in the code but not used in any ANM/SAN file.
 
-20260926
+20261119

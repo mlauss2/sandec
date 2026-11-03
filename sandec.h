@@ -3,49 +3,13 @@
  *
  * How to use:
  *
- * - Prepare some callbacks:
- *
- * Queue new audio data:  Audio is 22.05kHz 16bit Stereo LSB. This callback
- *  can be called multiple times during sandec_decode_next_frame(), always
- *  with new data, so the callback needs to either queue the data immediately,
- *  or append it to a buffer for later consumption.
- *
- * void my_queue_audio(void *userctx, char *abuf, uint32_t bufsize)
- * {
- *  userctx:  context data from struct sanio
- *  abuf, bufsize: audio data buffer and size in bytes of data in buffer.
- * }
- *
- *
- * Queue new video frame callback: Called once per frame after a new frame
- *  is available.  The pointers given to this callback are valid until
- *  the next invocation of sandec_decode_next_frame().
- * the subid parameter indicates which message id from the Outlaws LOCAL.MSG
- *  file should be displayed for subtitles. If it is zero, do not show any.
- *
- * void my_queue_videoframe(void *userctx, char *vbuf, uint32_t bufsize,
- *                          uint16_t w, uint16_t h, uint32_t* pal,
- *                          uint16_t subid, uint16_t, uint32_t frame_duration_us)
- * {
- *  userctx: context data from struct sanio
- *  vbuf, bufsize: image data and size of buffer
- *  w, h: width/height in pixels of image
- *  pitch: line size/stride/pitch in bytes
- *  pal: 256 * 4 byte buffer with palette data in ARGB format.  If pal is NULL,
- *   then pixelformat is RGB565, otherwise if PAL is set, the pixelformat is INDEX8.
- *  subid: index of the subtitle to display, or zero.
- *  frame_duration_us: how long to display the frame, in microsecods.  The frame
- *   duration _may_ vary during playback!
- * }
- *
- *
  * fetch data callback:  destbuf is always valid, amount is always 1 or more.
- * Return 1 if the requested amount of data was put in the buffer,
- *  otherwise or on error return 0.
+ * Return 0 if the requested amount of data was put in the buffer,
+ *  otherwise return an error.
  *
  * int my_data_read(void *userctx, char *destbuf, int amount)
- * {    // return 1 if all data was read, 0 on errors or not enough data.
- *	return (read(userctx->fhandle, destbuf, amount) == amount);
+ * {    // return 0 if all data was read, others on errors.
+ *	return (read(userctx->fhandle, destbuf, amount) != amount);
  * }
  *
  *
@@ -54,6 +18,7 @@
  * void *sancontext;
  * struct sanio myio;
  * struct my_avcontext_t my_avctx;
+ * struct sanframe framedat;
  *
  * int ret = sandec_init(&sancontxt);
  * if (ret != 0) { // error no memory };
@@ -63,25 +28,21 @@
  * myavctx.fhandle = fd;
  * myio.ioread = my_data_read;
  * myio.userctx = my_avctx;
- * myio.queue_audio = my_queue_audio;
- * myio.queue_video = my_queue_video;
  *
  * int ret = sandec_open(sancontext, &myio);
  * while (ret == SANDEC_OK) {
- *  ret = sandec_decode_next_frame(sancontext);
+ *  ret = sandec_decode_next_frame(sancontext, &framedat);
  *  if (ret != SANDEC_OK)
  * 	break;
- *  render_video_and_audio(my_avctx);
+ *  render_video_and_audio(my_avctx, &framedat);
  * }
+ * close(fd);
  * if (ret != SANDEC_DONE) { // report error code please }
  * sandec_exit(&sancontext);
- * close(fd);
  *
  * NOTES:
  * - The decoder only does linear forward reads. Once data has been read, it
  *    it will not be requested again.
- * - sanio.queue_audio() can be called multiple times per frame decoding call.
- * - sanio.queue_video() is only called ONCE per frame decoding call.
  */
 
 #ifndef _SANDEC_H_
@@ -106,12 +67,27 @@
 
 struct sanio {
 	int(*ioread)(void *userctx, void *dst, uint32_t size);
-	void(*queue_video)(void *userctx, unsigned char *vdata, uint32_t size,
-			  uint16_t w, uint16_t h, uint16_t pitch, uint32_t *pal,
-			  uint16_t subid, uint32_t frame_duration_us);
-	void(*queue_audio)(void *userctx, unsigned char *adata, uint32_t size);
 	void *userctx;
 	uint32_t flags;
+};
+
+/* A/V Data IO structure.  The pointers point to decoder internal buffers, and are
+ * valid only until the next call to sandec_decode_next_frame().
+ */
+struct sanframe {
+	void *ctx;			/* user context, userctx from struct sanio */
+	uint32_t frame_duration_us;	/* how long, in microseconds, to display this frame */
+	void *vid_data;			/* pointer to memory with planar frame data. */
+	uint32_t vid_size;		/* size, in bytes, of data pointed to by @vid_data */
+	uint32_t vid_xres;		/* horizontal size, in pixels, of video frame */
+	uint32_t vid_yres;		/* vertical size, in pixels, of video frame */
+	uint32_t vid_pitch;		/* size, in bytes, of a single line of video frame */
+	void *pal;			/* pointer to 32bit ARGB palette data for PAL8 frames */
+
+	void *aud_data;			/* pointer to S16LE audio data */
+	uint32_t aud_size;		/* size, in bytes, of memory pointed to by @aud_data */
+
+	uint32_t txtres;		/* id of the text resource for subtitles */
 };
 
 /* init SAN context. Call this as step 1. */
@@ -124,7 +100,7 @@ int sandec_open(void *sanctx, struct sanio *io);
  * will call the queue_audio() callback multiple times, and queue_video()
  * callback once.
  */
-int sandec_decode_next_frame(void *sanctx);
+int sandec_decode_next_frame(void *sanctx, struct sanframe *data_out);
 
 /* destroy all context. call this as last step. */
 void sandec_exit(void **sanctx);
