@@ -3177,30 +3177,22 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 }
 
 /* like c47_comp5 but adjusted for tbl2 lookups */
-static void bl16_comp8(uint16_t *dst, uint8_t *src, uint32_t left, const uint16_t *tbl2,
-		       uint32_t srcsize)
+static void bl16_comp8(uint16_t *dst, uint8_t *src, uint32_t left, const uint16_t *tbl2)
 {
 	uint8_t opc, rlen, j;
 	uint16_t col;
 
 	left >>= 1;	/* 16bit pixels */
-	while (left && (srcsize > 0)) {
+	while (left) {
 		opc = *src++;
-		--srcsize;
 		rlen = (opc >> 1) + 1;
 		if (rlen > left)
 			rlen = left;
 		if (opc & 1) {
-			if (srcsize < 1)
-				return;
-			--srcsize;
 			col = le16_to_cpu(tbl2[*src++]);
 			for (j = 0; j < rlen; j++)
 				*dst++ = col;
 		} else {
-			if (rlen > srcsize)
-				rlen = srcsize;
-			srcsize -= rlen;
 			for (j = 0; j < rlen; j++)
 				*dst++ = le16_to_cpu(tbl2[*src++]);
 		}
@@ -3322,8 +3314,7 @@ static void bl16_comp1(uint16_t *dst, uint8_t *src, const uint16_t w, const uint
 
 static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db2,
 			   const uint16_t *tbl1, const uint16_t *tbl2, const uint16_t w,
-			   const uint32_t stride, uint8_t blksize, struct sanctx *ctx,
-			   uint32_t *dsize)
+			   const uint32_t stride, uint8_t blksize, struct sanctx *ctx)
 {
 	int32_t mvofs, ofs;
 	uint8_t *pglyph, opc;
@@ -3331,16 +3322,10 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 	int16_t o2;
 	int i, j;
 
-	if ((*dsize) < 1)
-		return 0;
-	(*dsize) -= 1;
 	opc = *src++;
 	switch (opc) {
 	case 0xff:
 		if (blksize == 2) {
-			if ((*dsize) < 8)
-				return 0;
-			(*dsize) -= 8;
 			*(uint16_t *)(dst + 0      + 0) = le16_to_cpu(ua16(src));
 			src += 2;
 			*(uint16_t *)(dst + 0      + 2) = le16_to_cpu(ua16(src));
@@ -3351,23 +3336,20 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 			src += 2;
 		} else {
 			src = bl16_block(src, dst, db1, db2, tbl1, tbl2,
-					 w, stride, blksize >> 1, ctx, dsize);
+					 w, stride, blksize >> 1, ctx);
 			src = bl16_block(src, dst + blksize, db1 + blksize, db2 + blksize,
-					 tbl1, tbl2, w, stride, blksize >> 1, ctx, dsize);
+					 tbl1, tbl2, w, stride, blksize >> 1, ctx);
 			dst += stride * (blksize >> 1);
 			db1 += stride * (blksize >> 1);
 			db2 += stride * (blksize >> 1);
 			src = bl16_block(src, dst, db1, db2, tbl1, tbl2,
-					 w, stride, blksize >> 1, ctx, dsize);
+					 w, stride, blksize >> 1, ctx);
 			src = bl16_block(src, dst + blksize, db1 + blksize, db2 + blksize,
-					 tbl1, tbl2, w, stride, blksize >> 1, ctx, dsize);
+					 tbl1, tbl2, w, stride, blksize >> 1, ctx);
 		}
 		break;
 	case 0xfe:
 		/* fill a block with a color value from the stream */
-		if ((*dsize) < 2)
-			return 0;
-		(*dsize) -= 2;
 		c[0] = le16_to_cpu(ua16(src));
 		src += 2;
 		for (i = 0; i < blksize; i++) {
@@ -3379,9 +3361,6 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		break;
 	case 0xfd:
 		/* fill a block using tbl2 color, index from next byte */
-		if ((*dsize) < 1)
-			return 0;
-		(*dsize) -= 1;
 		c[0] = le16_to_cpu(tbl2[*src++]);
 		for (i = 0; i < blksize; i++) {
 			ofs = i * stride;
@@ -3405,9 +3384,6 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		break;
 	case 0xf8:
 		if (blksize == 2) {
-			if ((*dsize) < 8)
-				return 0;
-			(*dsize) -= 8;
 			*(uint16_t *)(dst + 0      + 0) = le16_to_cpu(ua16(src));
 			src += 2;
 			*(uint16_t *)(dst + 0      + 2) = le16_to_cpu(ua16(src));
@@ -3417,9 +3393,6 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 			*(uint16_t *)(dst + stride + 2) = le16_to_cpu(ua16(src));
 			src += 2;
 		} else {
-			if ((*dsize) < 5)
-				return 0;
-			(*dsize) -= 5;
 			opc = *src++;
 			c[1] = le16_to_cpu(ua16(src));
 			src += 2;
@@ -3436,17 +3409,11 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		break;
 	case 0xf7:
 		if (blksize == 2) {
-			if ((*dsize) < 4)
-				return 0;
-			(*dsize) -= 4;
 			*(uint16_t *)(dst + 0      + 0) = le16_to_cpu(tbl2[*src++]);
 			*(uint16_t *)(dst + 0      + 2) = le16_to_cpu(tbl2[*src++]);
 			*(uint16_t *)(dst + stride + 0) = le16_to_cpu(tbl2[*src++]);
 			*(uint16_t *)(dst + stride + 2) = le16_to_cpu(tbl2[*src++]);
 		} else {
-			if ((*dsize) < 3)
-				return 0;
-			(*dsize) -= 3;
 			opc = *src++;
 			c[1] = le16_to_cpu(tbl2[*src++]);
 			c[0] = le16_to_cpu(tbl2[*src++]);
@@ -3468,9 +3435,6 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 		}
 		break;
 	case 0xf5:	/* copy from db2, mvec from source */
-		if ((*dsize) < 2)
-			return 0;
-		(*dsize) -= 2;
 		o2 = le16_to_cpu((int16_t)ua16(src));
 		src += 2;
 		mvofs = o2 * 2;  /* since stride = w*2 */
@@ -3511,7 +3475,7 @@ static uint8_t* bl16_block(uint8_t *src, uint8_t *dst, uint8_t *db1, uint8_t *db
 
 static void bl16_comp2(uint8_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 		       uint8_t *db1, uint8_t *db2, const uint16_t *tbl1, const uint16_t *tbl2,
-		       struct sanctx *ctx, uint32_t size)
+		       struct sanctx *ctx)
 {
 	const uint32_t stride = w * 2;
 	int i, j;
@@ -3520,9 +3484,9 @@ static void bl16_comp2(uint8_t *dst, uint8_t *src, uint16_t w, uint16_t h,
 	w = (w + 7) & ~7;
 
 	for (j = 0; j < h; j += 8) {
-		for (i = 0; (i < 2 * w) && (size > 0); i += 8 * 2) {
+		for (i = 0; i < 2 * w; i += 8 * 2) {
 			src = bl16_block(src, dst + i, db1 + i , db2 + i, tbl1,
-					 tbl2, w, stride, 8, ctx, &size);
+					 tbl2, w, stride, 8, ctx);
 		}
 		dst += stride * 8;
 		db1 += stride * 8;
@@ -3562,13 +3526,6 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	decsize = le32_to_cpu(*(uint32_t *)(src + 36));
 	tbl2 = (uint16_t *)(src + 40);
 
-	/* this should not happen. */
-	if ((width > rt->bufw) || (height > rt->bufh))
-		goto out;
-
-	if (decsize > rt->fbsize)
-		decsize = rt->fbsize;
-
 	if (seq == 0) {
 		rt->lastseq = -1;
 		for (i = 0; i < width * height; i++) {
@@ -3582,33 +3539,22 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	src += 0x230;
 	size -= 0x230;
 	switch (codec) {
-	case 0: for (i = 0; (i < width * height) && (size > 1); i++, src += 2, size -= 2)
+	case 0: for (i = 0; i < width * height; i++, src += 2)
 			*dst++ = le16_to_cpu(*(uint16_t *)src);
 		break;
-	case 1: if (size >= 2 * (((width - 1) >> 1) * ((height + 1) >> 1))) {
-			bl16_comp1(dst, src, width, height);
-		}
-		break;
+	case 1: bl16_comp1(dst, src, width, height); break;
 	case 2: if (seq == rt->lastseq + 1)
 			bl16_comp2((uint8_t *)dst, src, width, height,
-				   (uint8_t *)db1, (uint8_t *)db2, tbl1, tbl2, ctx, size);
+				   (uint8_t *)db1, (uint8_t *)db2, tbl1, tbl2, ctx);
 		break;
 	case 3:	memcpy(dst, db2, width * height * 2); break;
 	case 4: memcpy(dst, db1, width * height * 2); break;
 	case 5: codec47_comp5(src, size, (uint8_t *)dst, decsize); break;
-	case 6: if (size >= (width * height)) {
-			bl16_comp6(dst, src, width, height, tbl2);
-		}
-		break;
-	case 7: if (size >= (((width - 1) >> 1) * ((height + 1) >> 1))) {
-			bl16_comp7(dst, src, width, height, tbl2);
-		}
-		break;
-	case 8: bl16_comp8(dst, src, decsize, tbl2, size); break;
-	default: break;
+	case 6: bl16_comp6(dst, src, width, height, tbl2); break;
+	case 7: bl16_comp7(dst, src, width, height, tbl2); break;
+	case 8: bl16_comp8(dst, src, decsize, tbl2); break;
 	}
 
-out:
 	rt->vbuf = rt->buf0;
 	rt->have_frame = 1;
 	rt->palette = NULL;
