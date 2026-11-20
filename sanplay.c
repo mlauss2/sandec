@@ -47,6 +47,7 @@ struct playpriv {
 
 	uint32_t vbufsize;
 	uint64_t next_disp_us;
+	uint64_t frame_dur_us;
 	uint64_t ptick_us;
 	unsigned char *vbuf;
 	uint32_t subid;
@@ -174,7 +175,7 @@ static void schedule_next_frame(struct playpriv *p)
 	if (!p->running || p->paused || p->parserdone || !p->ev_frame)
 		return;
 
-	delt_us = p->next_disp_us - p->ren_us - now_us();
+	delt_us = (p->next_disp_us - now_us()) - (p->ren_us + p->dec_us);
 	if (delt_us <= 0 || p->speedmode == 1) {
 		SDL_zero(ev);
 		ev.type = p->ev_frame;
@@ -257,7 +258,7 @@ static void queue_video(struct playpriv *p, const struct sanframe *f)
 	p->vbufsize = f->vid_size;
 	p->subid = f->txtres;
 	p->err = 0;
-	p->next_disp_us += f->frame_duration_us;
+	p->frame_dur_us = f->frame_duration_us;
 }
 
 static int decode_next(struct playpriv *p)
@@ -532,6 +533,95 @@ static void finish_current_file(struct playpriv *p)
 		       p->fc, p->last_ret);
 }
 
+static void print_status(struct playpriv *p)
+{
+	int gx;
+
+	if (!p->verbose || !p->running)
+		return;
+
+	gx = p->grid_on ? (p->grid_color + 1) : 0;
+
+	printf("\33[2K\r%4u/%4u  %lu ms/%lu ms I:%d S:%d P:%d G:%d/%d R:%d M:%d",
+	       sandec_get_currframe(p->sanctx), p->fc,
+	       (unsigned long)(p->ren_us / 1000ULL),
+	       (unsigned long)(p->dec_us / 1000ULL),
+	       !!(p->sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION),
+	       p->texsmooth, p->autopause, gx, p->grid_corner,
+	       p->last_ret, p->mortimermode);
+
+	if (!p->fullscreen && p->mouse_valid)
+		printf(" M:(%03d,%03d)", p->mouse_x, p->mouse_y);
+
+	fflush(stdout);
+}
+
+static void step_frame(struct playpriv *p)
+{
+	uint64_t t1, t2;
+	int ret;
+
+	t1 = now_us();
+	ret = decode_next(p);
+	t2 = now_us();
+	p->dec_us = t2 - t1;
+	p->last_ret = ret;
+
+	if (ret == SANDEC_DONE) {
+		p->parserdone = 1;
+		p->last_ret = 0;
+		if (p->speedmode) {
+			if (p->as)
+				SDL_ClearAudioStream(p->as);
+			finish_current_file(p);
+			return;
+		}
+		if (p->as) {
+			SDL_ResumeAudioStreamDevice(p->as);
+			SDL_FlushAudioStream(p->as);
+		}
+		if (!p->as || SDL_GetAudioStreamQueued(p->as) == 0) {
+			finish_current_file(p);
+			return;
+		}
+		start_drain_timer(p);
+		return;
+	}
+
+	if (ret != SANDEC_OK) {
+		finish_current_file(p);
+		return;
+	}
+
+	t1 = now_us();
+	if (!p->have_newimg) {
+		if (p->as && !p->paused)
+			SDL_ResumeAudioStreamDevice(p->as);
+		ret = 0;
+	} else {
+		ret = render_frame(p, 1);
+	}
+	t2 = now_us();
+
+	if (ret != 0) {
+		p->last_ret = ret;
+		finish_current_file(p);
+		return;
+	}
+
+	if (p->next_disp_us == 0) {
+		p->ren_us = 0;
+		p->next_disp_us = t2 + p->frame_dur_us;
+	} else {
+		p->ren_us = t2 - t1;
+		p->next_disp_us += p->frame_dur_us;
+	}
+	p->frame_dur_us = 0;
+
+	schedule_next_frame(p);
+	print_status(p);
+}
+
 static void speedmode2(struct playpriv *p, const char *fn)
 {
 	struct sanframe f;
@@ -610,6 +700,12 @@ static int open_next_file(struct playpriv *p)
 			continue;
 		}
 
+		p->autopause = 0;
+		if (p->speedmode == 3) {
+			p->speedmode = 0;
+			p->autopause = 1;
+		}
+
 		if (!p->sdl_inited && p->speedmode < 2) {
 			ret = init_sdl(p);
 			if (ret) {
@@ -617,12 +713,6 @@ static int open_next_file(struct playpriv *p)
 				p->fhdl = NULL;
 				return -1;
 			}
-		}
-
-		p->autopause = 0;
-		if (p->speedmode == 3) {
-			p->speedmode = 0;
-			p->autopause = 1;
 		}
 
 		ret = sandec_open(p->sanctx, &p->sio);
@@ -649,52 +739,21 @@ static int open_next_file(struct playpriv *p)
 
 		p->err = 0;
 		p->have_newimg = 0;
+		p->frame_dur_us = 0;
 		p->running = 1;
 		p->paused = 0;
 		p->ptick_us = 0;
 		p->parserdone = 0;
 		p->ren_us = 0;
 		p->dec_us = 0;
+		p->next_disp_us = 0;
 
-		ret = decode_next(p);
-		p->last_ret = ret;
-		p->next_disp_us = now_us();
-
-		if (ret != SANDEC_OK) {
-			finish_current_file(p);
-			if (p->draining_audio)
-				return 1;
-			continue;
-		}
-
-		schedule_next_frame(p);
-		return 1;
+		step_frame(p);
+		if (p->running || p->draining_audio)
+			return 1;
 	}
 
 	return 0;
-}
-
-static void print_status(struct playpriv *p)
-{
-	int gx;
-
-	if (!p->verbose || !p->running)
-		return;
-
-	gx = p->grid_on ? (p->grid_color + 1) : 0;
-
-	printf("\33[2K\r%4u/%4u  %lu ms/%lu ms I:%d S:%d P:%d G:%d/%d R:%d M:%d",
-	       sandec_get_currframe(p->sanctx), p->fc,
-	       (unsigned long)(p->ren_us / 1000ULL),
-	       (unsigned long)(p->dec_us / 1000ULL),
-	       !!(p->sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION),
-	       p->texsmooth, p->autopause, gx, p->grid_corner,
-	       p->last_ret, p->mortimermode);
-
-	if (!p->fullscreen && p->mouse_valid)
-		printf(" M:(%03d,%03d)", p->mouse_x, p->mouse_y);
-
-	fflush(stdout);
 }
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
@@ -779,58 +838,11 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 		return SDL_APP_CONTINUE;
 
 	if (p->ev_frame && event->type == p->ev_frame) {
-		uint64_t t1, t2;
-
 		if (event->user.code != p->timer_gen || p->paused || p->parserdone)
 			return SDL_APP_CONTINUE;
 
 		p->frame_timer = 0;
-
-		t1 = now_us();
-		if (!p->have_newimg) {
-			if (p->as && !p->paused)
-				SDL_ResumeAudioStreamDevice(p->as);
-			ret = 0;
-		} else {
-			ret = render_frame(p, 1);
-		}
-		if (!ret) {
-			t2 = now_us();
-			p->ren_us = t2 - t1;
-
-			t1 = now_us();
-			ret = decode_next(p);
-			t2 = now_us();
-			p->dec_us = t2 - t1;
-		}
-
-		p->last_ret = ret;
-		if (ret == SANDEC_DONE) {
-			p->parserdone = 1;
-			p->last_ret = 0;
-			if (p->speedmode) {
-				if (p->as)
-					SDL_ClearAudioStream(p->as);
-				finish_current_file(p);
-				return SDL_APP_CONTINUE;
-			}
-			if (p->as) {
-				SDL_ResumeAudioStreamDevice(p->as);
-				SDL_FlushAudioStream(p->as);
-			}
-			if (!p->as || SDL_GetAudioStreamQueued(p->as) == 0) {
-				finish_current_file(p);
-				return SDL_APP_CONTINUE;
-			}
-			start_drain_timer(p);
-		} else if (ret != 0) {
-			finish_current_file(p);
-			return SDL_APP_CONTINUE;
-		} else {
-			schedule_next_frame(p);
-		}
-
-		print_status(p);
+		step_frame(p);
 		return SDL_APP_CONTINUE;
 	}
 
