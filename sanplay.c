@@ -65,6 +65,10 @@ struct playpriv {
 	int grid_color;
 	int grid_corner;	/* 0 = bottom-right (default), 1 = top-left */
 
+	int status_on;
+	int status_color;
+	int status_corner;	/* 0 = bottom-right (default), 1 = top-right */
+
 	int dbg_on;
 	int dbg_color;
 	int dbg_line;
@@ -362,33 +366,33 @@ static void render_debug_text(struct playpriv *p, uint16_t dispw, uint16_t disph
 	char *s, *nl;
 	int outw, outh, vis, max_start, line = 0;
 	float y = 0.0f;
-	
+
 	if (!p->dbg_on || !p->dbg_text || !p->dbg_text[0])
 		return;
-	
+
 	if (!SDL_GetCurrentRenderOutputSize(p->ren, &outw, &outh))
 		return;
-	
+
 	vis = outh / 8;
 	if (vis < 1)
 		return;
-	
+
 	max_start = p->dbg_lines > vis ? p->dbg_lines - vis : 0;
 	if (p->dbg_line > max_start)
 		p->dbg_line = max_start;
 	if (p->dbg_line < 0)
 		p->dbg_line = 0;
-	
+
 	SDL_SetRenderLogicalPresentation(p->ren, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
 	col = &grid_colors[p->dbg_color];
 	SDL_SetRenderDrawColor(p->ren, col->r, col->g, col->b, col->a);
-	
+
 	s = p->dbg_text;
 	while (*s) {
 		nl = strchr(s, '\n');
 		if (nl)
 			*nl = '\0';
-		
+
 		if (line >= p->dbg_line) {
 			if (y + 8.0f > (float)outh) {
 				if (nl)
@@ -399,15 +403,78 @@ static void render_debug_text(struct playpriv *p, uint16_t dispw, uint16_t disph
 				SDL_RenderDebugText(p->ren, 0.0f, y, s);
 			y += 8.0f;
 		}
-		
+
 		line++;
 		if (!nl)
 			break;
-		
+
 		*nl = '\n';
 		s = nl + 1;
 	}
-	
+
+	SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
+	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+}
+
+static int format_status(struct playpriv *p, char *buf, size_t sz)
+{
+	int gx, len, extra;
+	char tbuf[32];
+
+	gx = p->grid_on ? (p->grid_color + 1) : 0;
+
+	snprintf(tbuf, sizeof(tbuf), "%4lu/%4lu us", p->ren_us, p->dec_us);
+	len = snprintf(buf, sz,
+		       "%4u/%4u  T%12s I%d S%d P%d G%d/%d R%d M%d",
+		       sandec_get_currframe(p->sanctx), p->fc, tbuf,
+		       !!(p->sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION),
+		       p->texsmooth, p->autopause, gx, p->grid_corner,
+		       p->last_ret, p->mortimermode);
+	if (len < 0)
+		return 0;
+
+	if (!p->fullscreen && p->mouse_valid && len < sz) {
+		/* X marks the pixel */
+		extra = snprintf(buf + len, sz - len, " X(%03d,%03d)", p->mouse_x, p->mouse_y);
+		if (extra > 0)
+			len += extra;
+	}
+
+	if (len >= sz)
+		len = sz - 1;
+
+	return len;
+}
+
+static void render_status_text(struct playpriv *p, uint16_t dispw, uint16_t disph)
+{
+	const SDL_Color *col;
+	char buf[160];
+	int outw, outh, len;
+	float x, y;
+
+	if (!p->status_on)
+		return;
+
+	if (!SDL_GetCurrentRenderOutputSize(p->ren, &outw, &outh))
+		return;
+
+	len = format_status(p, buf, sizeof(buf));
+	if (len <= 0)
+		return;
+
+	x = (float)(outw - len * 8);
+	if (x < 0.0f)
+		x = 0.0f;
+
+	y = p->status_corner ? 0.0f : (float)(outh - 8);
+	if (y < 0.0f)
+		y = 0.0f;
+
+	SDL_SetRenderLogicalPresentation(p->ren, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+	col = &grid_colors[p->status_color];
+	SDL_SetRenderDrawColor(p->ren, col->r, col->g, col->b, col->a);
+	SDL_RenderDebugText(p->ren, x, y, buf);
 	SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
 	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 }
@@ -531,6 +598,7 @@ static int render_frame(struct playpriv *p, int flip)
 
 	render_grid(p, dispw, disph);
 	render_debug_text(p, dispw, disph);
+	render_status_text(p, dispw, disph);
 	SDL_RenderPresent(p->ren);
 
 	if (flip) {
@@ -607,30 +675,18 @@ static void finish_current_file(struct playpriv *p)
 	}
 
 	if (p->verbose || p->last_ret > SANDEC_OK)
-		printf("\n%u/%u  %d\n", sandec_get_currframe(p->sanctx),
-		       p->fc, p->last_ret);
+		printf("\n%u/%u  %d\n", sandec_get_currframe(p->sanctx), p->fc, p->last_ret);
 }
 
 static void print_status(struct playpriv *p)
 {
-	int gx;
+	char buf[160];
 
 	if (!p->verbose || !p->running)
 		return;
 
-	gx = p->grid_on ? (p->grid_color + 1) : 0;
-
-	printf("\33[2K\r%4u/%4u  %lu ms/%lu ms I:%d S:%d P:%d G:%d/%d R:%d M:%d",
-	       sandec_get_currframe(p->sanctx), p->fc,
-	       (unsigned long)(p->ren_us / 1000ULL),
-	       (unsigned long)(p->dec_us / 1000ULL),
-	       !!(p->sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION),
-	       p->texsmooth, p->autopause, gx, p->grid_corner,
-	       p->last_ret, p->mortimermode);
-
-	if (!p->fullscreen && p->mouse_valid)
-		printf(" M:(%03d,%03d)", p->mouse_x, p->mouse_y);
-
+	format_status(p, buf, sizeof(buf));
+	printf("\33[2K\r%s", buf);
 	fflush(stdout);
 }
 
@@ -863,6 +919,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 	p->argv = argv;
 	p->arg_idx = 1;
 	p->dbg_color = 4;
+	p->status_color = 4;
+	p->status_corner = 0;
 
 	p->sio.ioread = sio_read;
 	p->sio.userctx = p;
@@ -946,6 +1004,13 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 		if (p->mouse_valid) {
 			p->mouse_valid = 0;
 			print_status(p);
+			if (p->status_on) {
+				ret = render_frame(p, 0);
+				if (ret) {
+					p->last_ret = ret;
+					finish_current_file(p);
+				}
+			}
 		}
 	} else if (event->type == SDL_EVENT_MOUSE_MOTION) {
 		if (!p->fullscreen && p->ren && p->texw && p->texh) {
@@ -970,6 +1035,13 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 				p->mouse_x = nx;
 				p->mouse_y = ny;
 				print_status(p);
+				if (p->status_on) {
+					ret = render_frame(p, 0);
+					if (ret) {
+						p->last_ret = ret;
+						finish_current_file(p);
+					}
+				}
 			}
 		}
 	} else if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
@@ -1097,6 +1169,25 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 		} else if (ke->scancode == SDL_SCANCODE_DOWN) {
 			if (p->dbg_on) {
 				p->dbg_line++;
+				ret = render_frame(p, 0);
+				if (ret) {
+					p->last_ret = ret;
+					finish_current_file(p);
+				}
+			}
+		} else if (ke->scancode == SDL_SCANCODE_U) {
+			if (ke->mod & SDL_KMOD_SHIFT)
+				p->status_color = (p->status_color + 1) % 5;
+			else
+				p->status_on ^= 1;
+			ret = render_frame(p, 0);
+			if (ret) {
+				p->last_ret = ret;
+				finish_current_file(p);
+			}
+		} else if (ke->key == SDLK_Z) {	/* SDLK wegen meinem deutschen keyboard */
+			p->status_corner ^= 1;
+			if (p->status_on) {
 				ret = render_frame(p, 0);
 				if (ret) {
 					p->last_ret = ret;

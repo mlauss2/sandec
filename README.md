@@ -29,12 +29,18 @@ with an SDL3-based player application to demonstrate library use.
   - .     to advance by 1 frame and pause
   - q     to quit
   - l     to toggle ANIMv1 (RA1) viewport size: Most videos have 320x200 content, but some gameplay videos have content on the full 384x242 buffer.
-  - number keys 1-6 to display the original/double/triple/... width preserving aspect ratio
+  - number keys 1-8 to display the original/double/triple/... width preserving aspect ratio
   - i  to toggle frame interpolation on/off.
   - s  to cycle between SDL3 texture smoothing (off/pixelized and smoothed).
   - g  to toggle pixel grid overlay on/off.
   - G  to cycle grid color (green/red/blue/white/black atm).
   - h  to cycle the pixel corner to draw the grid over (bottom-right default).
+  - u  to cycle statusbar output in a right corner (frame curr/max, decode/rendertimes, flags, ...)
+  - U  to cacle statusbar color.
+  - z  to cycle statusbar corner (top-right or bottom right)
+  - d  to enable debug data output from decoder.
+  - D  to cycle debug output color.
+
 - tested on AMD64, ARM64, MIPS32el.
   - BE targets are untested, there are probably issues with the audio format and palette.
 
@@ -67,4 +73,4 @@ with an SDL3-based player application to demonstrate library use.
   - GAME/GAM2: RA1 game progress feedback.
   - RAW!/SBL /SBL2/Crea: Raw PCM/VOC file support, it's in the code but not used in any ANM/SAN file.
 
-20261119
+20261120
