@@ -88,6 +88,7 @@ struct sanframe {
 	uint32_t aud_size;		/* size, in bytes, of memory pointed to by @aud_data */
 
 	uint32_t txtres;		/* id of the text resource for subtitles */
+	char *dbg_text;			/* debug text for frame */
 };
 
 /* init SAN context. Call this as step 1. */

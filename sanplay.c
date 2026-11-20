@@ -35,6 +35,7 @@ struct playpriv {
 	SDL_Surface *surf;
 	SDL_Texture *tex;
 	int have_newimg;
+	char *dbg_text;
 
 	SDL_AudioStream *as;
 
@@ -63,6 +64,11 @@ struct playpriv {
 	int grid_on;
 	int grid_color;
 	int grid_corner;	/* 0 = bottom-right (default), 1 = top-left */
+
+	int dbg_on;
+	int dbg_color;
+	int dbg_line;
+	int dbg_lines;
 
 	int mouse_x;
 	int mouse_y;
@@ -255,6 +261,20 @@ static void queue_video(struct playpriv *p, const struct sanframe *f)
 		}
 	}
 
+	SDL_free(p->dbg_text);
+	p->dbg_text = f->dbg_text ? SDL_strdup(f->dbg_text) : NULL;
+	p->dbg_lines = 0;
+	if (p->dbg_text && p->dbg_text[0]) {
+		const char *s = p->dbg_text;
+
+		p->dbg_lines = 1;
+		while ((s = strchr(s, '\n')) != NULL) {
+			s++;
+			if (*s)
+				p->dbg_lines++;
+		}
+	}
+
 	p->have_newimg = 1;
 	p->vbufsize = f->vid_size;
 	p->subid = f->txtres;
@@ -332,6 +352,62 @@ static void render_grid(struct playpriv *p, uint16_t dispw, uint16_t disph)
 		SDL_RenderLine(p->ren, dx, pos, x1, pos);
 	}
 
+	SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
+	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+}
+
+static void render_debug_text(struct playpriv *p, uint16_t dispw, uint16_t disph)
+{
+	const SDL_Color *col;
+	char *s, *nl;
+	int outw, outh, vis, max_start, line = 0;
+	float y = 0.0f;
+	
+	if (!p->dbg_on || !p->dbg_text || !p->dbg_text[0])
+		return;
+	
+	if (!SDL_GetCurrentRenderOutputSize(p->ren, &outw, &outh))
+		return;
+	
+	vis = outh / 8;
+	if (vis < 1)
+		return;
+	
+	max_start = p->dbg_lines > vis ? p->dbg_lines - vis : 0;
+	if (p->dbg_line > max_start)
+		p->dbg_line = max_start;
+	if (p->dbg_line < 0)
+		p->dbg_line = 0;
+	
+	SDL_SetRenderLogicalPresentation(p->ren, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED);
+	col = &grid_colors[p->dbg_color];
+	SDL_SetRenderDrawColor(p->ren, col->r, col->g, col->b, col->a);
+	
+	s = p->dbg_text;
+	while (*s) {
+		nl = strchr(s, '\n');
+		if (nl)
+			*nl = '\0';
+		
+		if (line >= p->dbg_line) {
+			if (y + 8.0f > (float)outh) {
+				if (nl)
+					*nl = '\n';
+				break;
+			}
+			if (*s)
+				SDL_RenderDebugText(p->ren, 0.0f, y, s);
+			y += 8.0f;
+		}
+		
+		line++;
+		if (!nl)
+			break;
+		
+		*nl = '\n';
+		s = nl + 1;
+	}
+	
 	SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
 	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 }
@@ -454,6 +530,7 @@ static int render_frame(struct playpriv *p, int flip)
 	}
 
 	render_grid(p, dispw, disph);
+	render_debug_text(p, dispw, disph);
 	SDL_RenderPresent(p->ren);
 
 	if (flip) {
@@ -785,6 +862,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 	p->argc = argc;
 	p->argv = argv;
 	p->arg_idx = 1;
+	p->dbg_color = 4;
 
 	p->sio.ioread = sio_read;
 	p->sio.userctx = p;
@@ -902,7 +980,11 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 		}
 	} else if (event->type == SDL_EVENT_KEY_DOWN) {
 		ke = (SDL_KeyboardEvent *)event;
-		if (!ke->down || ke->repeat != 0)
+		if (!ke->down)
+			return SDL_APP_CONTINUE;
+		if (ke->repeat != 0 &&
+		    ke->scancode != SDL_SCANCODE_UP &&
+		    ke->scancode != SDL_SCANCODE_DOWN)
 			return SDL_APP_CONTINUE;
 
 		if (ke->scancode == SDL_SCANCODE_SPACE && p->speedmode < 1) {
@@ -969,10 +1051,13 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 				finish_current_file(p);
 			}
 		} else if (ke->scancode == SDL_SCANCODE_G) {
-			if (ke->mod & SDL_KMOD_SHIFT)
+			if (ke->mod & SDL_KMOD_SHIFT) {
 				p->grid_color = (p->grid_color + 1) % 5;
-			else
+			} else {
 				p->grid_on ^= 1;
+				if (p->grid_on && p->dbg_on)
+					p->dbg_color = (p->grid_color + 1) % 5;
+			}
 			ret = render_frame(p, 0);
 			if (ret) {
 				p->last_ret = ret;
@@ -981,6 +1066,37 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 		} else if (ke->scancode == SDL_SCANCODE_H) {
 			p->grid_corner ^= 1;
 			if (p->grid_on) {
+				ret = render_frame(p, 0);
+				if (ret) {
+					p->last_ret = ret;
+					finish_current_file(p);
+				}
+			}
+		} else if (ke->scancode == SDL_SCANCODE_D) {
+			if (ke->mod & SDL_KMOD_SHIFT) {
+				p->dbg_color = (p->dbg_color + 1) % 5;
+			} else {
+				p->dbg_on ^= 1;
+				if (p->grid_on && p->dbg_on)
+					p->dbg_color = (p->grid_color + 1) % 5;
+			}
+			ret = render_frame(p, 0);
+			if (ret) {
+				p->last_ret = ret;
+				finish_current_file(p);
+			}
+		} else if (ke->scancode == SDL_SCANCODE_UP) {
+			if (p->dbg_on && p->dbg_line > 0) {
+				p->dbg_line--;
+				ret = render_frame(p, 0);
+				if (ret) {
+					p->last_ret = ret;
+					finish_current_file(p);
+				}
+			}
+		} else if (ke->scancode == SDL_SCANCODE_DOWN) {
+			if (p->dbg_on) {
+				p->dbg_line++;
 				ret = render_frame(p, 0);
 				if (ret) {
 					p->last_ret = ret;
@@ -1039,5 +1155,6 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
 	if (p->verbose)
 		putchar('\n');
 
+	SDL_free(p->dbg_text);
 	SDL_free(p);
 }
