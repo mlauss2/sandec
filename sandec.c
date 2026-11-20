@@ -4616,16 +4616,20 @@ static void iact_audio_scaled(struct sanctx *ctx, uint32_t size, uint8_t *src)
 static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint16_t p[7];
+	uint32_t s2;
 	int i, ret;
 
-	if (size < 14)
-		return;
-
-	for (i = 0; i < 7; i++)
-		p[i] = le16_to_cpu(*(uint16_t*)(src + (i<<1)));
+	/* The IACT header is unstructured; the 8/46-type, which carries
+	 * arbitrary data and we are interested in, must at least have an
+	 * 18-byte header.
+	 */
+	memset(p, 0, 7 * sizeof(uint16_t));
+	for (i = 0, s2 = size; (i < 7) && (s2 > 1); i++, s2 -= 2)
+		p[i] = le16_to_cpu(*(uint16_t *)(src + (i<<1)));
 
 	if (p[0] == 8 && p[1] == 46) {
-
+		if (size < 18)
+			return;
 		if (p[3] == 0) {
 			/* subchunkless scaled IACT audio codec47/48 videos,
 			 * LECSMUSH.DLL 10001a50
