@@ -99,12 +99,13 @@ static const SDL_ScaleMode smodes[2] = {
 	SDL_SCALEMODE_LINEAR
 };
 
+/* selectable grays for the grid */
 static const SDL_Color grid_colors[5] = {
-	{ 0,   0,   0,   SDL_ALPHA_OPAQUE },	/* black */
-	{ 255, 255, 255, SDL_ALPHA_OPAQUE },	/* white */
-	{ 0,   255, 0,   SDL_ALPHA_OPAQUE },	/* green */
-	{ 255, 0,   0,   SDL_ALPHA_OPAQUE },	/* red */
-	{ 0,   0,   255, SDL_ALPHA_OPAQUE },	/* blue */
+	{   0,   0,   0, SDL_ALPHA_OPAQUE },
+	{  64,  64,  64, SDL_ALPHA_OPAQUE },
+	{ 127, 127, 127, SDL_ALPHA_OPAQUE },
+	{ 192, 192, 192, SDL_ALPHA_OPAQUE },
+	{ 255, 255, 255, SDL_ALPHA_OPAQUE },
 };
 
 static inline uint64_t now_us(void)
@@ -949,7 +950,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 			if (p->win)
 				SDL_SetWindowFullscreen(p->win, !p->fullscreen);
 		} else if (ke->scancode >= SDL_SCANCODE_1 &&
-			   ke->scancode <= SDL_SCANCODE_6) {
+			   ke->scancode <= SDL_SCANCODE_8) {
 			p->nextmult = ke->scancode - SDL_SCANCODE_1 + 1;
 			ret = render_frame(p, 0);
 			if (ret) {
