@@ -5685,6 +5685,10 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 
 	vima_init(ctx);
 
+	/* preallocate 1MB */
+	if (allocfrme(ctx, 1 << 20))
+		return 61;
+
 	return ret;
 }
 
