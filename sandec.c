@@ -5503,17 +5503,6 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 		maxframe =       le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 4));
 		srate	       = le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 8));
 
-		/* "maxframe" indicates the maximum size of one FRME object
-		 * including chunk ID and chunk size in the stream (usually the first)
-		 * plus 1 byte.
-		 */
-		if ((maxframe > 9) && (maxframe <= FRME_MAX_SIZE)) {
-			if (allocfrme(ctx, maxframe)) {
-				free(ahbuf);
-				return 13;
-			}
-		}
-
 		/* since IACT 8/x/x/>0 can be either TheDig Audio or something else,
 		 * we initially assume imuse, since it can tell us when it is
 		 * definitely not it.  The Dig uses IACT for its iMUSE audio only.
@@ -5522,9 +5511,19 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	} else {
 		fps = 15;			/* ANIMv1 default */
 		srate = 11025;			/* ANIMv1 default */
+		maxframe = 65536;
 		rt->frmebufsz = 0;
 	}
 	free(ahbuf);
+
+	/* "maxframe" indicates the maximum size of one FRME object
+	 * including chunk ID and chunk size in the stream (usually the first)
+	 * plus 1 byte.
+	 */
+	if ((maxframe > 9) && (maxframe <= FRME_MAX_SIZE)) {
+		if (allocfrme(ctx, maxframe))
+			return 13;
+	}
 
 	if ((fps < 10) || (fps > 15))
 		fps = 15;
