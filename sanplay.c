@@ -370,6 +370,7 @@ static void render_grid(struct playpriv *p, uint16_t dispw, uint16_t disph)
 		}
 		SDL_RenderLine(p->ren, dx, pos, x1, pos);
 	}
+	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, rmodes[p->renmode]);
 }
 
 static void render_debug_text(struct playpriv *p, uint16_t dispw, uint16_t disph)
@@ -423,6 +424,7 @@ static void render_debug_text(struct playpriv *p, uint16_t dispw, uint16_t disph
 		*nl = '\n';
 		s = nl + 1;
 	}
+	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, rmodes[p->renmode]);
 }
 
 static int format_status(struct playpriv *p, char *buf, size_t sz)
@@ -484,6 +486,7 @@ static void render_status_text(struct playpriv *p, uint16_t dispw, uint16_t disp
 	col = &grid_colors[p->status_color];
 	SDL_SetRenderDrawColor(p->ren, col->r, col->g, col->b, col->a);
 	SDL_RenderDebugText(p->ren, x, y, buf);
+	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, rmodes[p->renmode]);
 }
 
 static int render_frame(struct playpriv *p, int flip)
