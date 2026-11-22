@@ -78,6 +78,8 @@ struct playpriv {
 	int mouse_y;
 	int mouse_valid;
 
+	int renmode;		/* SDL render mode logical presentation */
+
 	/* Timer / custom event state */
 	uint32_t ev_frame;
 	uint32_t ev_drain;
@@ -104,10 +106,13 @@ struct playpriv {
 	uint64_t dec_us;
 };
 
-static const SDL_ScaleMode smodes[2] = {
+#define SMODES_CNT	3
+static const SDL_ScaleMode smodes[SMODES_CNT] = {
 	SDL_SCALEMODE_NEAREST,
-	SDL_SCALEMODE_LINEAR
+	SDL_SCALEMODE_LINEAR,
+	SDL_SCALEMODE_PIXELART
 };
+static const char smodes_c[SMODES_CNT] = { 'N', 'L', 'P' };
 
 /* selectable grays for the grid */
 static const SDL_Color grid_colors[5] = {
@@ -117,6 +122,16 @@ static const SDL_Color grid_colors[5] = {
 	{ 192, 192, 192, SDL_ALPHA_OPAQUE },
 	{ 255, 255, 255, SDL_ALPHA_OPAQUE },
 };
+
+#define RMODES_CNT	5
+static const SDL_RendererLogicalPresentation rmodes[RMODES_CNT] = {
+	SDL_LOGICAL_PRESENTATION_LETTERBOX,
+	SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
+	SDL_LOGICAL_PRESENTATION_STRETCH,
+	SDL_LOGICAL_PRESENTATION_OVERSCAN,
+	SDL_LOGICAL_PRESENTATION_DISABLED
+};
+static const char rmodes_c[RMODES_CNT] = { 'L', 'I', 'S', 'O', 'D' };
 
 static inline uint64_t now_us(void)
 {
@@ -355,9 +370,6 @@ static void render_grid(struct playpriv *p, uint16_t dispw, uint16_t disph)
 		}
 		SDL_RenderLine(p->ren, dx, pos, x1, pos);
 	}
-
-	SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
-	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 }
 
 static void render_debug_text(struct playpriv *p, uint16_t dispw, uint16_t disph)
@@ -411,9 +423,6 @@ static void render_debug_text(struct playpriv *p, uint16_t dispw, uint16_t disph
 		*nl = '\n';
 		s = nl + 1;
 	}
-
-	SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
-	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 }
 
 static int format_status(struct playpriv *p, char *buf, size_t sz)
@@ -425,10 +434,10 @@ static int format_status(struct playpriv *p, char *buf, size_t sz)
 
 	snprintf(tbuf, sizeof(tbuf), "%4lu/%4lu us", p->ren_us, p->dec_us);
 	len = snprintf(buf, sz,
-		       "%4u/%4u  T%12s I%d S%d P%d G%d/%d R%d M%d",
+		       "%4u/%4u  T%12s I%d S%c R%c P%d G%d/%d =%d M%d",
 		       sandec_get_currframe(p->sanctx), p->fc, tbuf,
 		       !!(p->sio.flags & SANDEC_FLAG_DO_FRAME_INTERPOLATION),
-		       p->texsmooth, p->autopause, gx, p->grid_corner,
+		       smodes_c[p->texsmooth], rmodes_c[p->renmode], p->autopause, gx, p->grid_corner,
 		       p->last_ret, p->mortimermode);
 	if (len < 0)
 		return 0;
@@ -475,8 +484,6 @@ static void render_status_text(struct playpriv *p, uint16_t dispw, uint16_t disp
 	col = &grid_colors[p->status_color];
 	SDL_SetRenderDrawColor(p->ren, col->r, col->g, col->b, col->a);
 	SDL_RenderDebugText(p->ren, x, y, buf);
-	SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
-	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 }
 
 static int render_frame(struct playpriv *p, int flip)
@@ -509,8 +516,6 @@ static int render_frame(struct playpriv *p, int flip)
 			p->err = 1101;
 			goto out;
 		}
-		SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
-		SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 		p->winw = dispw;
 		p->winh = disph;
 		if (p->nextmult == 0)
@@ -518,7 +523,6 @@ static int render_frame(struct playpriv *p, int flip)
 	}
 
 	if (flip && (p->winw != dispw || p->winh != disph)) {
-		SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 		SDL_SetWindowSize(p->win, dispw, disph);
 		p->winw = dispw;
 		p->winh = disph;
@@ -588,6 +592,8 @@ static int render_frame(struct playpriv *p, int flip)
 		goto out;
 	}
 
+	SDL_SetRenderDrawColor(p->ren, 0, 0, 0, SDL_ALPHA_OPAQUE);
+	SDL_SetRenderLogicalPresentation(p->ren, dispw, disph, rmodes[p->renmode]);
 	SDL_RenderClear(p->ren);
 	SDL_SetTextureScaleMode(p->tex, smodes[p->texsmooth]);
 	ret = SDL_RenderTexture(p->ren, p->tex, NULL, NULL);
@@ -628,8 +634,7 @@ static int init_sdl(struct playpriv *p)
 	p->ev_drain = p->ev_frame + 1;
 
 	SDL_SetHint(SDL_HINT_APP_NAME, "SAN/ANIM Player");
-	p->texsmooth = 1;
-	p->prevmult = 1;
+	p->prevmult = 1;	/* force window redraw */
 
 	spec.freq = SANDEC_AUDIO_SRATE;
 	spec.format = SDL_AUDIO_S16LE;
@@ -920,7 +925,6 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 	p->arg_idx = 1;
 	p->dbg_color = 4;
 	p->status_color = 4;
-	p->status_corner = 0;
 
 	p->sio.ioread = sio_read;
 	p->sio.userctx = p;
@@ -1116,7 +1120,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 		} else if (ke->scancode == SDL_SCANCODE_L) {
 			p->animv1full ^= 1;
 		} else if (ke->scancode == SDL_SCANCODE_S) {
-			p->texsmooth ^= 1;
+			if (++p->texsmooth >= SMODES_CNT)
+				p->texsmooth = 0;
 			ret = render_frame(p, 0);
 			if (ret) {
 				p->last_ret = ret;
@@ -1193,6 +1198,19 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 					p->last_ret = ret;
 					finish_current_file(p);
 				}
+			}
+		} else if (ke->scancode == SDL_SCANCODE_R) {
+			if (ke->mod & SDL_KMOD_SHIFT) {
+				if (--p->renmode < 0)
+					p->renmode = RMODES_CNT - 1;
+			} else {
+				if (++p->renmode >= RMODES_CNT)
+					p->renmode = 0;
+			}
+			ret = render_frame(p, 0);
+			if (ret) {
+				p->last_ret = ret;
+				finish_current_file(p);
 			}
 		}
 		print_status(p);
