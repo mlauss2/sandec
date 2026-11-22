@@ -10,6 +10,10 @@
  */
 
 #include <memory.h>
+#ifdef SANDEC_DEBUG
+#include <stdarg.h>
+#include <stdio.h>
+#endif
 #include <stdlib.h>
 #include "sandec.h"
 
@@ -95,6 +99,13 @@ static inline uint32_t ua32(const uint8_t *p)
 #define FDHD	0x44484446
 #define FFRM	0x4d524646
 #define GOST	0x54534f47
+#define SKIP	0x50494B53
+#define GAME	0x454d4147
+#define GAM2	0x324d4147
+#define TEXT	0x54584554
+#define SEGA	0x41474553
+#define REGN	0x4e474552
+#define STOP	0x504f5453
 
 /* ANM_FLAGS: various flags passed to the fob decoders and font renderer */
 #define ANM_FLAG_IGN_FOB_OFS		0x0001
@@ -221,6 +232,7 @@ struct sanmsa {
 	uint32_t srcrate;		/* 4 SAN audio samplerate in Hz	*/
 	uint32_t destrate;		/* 4 desired destination rate	*/
 	uint8_t numtrk;			/* number of allocated tracks	*/
+	struct sanctx *ctx;		/* for debug			*/
 };
 
 /* internal context: per-file */
@@ -285,6 +297,11 @@ struct sanctx {
 	uint8_t c45tbl2[0x8000];
 	uint16_t c4tblparam;
 	uint16_t vima_pred_tbl[5786];
+#ifdef SANDEC_DEBUG
+	char	*dbg_buf;
+	uint32_t dbg_ptr;
+	uint32_t dbg_size;
+#endif
 };
 
 /* VIMA data tables */
@@ -467,6 +484,56 @@ static const int8_t c37_mv[3][512] = {
 	0, 0
 	}
 };
+
+#ifdef SANDEC_DEBUG
+
+static void __dbg_clr(struct sanctx *ctx)
+{
+	memset(ctx->dbg_buf, 0, ctx->dbg_size);
+	ctx->dbg_ptr = 0;
+}
+
+static void __dbg(struct sanctx *ctx, const char *fmt, ...)
+{
+	va_list args;
+	int ret, left;
+	char *b = ctx->dbg_buf + ctx->dbg_ptr;
+
+	left = ctx->dbg_size - ctx->dbg_ptr;
+	if (left < 2)
+		return;
+	va_start(args, fmt);
+	ret = vsnprintf(b, left, fmt, args);
+	va_end(args);
+	if (ret > 0)
+		ctx->dbg_ptr += ret;
+}
+
+static void __dbgc(struct sanctx *ctx, char c)
+{
+	int left = ctx->dbg_size - ctx->dbg_ptr;
+	char *b = ctx->dbg_buf + ctx->dbg_ptr;
+
+	if ((c == 0) || (left < 2))
+		return;
+	if ((c < 32) || (c > 126)) {
+		if (left < 3)
+			return;
+		*b++ = '\\';
+		ctx->dbg_ptr++;
+	}
+
+	*b = c;
+	ctx->dbg_ptr++;
+}
+
+#else
+
+static void __dbg_clr(struct sanctx *ctx) { }
+static void __dbg(struct sanctx *ctx, const char *fmt, ...) { }
+static void __dbgc(struct sanctx *ctx, char c) { }
+
+#endif
 
 /******************************************************************************
  * SAN Codec47 Glyph setup, taken from ffmpeg
@@ -776,6 +843,8 @@ static void c4_5_param2(struct sanctx *ctx, uint8_t *src, uint16_t cnt,
 {
 	uint8_t c, *dst = (uint8_t *)&(ctx->c4tbl[1]);
 	uint32_t loop = cnt * 8;
+
+	__dbg(ctx, "      c4/5 param2: %d / %d\n", cnt, clr);
 
 	while (loop--) {
 		c = *src++;
@@ -1325,6 +1394,9 @@ static int codec47(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w, 
 	flag =   src[4];
 	coltbl = src + 8;	/* codebook 4 colors */
 	decsize  = le32_to_cpu(ua32(src + 14));	/* decoded (raw frame) size */
+
+	__dbg(ctx, "       C47   w/h/x/y %3d/%3d/%3d/%3d  s %d  c/r/s/d/f %d/%d/%d/%d/%02x\n", w, h, xoff, yoff, size, comp, newrot, seq, decsize, flag);
+
 	if (decsize > ctx->rt.fbsize)
 		decsize = ctx->rt.fbsize;
 
@@ -1620,6 +1692,7 @@ static int codec48(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 	 * 0x30: unknown, same as 0x20 but checked for MotS error path.
 	 */
 
+	__dbg(ctx, "       C48   %d/%d  seq %3d  flag %08b  ps/ds %u6/%6u  c %d\n", w, h, seq, flag, pktsize, decsize, comp);
 	if (decsize > ctx->rt.fbsize)
 		decsize = ctx->rt.fbsize;
 	if (pktsize > ctx->rt.fbsize)
@@ -1872,6 +1945,8 @@ static int codec37(struct sanctx *ctx, uint8_t *dbuf, uint8_t *src, uint16_t w,
 	decsize = le32_to_cpu(ua32(src + 4));
 	flag = src[12];
 
+	__dbg(ctx, "       C37   w/h/x/y %3d/%3d/%3d/%3d  s %d  c/m/s/d/f %d/%d/%d/%d/%02x  m%d\n", w, h, xoff, yoff, size, comp, mvidx, seq, decsize, flag, ctx->rt.mortimer);
+
 	if (decsize > ctx->rt.fbsize)
 		decsize = ctx->rt.fbsize;
 
@@ -1933,6 +2008,8 @@ static void codec45(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t 
 	const uint16_t pitch = ctx->rt.pitch;
 	unsigned int seq, c1, c2, r, g, b;
 	int i, runlen;
+
+	__dbg(ctx, "       C45   w/h/x/y %3d/%3d/%3d/%3d  s/p/p2 %6d/%d/%d\n", w, h, xoff, yoff, size, param, param2);
 
 	/* The main purpose of this codec is to slightly blur the outline of the "opening
 	 *  aperture" effect in the LEVxx/xxRETRY.SAN files (i.e. antialiasing).
@@ -2010,6 +2087,8 @@ static void codec23(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
 	int skip, i, j, ls, pc, y, wrlen, skip_left;
 	uint8_t lut[256], *d;
+
+	__dbg(ctx, "       C23   w/h/x/y %3d/%3d/%3d/%3d  s/p/p2 %6d/%d/%d\n", w, h, xoff, yoff, size, param, param2);
 
 	if (ctx->rt.version < 2) {
 		/* RA1 */
@@ -2105,6 +2184,8 @@ static void codec23_2x2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t
 	const uint16_t mx = ctx->rt.bufw, my = ctx->rt.bufh, p = ctx->rt.pitch;
 	int skip, i, j, ls, pc, y, wrlen, skip_left;
 	uint8_t lut[256], *d;
+
+	__dbg(ctx, "       C23x2  w/h/x/y %3d/%3d/%3d/%3d  s/p/p2 %6d/%d/%d\n", w, h, xoff, yoff, size, param, param2);
 
 	/* Mortimer 00410770: first c23 has this LUT (param2 == 256),
 	 * later frames reuse it (param2 == 257). param2 < 256 indicates
@@ -2209,6 +2290,8 @@ static void codec44(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	int j, y, pc, skip, ls;
 	uint8_t c, *nsrc;
 
+	__dbg(ctx, "       C44   w/h/x/y %3d/%3d/%3d/%3d  s/f %6d/%d\n", w, h, xoff, yoff, size, fgcol);
+
 	if ((size < 1) || ((yoff + h) < 0) || (yoff >= my) || (xoff + w < 0) || (xoff >= mx))
 		return;
 
@@ -2258,6 +2341,8 @@ static void codec21(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	int j, y, pc, skip, ls;
 	uint8_t c, *nsrc;
 
+	__dbg(ctx, "       C21   w/h/x/y %3d/%3d/%3d/%3d  s/p %6d/%d\n", w, h, xoff, yoff, size, param);
+
 	if ((size < 1) || ((yoff + h) < 0) || (yoff >= my) || (xoff + w < 0) || (xoff >= mx))
 		return;
 
@@ -2304,6 +2389,8 @@ static void codec20(struct sanctx *ctx, uint8_t * __restrict dst,
 		    const uint16_t srcstride)
 {
 	int16_t hh = h;
+
+	__dbg(ctx, "       C20   w/h/x/y %3d/%3d/%3d/%3d  s %6d\n", w, h, xoff, yoff, size);
 
 	if (((xoff + w) < 0) || (xoff >= ctx->rt.bufw) || ((yoff + h) < 0)
 	    || (yoff >= ctx->rt.bufh) || (w < 1) || (h < 1))
@@ -2407,8 +2494,10 @@ static void codec33(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		    uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
 		    uint8_t param, uint16_t param2, int codec)
 {
-	if (ctx->c4tblparam != (param + 0x100))
+	__dbg(ctx, "       C33   w/h/x/y %3d/%3d/%3d/%3d  s/p/p2/c %6d/%d/%d/%d\n", w, h, xoff, yoff, size, param, param2, codec);
+	if (ctx->c4tblparam != (param + 0x100)) {
 		c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	}
 	ctx->c4tblparam = param + 0x100;
 	codec4_main(ctx, dst, src, w, h, xoff, yoff, size, param, param2, codec);
 }
@@ -2417,8 +2506,11 @@ static void codec4(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
 		   uint8_t param, uint16_t param2, int codec)
 {
-	if (ctx->c4tblparam != param)
+	__dbg(ctx, "       C33   w/h/x/y %3d/%3d/%3d/%3d  s/p/p2/c %6d/%d/%d/%d\n", w, h, xoff, yoff, size, param, param2, codec);
+	if (ctx->c4tblparam != param) {
+		__dbg(ctx, "      c4/5 tilegen %d\n", param);
 		c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
+	}
 	ctx->c4tblparam = param;
 	codec4_main(ctx, dst, src, w, h, xoff, yoff, size, param, param2, codec);
 }
@@ -2430,6 +2522,8 @@ static void codec1(struct sanctx *ctx, uint8_t *dst_in, uint8_t *src, uint16_t w
 	uint8_t *dst, code, col;
 	uint16_t rlen, dlen;
 	int j, x, y;
+
+	__dbg(ctx, "       C 1   w/h/x/y %3d/%3d/%3d/%3d  s/p %6d/%c\n", w, h, xoff, yoff, size, transp ? 'T' : 'O');
 
 	if (((yoff + h) < 0) || (yoff >= my) || (xoff + w < 0) || (xoff >= mx))
 		return;
@@ -2520,6 +2614,8 @@ static void codec1_flipx(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_
 	uint16_t rlen, dlen;
 	int j, x_rel, y;
 
+	__dbg(ctx, "       C 1x  w/h/x/y %3d/%3d/%3d/%3d  s/p %6d/%d\n", w, h, xoff, yoff, size, transp);
+
 	for (y = 0; (size > 1) && (y < h); y++) {
 		dlen = le16_to_cpu(ua16(src));
 		src += 2;
@@ -2572,6 +2668,8 @@ static void codec1_flipy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_
 	uint8_t code, col;
 	uint16_t rlen, dlen;
 	int j, x, y;
+
+	__dbg(ctx, "       C 1y  w/h/x/y %3d/%3d/%3d/%3d  s/p %6d/%d\n", w, h, xoff, yoff, size, transp);
 
 	for (y = 0; (size > 1) && (y < h); y++) {
 		dlen = le16_to_cpu(ua16(src));
@@ -2629,6 +2727,8 @@ static void codec1_flipxy(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16
 	uint16_t rlen, dlen;
 	int j, x_rel, y;
 
+	__dbg(ctx, "       C 1xy w/h/x/y %3d/%3d/%3d/%3d  s/p %6d/%d\n", w, h, xoff, yoff, size, transp);
+
 	for (y = 0; (size > 1) && (y < h); y++) {
 		dlen = le16_to_cpu(ua16(src));
 		src += 2;
@@ -2681,6 +2781,8 @@ static void codec1_2x2(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 			uint16_t fobw, uint16_t fobh, int16_t xoff, int16_t yoff)
 {
 	const uint16_t stride = ctx->rt.pitch;
+
+	__dbg(ctx, "       C 1x2 w/h/x/y %3d/%3d/%3d/%3d\n", fobw, fobh, xoff, yoff);
 
 	if (yoff < 0) {
 		yoff = -yoff;
@@ -2798,6 +2900,8 @@ static void codec2(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 {
 	const uint16_t pitch = ctx->rt.pitch, maxx = ctx->rt.bufw, maxy = ctx->rt.bufh;
 
+	__dbg(ctx, "       C 2 w/h/x/y %3d/%3d/%3d/%3d  s/p/p2 %6d/%d/%d\n", w, h, xoff, yoff, size, param, param2);
+
 	/* RA2 31a10; but there are no codec2 fobjs in RA2 at all.. */
 	if (param2 != 0 && ctx->rt.version == 2) {
 		codec1(ctx, dst, src, w, h, xoff, yoff, size, 1);
@@ -2824,6 +2928,8 @@ static void codec31(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 	uint8_t code, col;
 	uint16_t rlen, dlen;
 	int j, x, y;
+
+	__dbg(ctx, "       C31 w/h/x/y %3d/%3d/%3d/%3d  s/p/o %6d/%d/%d\n", w, h, xoff, yoff, size, p1, opaque);
 
 	if (((yoff + h) < 0) || (yoff >= my) || (xoff + w < 0) || (xoff >= mx))
 		return;
@@ -3030,6 +3136,8 @@ static int fob_decode_render(struct sanctx *ctx, uint8_t *dst, uint8_t *src,
 	src += 14;
 	size -= 14;
 
+	__dbg(ctx, "      fdr c%2u  w/h %3u/%3u @ x/y %4d/%4d  p1/2 %02x/%04x(%d) af %04x  sz %d\n", codec, fobw, fobh, xoff, yoff, param, param2, param2, anm_flags, size);
+
 	ret = 0;
 	switch (codec) {
 	case 1:  codec1(ctx, dst, src, fobw, fobh, xoff, yoff, size, 1); break;
@@ -3090,6 +3198,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	h = hr = le16_to_cpu(ua16(src + 8));
 	v1skip = le16_to_cpu(ua16(src + 10));	/* ANIMv1 version of SKIP chunk */
 	param2 = le16_to_cpu(ua16(src + 12));
+
+	__dbg(ctx, "     FOBJ c%2u  w/h %3u/%3u @ x/y %4d/%4d  p1/2 %02x/%04x(%d) v1skip %d  stor %d  af %04x\n", codec, w, h, left, top, param, param2, param2, v1skip, ctx->rt.to_store, anm_flags);
 
 	/* ignore nonsensical dimensions in frames, happens with
 	 * some Full Throttle and RA2 videos.
@@ -3163,6 +3273,8 @@ static int handle_FOBJ(struct sanctx *ctx, uint32_t size, uint8_t *src,
 	}
 
 	(void)v1skip;
+
+	__dbg(ctx, "      FOBJ buf: x/y/p %d/%d/%d  xo/yo %d/%d  af %04x\n", rt->bufw, rt->bufh, rt->pitch, xoff, yoff, anm_flags);
 
 	rt->vbuf = rt->fbuf;
 	ret = fob_decode_render(ctx, rt->fbuf, src, size, xoff, yoff, anm_flags, 1, 0);
@@ -3536,6 +3648,8 @@ static void handle_BL16(struct sanctx *ctx, uint32_t size, uint8_t *src)
 		db2 = (uint16_t *)rt->buf2;
 	}
 
+	__dbg(ctx, "      BL16: c %d  w/h %d/%d  sq %d  r %d  ds %d  0x228: %d\n", codec, width, height, seq, newrot, decsize, src[0x228]);
+
 	src += 0x230;
 	size -= 0x230;
 	switch (codec) {
@@ -3691,6 +3805,14 @@ static inline uint32_t atrk_bufbytes(struct sanatrk *atrk)
 	if (atrk->rdptr <= atrk->wrptr)
 		return atrk->wrptr - atrk->rdptr;
 	return atrk->wrptr + ATRK_DATSZ - atrk->rdptr;
+}
+
+static void _atrk_print(struct sanatrk *atrk)
+{
+	__dbg(atrk->msa->ctx, " tid %3d S%d rd/wr %7d/%7d  pl/bb/pa/da %7d/%7d/%6d/%6d  f %08b  v/p %3d/%4d  sr %5d a/c %08x/%08x  dl %8d  sp/sz %d/%d\n",
+	       atrk->trkid, atrk->state, atrk->rdptr, atrk->wrptr, atrk->playlen, atrk_bufbytes(atrk),
+	       atrk->dstfavail, atrk->dstpavail, atrk->flags, atrk->vol, atrk->pan,
+	       atrk->srate, atrk->src_accum, atrk->src_cnvrate, atrk->dataleft, atrk->strkptr, atrk->strksz);
 }
 
 static void atrk_update_dstframes_avail(struct sanatrk *atrk)
@@ -3935,9 +4057,11 @@ static void atrk_set_default_strk(struct sanatrk *atrk, uint32_t len)
 static void atrk_process_strk(struct sanatrk *atrk)
 {
 	uint8_t *s, *r = &atrk->msa->sou_hooks[0xff];
+	struct sanctx *ctx = atrk->msa->ctx;
 	uint32_t v1, v2, v3, v4;
 	int j;
 
+	__dbg(ctx, "       STRK(%d) sp/sz %d/%d\n", atrk->trkid, atrk->strkptr, atrk->strksz);
 	j = atrk->strksz - atrk->strkptr;
 	if (j < 1) {
 		atrk_reset(atrk);
@@ -3946,6 +4070,7 @@ static void atrk_process_strk(struct sanatrk *atrk)
 
 	do {
 		s = atrk->strk + atrk->strkptr;
+		__dbg(ctx, "       STRK(%d) cmd %d  dleft %d  reg %d | ", atrk->trkid, s[0], j, *r);
 		switch (s[0]) {
 		case 1:					/* set play offset + length */
 			if (j < 10)
@@ -3953,6 +4078,7 @@ static void atrk_process_strk(struct sanatrk *atrk)
 
 			v1 = be32_to_cpu(ua32(s + 2 + 0));
 			v2 = be32_to_cpu(ua32(s + 2 + 4));
+			__dbg(ctx, " c1 v1/v2 %d/%d\n", v1, v2);
 			atrk_set_playpos(atrk, v1, v2);
 			atrk->strkptr += s[1] + 2;
 			atrk->af4 = 0;			/* for case 7 */
@@ -3961,6 +4087,7 @@ static void atrk_process_strk(struct sanatrk *atrk)
 			if (j < 4)
 				goto out_err;
 
+			__dbg(ctx, " c3 s2/s3 %d/%d\n", s[2], s[3]);
 			if (s[2] == 0xff) {
 				*r = s[3];
 			} else if (s[2] == 0xfe) {
@@ -3978,6 +4105,7 @@ static void atrk_process_strk(struct sanatrk *atrk)
 			if (j < 4)
 				goto out_err;
 
+			__dbg(ctx, " c4 s2/s3 %d/%d\n", s[2], s[3]);
 			if (s[2] == 0xff) {
 				*r += (int8_t)s[3];	/* "register" */
 			} else if (s[2] == 0xfe) {
@@ -4000,6 +4128,7 @@ static void atrk_process_strk(struct sanatrk *atrk)
 			v1 = be32_to_cpu(ua32(s + 2 + 0));
 			v2 = be32_to_cpu(ua32(s + 2 + 4));
 			v3 = be32_to_cpu(ua32(s + 2 + 8));
+			__dbg(ctx, " c6 v1/v2/v3 %d/%d/%d\n", v1, v2, v3);
 			if ((v3 < 1000) || (v3 > 48000))
 				goto out_err;
 			atrk_set_playpos(atrk, v1, v2);
@@ -4025,6 +4154,7 @@ static void atrk_process_strk(struct sanatrk *atrk)
 			} else {
 				*r = atrk->msa->sou_hooks[s[4]];
 			}
+			__dbg(ctx, " c%d s4/s5 %d/%d  r %d\n", s[0], s[4], s[5], *r);
 			/* execute logical op */
 			switch (s[0]) {
 			case 2:	 *r =((*r != 0) || (s[4] == 0)) ? 1 : 0; break;
@@ -4047,6 +4177,7 @@ static void atrk_process_strk(struct sanatrk *atrk)
 			v2 = be32_to_cpu(ua32(s + 2 +  4));
 			v3 = be32_to_cpu(ua32(s + 2 +  8));
 			v4 = be32_to_cpu(ua32(s + 2 + 12));
+			__dbg(ctx, " c7 v1/2/3/4 %d/%d/%d/%d  af0/4 %d/%d  j1/j2 %d/%d\n", v1, v2, v3, v4, atrk->af0, atrk->af4, s[1], (int16_t)be16_to_cpu(ua16(s + 2 + 16)));
 			if ((v3 < 1000) || (v3 > 48000))
 				goto out_err;
 			/* SHELL.EXE 41cb5e+ */
@@ -4075,8 +4206,10 @@ static void atrk_process_strk(struct sanatrk *atrk)
 	} while (j > 0);
 	/* no more STRK bytes, but still here? Just terminate the stream then */
 out_err:
+	__dbg(ctx, "       STRK(%d)       ERROR ", atrk->trkid);
 	atrk_reset(atrk);
 out_ok:
+	__dbg(ctx, "       STRK(%d) sp %d DONE\n", atrk->trkid, atrk->strkptr);
 	return;
 }
 
@@ -4365,9 +4498,16 @@ static int aud_mix_tracks(struct sanctx *ctx, void **dpt_out, uint32_t *dsz_out)
 	dff = msa->audminframes;	/* amount of target samples to generate */
 
 	active1 = atrk_count_active(msa, &voice);
+	__dbg(ctx, "=== MIX START ===  dff %d  a1 %d\n", dff, active1);
+	if (active1 > 0) {
+		for (int i = 0; i < msa->numtrk; i++) {
+			_atrk_print(&(msa->atrk[i]));
+		}
+	}
 	while ((active1 != 0) && (dff != 0)) {
 		atrk_reset_mixed(msa, 0);
 		mixable = atrk_count_mixable(msa, &minlen1);
+		__dbg(ctx, " -- mixloop: mixable/dff/minlen1 %d/%d/%d\n", mixable, dff, minlen1);
 		if ((mixable < 1) || (minlen1 == -1))
 			break;
 
@@ -4377,6 +4517,7 @@ static int aud_mix_tracks(struct sanctx *ctx, void **dpt_out, uint32_t *dsz_out)
 		while (NULL != (atrk = atrk_get_next_mixable(msa))) {
 			const int m = atrk->flags & SAUD_FLAG_TRK_MASK;
 			int vol = 0, pan = (atrk->flags & ATRK_1CH) ? atrk->pan : 0;
+			__dbg(ctx, "  - conv: tid %d  ml1 %d  ofs %d\n", atrk->trkid, minlen1, dstlen);
 
 			if (m == 0) {
 				vol = (atrk->vol * msa->sou_vol_sfx) >> 7;
@@ -4397,12 +4538,18 @@ static int aud_mix_tracks(struct sanctx *ctx, void **dpt_out, uint32_t *dsz_out)
 		dstptr += dstlen;
 		dff -= minlen1;
 		if (dff) {
+			__dbg(ctx, " -- dff NOT reached: \n");
+			for (int i = 0; i < msa->numtrk; i++) {
+				_atrk_print(&(msa->atrk[i]));
+			}
+			__dbg(ctx, " ----\n");
 			active2 = atrk_count_active(msa, NULL);
 			if (active2 < active1) {
 				/* the short track was done and freed, try
 				 * again to get the missing rest from the
 				 * other still active tracks.
 				 */
+				__dbg(ctx, " -- RETRY1: track went inactive.\n");
 				active1 = active2;
 				continue;
 			}
@@ -4436,6 +4583,7 @@ static int aud_mix_tracks(struct sanctx *ctx, void **dpt_out, uint32_t *dsz_out)
 	}
 
 	atrk_reset_mixed(msa, 1);
+	__dbg(ctx, "=== MIX END: dstlen/dff/act %d/%d/%d\n", dstlen, dff, atrk_count_active(msa, NULL));
 	return (dstlen != 0);
 }
 
@@ -4444,7 +4592,10 @@ static int iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 {
 	uint32_t cid, csz, mapsz;
 	uint16_t rate, bits, chnl, vol;
+	struct sanctx *ctx = msa->ctx;
 	struct sanatrk *atrk;
+
+	__dbg(ctx, "      IMUS: t/u %d/%d\n", trkid, uid);
 
 	if (size > (_ATRK_DATSZ / 2))
 		return 1;
@@ -4466,6 +4617,7 @@ static int iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 		trkid += 600;
 		vol = uid * 2 - 600;
 	}
+	__dbg(ctx, "      IMUS: t/u %d/%d/%d\n", trkid, uid, vol);
 
 	atrk = atrk_find_trkid(msa, trkid, -1, 0, 0);
 	if (!atrk)
@@ -4496,6 +4648,7 @@ static int iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 		if (cid != MAP_ || mapsz > size)
 			return 1;
 
+		__dbg(ctx, "      ");
 		/* the MAP_ chunk again has a few subchuks, need the FRMT tag */
 		while (mapsz > 7 && size > 7) {
 			cid = le32_to_cpu(ua32(src + 0));
@@ -4509,13 +4662,20 @@ static int iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 				bits = be16_to_cpu(ua16(src + 10));
 				rate = be16_to_cpu(ua16(src + 14));
 				chnl = be16_to_cpu(ua16(src + 18));
+				__dbg(ctx, " FRMT r/b/c %d/%d/%d  ", rate, bits, chnl);
+			} else if (cid == REGN) {
+				__dbg(ctx, " REGN 1/2 %d/%d  ", be32_to_cpu(ua32(src + 0)), be32_to_cpu(ua32(src + 4)));
+			} else if (cid == STOP) {
+				__dbg(ctx, " STOP %d  ", be32_to_cpu(ua32(src + 0)));
+			} else if (cid == TEXT) {
+				__dbg(ctx, " TEXT '%s'  ", src);
 			}
 
 			src += csz;
 			size -= csz;
 			mapsz -= csz;
 		}
-
+		__dbg(ctx, "\n");
 		/* now there should be "DATA" with the TOTAL len of sound of the whole track */
 		if (size < 8)
 			return 1;
@@ -4532,6 +4692,7 @@ static int iact_audio_imuse(struct sanmsa *msa, uint32_t size, uint8_t *src,
 		atrk_set_srcfmt(atrk, rate, bits, chnl, vol, 0);
 		atrk_set_default_strk(atrk, csz);
 		atrk_process_strk(atrk);
+		__dbg(ctx, "      IMUS: "); _atrk_print(atrk);
 	}
 
 	if (atrk->state < STATE_BLOCKED)
@@ -4627,6 +4788,11 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	for (i = 0, s2 = size; (i < 7) && (s2 > 1); i++, s2 -= 2)
 		p[i] = le16_to_cpu(*(uint16_t *)(src + (i<<1)));
 
+	{
+		const uint32_t p7 = le32_to_cpu(ua32(src + 14));
+		__dbg(ctx, "     IACT %5d  %5d  %5d  %5d  %5d  %5d  %5d %10u(%08x)\n", p[0], p[1], p[2], p[3], p[4], p[5], p[6], p7, p7);
+	};
+
 	if (p[0] == 8 && p[1] == 46) {
 		if (size < 18)
 			return;
@@ -4656,7 +4822,10 @@ static void handle_IACT(struct sanctx *ctx, uint32_t size, uint8_t *src)
 static void handle_SAUD(struct sanatrk *atrk, const uint16_t rate)
 {
 	uint32_t cid, csz, size = atrk_bufbytes(atrk);
+	struct sanctx *ctx = atrk->msa->ctx;
 	uint8_t *src = atrk->data;
+
+	__dbg(ctx, "       SAUD(%d) S%d  sz %d TESTING\n", atrk->trkid, atrk->state, atrk->wrptr);
 
 	if ((atrk->state > STATE_HEADER) || (size < 16))
 		return;
@@ -4703,6 +4872,7 @@ static void handle_SAUD(struct sanatrk *atrk, const uint16_t rate)
 	atrk_set_srcfmt(atrk, rate, 8, 1, atrk->vol, atrk->pan);
 	atrk_process_strk(atrk);
 	atrk_update_dstframes_avail(atrk);
+	__dbg(ctx, "       SAUD(%d) OK\n", atrk->trkid);
 }
 
 static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t v1flag)
@@ -4753,6 +4923,7 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 		size -= 10;
 	}
 
+	__dbg(ctx, "     PSAD sz %d t/i/m/v/p %d/%d/%d/%d/%d flg %08b\n", size, tid, idx, mid, vol, pan, flg);
 	if (idx == 0) {
 		atrk = atrk_find_trkid(msa, tid, -1, 0, 0);
 		if (!atrk)
@@ -4769,8 +4940,10 @@ static void handle_PSAD(struct sanctx *ctx, uint32_t size, uint8_t *src, uint8_t
 		atrk->state = STATE_HEADER;
 	} else {
 		atrk = atrk_find_trkid(ctx->msa, tid, idx, mid, 1);
-		if (!atrk || (atrk->state < STATE_HEADER))
+		if (!atrk || (atrk->state < STATE_HEADER)) {
+			__dbg(ctx, "      PSAD: tid %d NOT FOUND/STATE ERROR\n", tid);
 			return;
+		}
 	}
 
 	atrk->curridx = idx;
@@ -4987,6 +5160,42 @@ static int handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	return 0;
 }
 
+static void handle_TEXT(struct sanctx *ctx, uint32_t size, uint8_t *src)
+{
+	uint32_t xoff, yoff, x1, y1, x2, y2;
+
+	if (ctx->rt.version < 2) {
+		if (size < 8)
+			return;
+		xoff = be32_to_cpu(ua32(src + 0));
+		yoff = be32_to_cpu(ua32(src + 4));
+		/* clipping rect; none defined in v1 */
+		x1 = y1 = 0;
+		x2 = 320; y2 = 200;
+		size -= 8;
+		src += 8;
+	} else {
+		if (size < 16)
+			return;
+		/* position */
+		xoff = le16_to_cpu(*(uint16_t *)(src +  0));
+		yoff = le16_to_cpu(*(uint16_t *)(src +  2));
+		/* clipping window */
+		x1   = le16_to_cpu(*(uint16_t *)(src +  6));
+		y1   = le16_to_cpu(*(uint16_t *)(src +  8));
+		x2   = le16_to_cpu(*(uint16_t *)(src + 10));
+		y2   = le16_to_cpu(*(uint16_t *)(src + 12));
+		size -= 16;
+		src += 16;
+	}
+	if (size < 4096) {
+		__dbg(ctx, "     TEXT %d/%d (%d/%d-%d/%d): >>>", xoff, yoff, x1, y1, x2, y2);
+		while (size--)
+			__dbgc(ctx, *src++);
+		__dbg(ctx, " <<< TEXT END\n");
+	}
+}
+
 /* subtitles: index of message in the Outlaws LOCAL.MSG file, 10000 - 12001.
  * As long as subid is set to non-zero, the subtitle needs to be overlaid
  * over the image.  The chunk also provides hints about where to place
@@ -4995,6 +5204,7 @@ static int handle_VIMA(struct sanctx *ctx, uint32_t size, uint8_t *src)
 static void handle_TRES(struct sanctx *ctx, uint32_t size, uint8_t *src)
 {
 	uint16_t *tres = (uint16_t *)src;
+	__dbg(ctx, "     TRES x/y %d/%d  af 0x%04x  x1/y1/x2/y2 %03d/%03d/%03d/%03d  u1/resid %d/%d\n", tres[0], tres[1], tres[2], tres[3], tres[4], tres[5], tres[6], tres[7], tres[8]);
 	ctx->rt.subid = size >= 18 ? le16_to_cpu(tres[8]) : 0;
 }
 
@@ -5015,6 +5225,7 @@ static void handle_STOR(struct sanctx *ctx, uint32_t size, uint8_t *src)
 	 *  - change the fobj header to codec20, 320x200
 	 * Probably a good perf improvement on 1992/1993 PC hardware.
 	 */
+	 __dbg(ctx, "     STOR %u\n", src[0]);
 }
 
 static void handle_FADE(struct sanctx *ctx, uint32_t size, uint8_t *src)
@@ -5110,6 +5321,7 @@ static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t
 
 	ret = 0;
 	sz = *(uint32_t *)(vb + 0);
+	__dbg(ctx, "     FTCH %d  x/y %d/%d  af %04x  ss %d\n", size, xoff, yoff, anm_flags, sz);
 	if (sz > 0 && sz <= ctx->rt.fbsize) {
 		ret = fob_decode_render(ctx, ctx->rt.fbuf, vb + 4, sz, xoff, yoff, anm_flags, 1, 0);
 	}
@@ -5174,6 +5386,48 @@ static int allocfrme(struct sanctx *ctx, uint32_t sz)
 	return 0;
 }
 
+static void handle_SKIP(struct sanctx *ctx, uint32_t size, uint8_t *src)
+{
+	uint16_t v1, v2;
+
+	v1 = le16_to_cpu(*(uint16_t *)(src + 0));
+	v2 = le16_to_cpu(*(uint16_t *)(src + 2));
+	__dbg(ctx, "     SKIP %d/%d\n", v1, v2);
+}
+
+static void handle_GAME(struct sanctx *ctx, uint32_t size, uint8_t *src)
+{
+	uint32_t v[5];
+	int i;
+
+	__dbg(ctx, "     GAME p1/2/3/4/5 ");
+	if (size == 20) {
+		for (i = 0; i < 5; i++) {
+			v[i] = be32_to_cpu(ua32(src));
+			__dbg(ctx, "%4d ", v[i]);
+			src += 4;
+		}
+	}
+	__dbg(ctx, "\n");
+}
+
+static void handle_SEGA(struct sanctx *ctx, uint32_t size, uint8_t *src)
+{
+	uint32_t s[5];
+	if (size < 20)
+		return;
+	for (int i = 0; i < 5; i++)
+		s[i] = be32_to_cpu(*(uint32_t *)(src + (i*4)));
+	__dbg(ctx, "     SEGA raw p1/2/3/4/5 %d/%d/%d/%d/%d\n", s[0], s[1], s[2], s[3], s[4]);
+	/* the SEGA MegaCD port writes the 4 values right-shifted by 3 as arguments to
+	 * command 7 to a "mailbox".
+	 */
+	for (int i = 0; i < 4; i++)
+		s[i] >>= 3;
+	__dbg(ctx, "     SEGA cnv p1/2/3/4/5 %d/%d/%d/%d\n", s[0], s[1], s[2], s[3]);
+
+}
+
 static int handle_FRME(struct sanctx *ctx, uint32_t size, struct sanframe *outdata)
 {
 	struct sanrt *rt = &ctx->rt;
@@ -5181,6 +5435,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size, struct sanframe *outda
 	uint16_t anm_flags;
 	uint8_t *src;
 	int ret;
+
+	__dbg(ctx, "FRME c/m/sz %d/%d/%d\n", rt->currframe, rt->FRMEcnt, size);
 
 	ret = allocfrme(ctx, size);
 	if (ret)
@@ -5217,6 +5473,8 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size, struct sanframe *outda
 		src += 8;
 		size -= 8;
 
+		__dbg(ctx, "%4u %c%c%c%c size/left %7u /%7u\n", rt->currframe,  cid,cid>>8,cid>>16,cid>>24, csz, size);
+
 		if (csz > size)
 			return 15;
 
@@ -5240,6 +5498,11 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size, struct sanframe *outda
 			case PSD2: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_SFX);   break;
 			case PSAD: handle_PSAD(ctx, csz, src, SAUD_FLAG_TRK_MUSIC); break;
 			case FADE: handle_FADE(ctx, csz, src); break;
+			case SKIP: handle_SKIP(ctx, csz, src); break;
+			case GAME:
+			case GAM2: handle_GAME(ctx, csz, src); break;
+			case TEXT: handle_TEXT(ctx, csz, src); break;
+			case SEGA: handle_SEGA(ctx, csz, src); break;
 			default:   ret = 0;		/* unknown chunk, ignore */
 			}
 		}
@@ -5283,6 +5546,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size, struct sanframe *outda
 				outdata->pal = rt->palette;
 				outdata->frame_duration_us = rt->framedur / 2;
 				outdata->txtres = rt->subid;
+				__dbg(ctx, "IPOL FAKE frame\n");
 			} else {
 				outdata->vid_data = rt->vbuf;
 				outdata->vid_size = rt->pitch * rt->bufh;
@@ -5496,6 +5760,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 	/* set our own as default interpolation table */
 	rt->itbl = rt->general_itbl;
 	read_palette(ctx, ahbuf + 6);	/* 768 bytes */
+	maxframe = 256000 / 15;
 
 	if (rt->version > 1) {
 		rt->framedur  =  le32_to_cpu(*(uint32_t *)(ahbuf + 6 + 768 + 0));
@@ -5547,6 +5812,7 @@ static int handle_AHDR(struct sanctx *ctx, uint32_t size)
 
 	if (sandec_alloc_msa(&ctx->msa, ATRK_MAX, audminframes))
 		return 14;
+	ctx->msa->ctx = ctx;
 	ctx->msa->srcrate = srate;
 	ctx->msa->destrate = ctx->adestrate;
 
@@ -5676,6 +5942,7 @@ static int handle_SHDR(struct sanctx *ctx, uint32_t csz)
 	const uint32_t audminframes = (((srate * 10 * rt->framedur) / 1000000) + 1) & ~1U;
 	if (sandec_alloc_msa(&ctx->msa, 1, audminframes))
 		return 60;
+	ctx->msa->ctx = ctx;
 	ctx->msa->srcrate = srate;
 	ctx->msa->destrate = ctx->adestrate;
 
@@ -5703,14 +5970,19 @@ int sandec_decode_next_frame(void *sanctx, struct sanframe *outdata)
 
 	if (!ctx || !outdata)
 		return 1;
+
 	/* in case of previous error, don't continue, just return it again */
 	if (ctx->errdone)
 		return ctx->errdone;
 
 	memset(outdata, 0, sizeof(struct sanframe));
 
+#ifdef SANDEC_DEBUG
+	outdata->dbg_text = ctx->dbg_buf;
+#endif
 	/* interpolated frame: was queued first, now queue the decoded one */
 	if (ctx->rt.have_ipframe) {
+		__dbg(ctx, "IPOL REAL frame\n");
 		struct sanrt *rt = &ctx->rt;
 		rt->have_ipframe = 0;
 		outdata->vid_data = rt->vbuf;
@@ -5724,9 +5996,11 @@ int sandec_decode_next_frame(void *sanctx, struct sanframe *outdata)
 		return SANDEC_OK;
 	}
 
+	__dbg_clr(ctx);
 again:
 	ret = read_source(ctx, c, 8);
 	if (ret) {
+		__dbg(ctx, "IO error\n");
 		/* read error: file may have been read */
 		if (ctx->rt.currframe >= ctx->rt.FRMEcnt) {
 			/* all frames read, finish up remaining audio */
@@ -5754,6 +6028,7 @@ again:
 
 	} else if (c[0] == ANNO) {
 		/* some annotation, found esp. in Grim Fandango files. just skip it */
+		__dbg(ctx, "ANNO  s %u\n", c[1]);
 		uint8_t buf[128], rs;
 		while (c[1] > 0) {
 			rs = c[1] >= 128 ? 128 : c[1];
@@ -5790,6 +6065,15 @@ int sandec_init(void **ctxout)
 		free(ctx);
 		return 2;
 	}
+
+#ifdef SANDEC_DEBUG
+	ctx->dbg_buf = malloc(8192);
+	if (!ctx->dbg_buf)
+		return 101;
+	memset(ctx->dbg_buf, 0, 8192);
+	ctx->dbg_size = 8192;
+	ctx->dbg_ptr = 0;
+#endif
 
 	/* set to error state initially until a valid file has been opened */
 	ctx->errdone = 44;
@@ -5886,6 +6170,10 @@ void sandec_exit(void **sanctx)
 
 	sandec_free_memories(ctx);
 
+#ifdef SANDEC_DEBUG
+	if (ctx->dbg_buf)
+		free(ctx->dbg_buf);
+#endif
 	if (ctx->adstbuf1)
 		free(ctx->adstbuf1);
 	free(ctx);

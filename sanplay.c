@@ -694,7 +694,12 @@ static void print_status(struct playpriv *p)
 		return;
 
 	format_status(p, buf, sizeof(buf));
-	printf("\33[2K\r%s", buf);
+	printf("\33[2K\r");
+	if (p->dbg_text && p->dbg_text[0]) {
+		printf("<<------------------------------------------------->>\n");
+		printf("%s\n", p->dbg_text);
+	}
+	printf("%s", buf);
 	fflush(stdout);
 }
 
