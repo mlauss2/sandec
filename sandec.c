@@ -2497,6 +2497,7 @@ static void codec33(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 {
 	__dbg(ctx, "       C33   w/h/x/y %3d/%3d/%3d/%3d  s/p/p2/c %6d/%d/%d/%d\n", w, h, xoff, yoff, size, param, param2, codec);
 	if (ctx->c4tblparam != (param + 0x100)) {
+		__dbg(ctx, "      c33  tilegen %d\n", param);
 		c33_34_tilegen(&(ctx->c4tbl[0][0][0]), param);
 	}
 	ctx->c4tblparam = param + 0x100;
@@ -2507,7 +2508,7 @@ static void codec4(struct sanctx *ctx, uint8_t *dst, uint8_t *src, uint16_t w,
 		   uint16_t h, int16_t xoff, int16_t yoff, uint32_t size,
 		   uint8_t param, uint16_t param2, int codec)
 {
-	__dbg(ctx, "       C33   w/h/x/y %3d/%3d/%3d/%3d  s/p/p2/c %6d/%d/%d/%d\n", w, h, xoff, yoff, size, param, param2, codec);
+	__dbg(ctx, "       C 4   w/h/x/y %3d/%3d/%3d/%3d  s/p/p2/c %6d/%d/%d/%d\n", w, h, xoff, yoff, size, param, param2, codec);
 	if (ctx->c4tblparam != param) {
 		__dbg(ctx, "      c4/5 tilegen %d\n", param);
 		c4_5_tilegen(&(ctx->c4tbl[0][0][0]), param);
