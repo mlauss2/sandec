@@ -5458,12 +5458,14 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size, struct sanframe *outda
 	rt->can_ipol = 1;
 	while ((size > 7) && (ret == 0)) {
 
-		/* some blocks like IACT have odd size, and RA1 L2PLAY.ANM
-		 * has a few unaligned (not at 2 byte boundary) FOBJs.
-		 * This is how the smush game engine deals with that.
+		/* blocks are usually stored in the file at 2-byte alignment,
+		 * padded with a zero-byte if necessary.  RA1 L2PLAY.ANM has
+		 * a few unaligned chunks (starting add odd offsets from the
+		 * file start), so the padding byte is non-zero and must not be
+		 * skipped.  Below is how all SMUSH engines deal with this.
 		 */
 		if (((uintptr_t)src & 1) && (*src == 0)) {
-			src++;
+			src++;		/* skip zero/padding byte */
 			size--;
 		}
 
