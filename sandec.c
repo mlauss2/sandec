@@ -271,10 +271,11 @@ struct sanrt {
 	uint8_t  can_ipol:1;	/* 1 frame interpolation possible       */
 	uint8_t  have_ipframe:1;/* 1 we have an interpolated frame      */
 	uint8_t  iactimus:2;	/* 1 is TheDig/IACT 8/0/0/x>0 is audio	*/
+	uint8_t	 mortimer:1;	/* 1 upscale for Mortimer		*/
+	uint8_t	 anm_in_fade:1;	/* 1 FADE is active			*/
 	void	 *membase;	/* 8 base to allocated mem block	*/
 	uint8_t *last_fobj;	/* 8 ptr to last FOBJ, for GOST		*/
 	uint32_t last_fobj_size;/* 4 size of last FOBJ			*/
-	uint8_t	 mortimer:1;	/* 1 upscale for Mortimer		*/
 	uint8_t *general_itbl;	/* 8 general interpolation table	*/
 	uint8_t *itbl;		/* 8 ptr to itable to use for framegen  */
 };
@@ -5296,7 +5297,7 @@ static void handle_FADE(struct sanctx *ctx, uint32_t size, uint8_t *src)
 
 	ctx->rt.vbuf = ctx->rt.fadebuf;
 	ctx->rt.can_ipol = 0;
-	return;
+	ctx->rt.anm_in_fade = 1;
 }
 
 static int handle_FTCH(struct sanctx *ctx, uint32_t size, uint8_t *src, uint16_t anm_flags)
@@ -5456,6 +5457,7 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size, struct sanframe *outda
 	rt->last_fobj = NULL;
 	rt->last_fobj_size = 0;
 	rt->can_ipol = 1;
+	rt->anm_in_fade = 0;
 	while ((size > 7) && (ret == 0)) {
 
 		/* blocks are usually stored in the file at 2-byte alignment,
@@ -5562,6 +5564,16 @@ static int handle_FRME(struct sanctx *ctx, uint32_t size, struct sanframe *outda
 				/* save frame as possible interpolation source */
 				memcpy(rt->buf4, rt->vbuf, rt->bufw * rt->bufh * 1);
 			}
+
+			/* FADE (and VMSK) operate directly on VGA memory and
+			 * set anm_flag 0x8000 (via the anm_in_fade global variable)
+			 * to inhibit the blitter.  As long as FADE hasn't run,
+			 * copy the current final image to the fadebuf, which
+			 * acts as our VGA memory.  VMSK isn't used in any SAN
+			 * file therefore limit this copy to RA1 (ANIMv0/1).
+			 */
+			if ((rt->version < 2) && (rt->anm_in_fade == 0))
+				memcpy(rt->fadebuf, rt->vbuf, rt->bufw * rt->bufh * 1);
 		}
 
 
@@ -5713,7 +5725,7 @@ static int sandec_alloc_vidmem(struct sanctx *ctx, const uint16_t maxx,
 		rt->buf4 = rt->buf2 + cmem;	/* interpolated frame buffer	*/
 		rt->buf5 = rt->buf4 + vmem;	/* interpolation last frame buf */
 		rt->buf3 = rt->buf5 + vmem;	/* STOR buffer			*/
-		rt->fadebuf = rt->buf5 + vmem;	/* FADE intermediate buffer	*/
+		rt->fadebuf = rt->buf3 + vmem;	/* FADE intermediate buffer	*/
 	} else {
 		/* set up buffers for SNM: 3 video buffers for BL16 */
 		rt->fbuf = NULL;
