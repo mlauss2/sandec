@@ -4553,7 +4553,6 @@ static int aud_mix_tracks(struct sanctx *ctx, void **dpt_out, uint32_t *dsz_out)
 				 */
 				__dbg(ctx, " -- RETRY1: track went inactive.\n");
 				active1 = active2;
-				continue;
 			}
 			/* see if any of the tracks had a reset of their play
 			 * position/length (STRK processing), indicated by
@@ -4563,7 +4562,7 @@ static int aud_mix_tracks(struct sanctx *ctx, void **dpt_out, uint32_t *dsz_out)
 			for (int i = 0; i < msa->numtrk; i++) {
 				atrk = &(msa->atrk[i]);
 				if (atrk->state == STATE_NEWDATA)
-					atrk->state = STATE_MIXED;
+					atrk->state = STATE_MIXABLE;
 			}
 		}
 	}
