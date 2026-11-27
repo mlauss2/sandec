@@ -4519,7 +4519,6 @@ static int aud_mix_tracks(struct sanctx *ctx, void **dpt_out, uint32_t *dsz_out)
 		while (NULL != (atrk = atrk_get_next_mixable(msa))) {
 			const int m = atrk->flags & SAUD_FLAG_TRK_MASK;
 			int vol = 0, pan = (atrk->flags & ATRK_1CH) ? atrk->pan : 0;
-			__dbg(ctx, "  - conv: tid %d  ml1 %d  ofs %d\n", atrk->trkid, minlen1, dstlen);
 
 			if (m == 0) {
 				vol = (atrk->vol * msa->sou_vol_sfx) >> 7;
@@ -4531,6 +4530,8 @@ static int aud_mix_tracks(struct sanctx *ctx, void **dpt_out, uint32_t *dsz_out)
 			vol = (vol * msa->sou_vol_global) >> 7;
 			if (m == SAUD_FLAG_TRK_MUSIC)
 				vol = ((vol * msa->sou_vol_damp) >> 7) & 0xff;
+
+			__dbg(ctx, "  - conv: tid %d  ml1 %d  ofs %d  v/p %d/%d\n", atrk->trkid, minlen1, dstlen, vol, pan);
 
 			atrk_resample(atrk, trkobuf, minlen1);
 			aud_mixs16(dstptr, (uint8_t *)trkobuf, dstptr,
