@@ -73,6 +73,7 @@ struct playpriv {
 	int dbg_color;
 	int dbg_line;
 	int dbg_lines;
+	int dbg_con;		/* curr dbg text already printed on stdout */
 
 	int mouse_x;
 	int mouse_y;
@@ -283,6 +284,7 @@ static void queue_video(struct playpriv *p, const struct sanframe *f)
 	SDL_free(p->dbg_text);
 	p->dbg_text = f->dbg_text ? SDL_strdup(f->dbg_text) : NULL;
 	p->dbg_lines = 0;
+	p->dbg_con = 0;
 	if (p->dbg_text && p->dbg_text[0]) {
 		const char *s = p->dbg_text;
 
@@ -695,7 +697,8 @@ static void print_status(struct playpriv *p)
 
 	format_status(p, buf, sizeof(buf));
 	printf("\33[2K\r");
-	if (p->dbg_text && p->dbg_text[0]) {
+	if ((0 == p->dbg_con) && p->dbg_text && p->dbg_text[0]) {
+		p->dbg_con = 1;
 		printf("<<------------------------------------------------->>\n");
 		printf("%s\n", p->dbg_text);
 	}
